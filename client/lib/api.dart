@@ -42,6 +42,10 @@ class RiverApi extends ChangeNotifier {
     final data = jsonDecode(response.body) as Json;
     if (response.statusCode == 401) {
       user = null;
+      groups = [];
+      events = [];
+      recent = [];
+      selected = null;
       notifyListeners();
     }
     if (response.statusCode >= 400) {

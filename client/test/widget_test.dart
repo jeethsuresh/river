@@ -51,4 +51,30 @@ void main() {
       expect(find.textContaining('Calls are coming later'), findsOneWidget);
     },
   );
+  testWidgets('account changes discard the previous account composer', (
+    tester,
+  ) async {
+    final api =
+        RiverApi()
+          ..loading = false
+          ..user = {'username': 'Alice', 'sub': 'alice'};
+    api.groups = [
+      {
+        'id': 'one',
+        'name': 'Private space',
+        'kind': 'space',
+        'membership': 'join',
+        'owner': true,
+        'members': <Json>[],
+      },
+    ];
+    api.selected = 'one';
+    await tester.pumpWidget(RiverApp(api: api, boot: false));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byType(TextField), 'Private unsent draft');
+    api.user = {'username': 'Bob', 'sub': 'bob'};
+    api.notifyListeners();
+    await tester.pumpAndSettle();
+    expect(find.text('Private unsent draft'), findsNothing);
+  });
 }

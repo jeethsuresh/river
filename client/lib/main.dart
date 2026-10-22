@@ -76,7 +76,7 @@ class _RiverAppState extends State<RiverApp> with WidgetsBindingObserver {
                   ? const Scaffold(
                     body: Center(child: CircularProgressIndicator()),
                   )
-                  : RiverShell(app: app),
+                  : RiverShell(key: ValueKey(app.user?['sub']), app: app),
     ),
   );
 }
