@@ -62,11 +62,11 @@
                 "resources": {
                   "requests": {
                     "cpu": "100m",
-                    "memory": "256Mi"
+                    "memory": "128Mi"
                   },
                   "limits": {
                     "cpu": "100m",
-                    "memory": "256Mi"
+                    "memory": "128Mi"
                   }
                 },
                 "securityContext": {
@@ -127,6 +127,10 @@
                   {
                     "name": "APP_URL",
                     "value": "https://chat.gravitas.cool"
+                  },
+                  {
+                    "name": "GOMEMLIMIT",
+                    "value": "96MiB"
                   }
                 ],
                 "envFrom": [

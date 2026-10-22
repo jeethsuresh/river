@@ -105,7 +105,7 @@ Pending Android links are bounded and in memory; restart requires starting a new
 The image bundles the compiled Flutter web assets. The existing DOKS cluster,
 Traefik ingress, wildcard DNS and wildcard TLS are reused. No new load balancer,
 public database or cloud VM is required. The Go pod requests/limits 100m CPU and
-256Mi memory, runs without root or Linux capabilities, uses a read-only filesystem,
+128Mi memory (with a 96MiB Go heap target), runs without root or Linux capabilities, uses a read-only filesystem,
 and has no Kubernetes API token. Network policy permits ingress only from Traefik.
 
 ```
