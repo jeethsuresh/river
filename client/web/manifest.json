@@ -1,0 +1,19 @@
+{
+  "name": "River",
+  "short_name": "River",
+  "start_url": ".",
+  "display": "standalone",
+  "background_color": "#f4f7fc",
+  "theme_color": "#185adb",
+  "description": "Gravitas spaces and conversations",
+  "orientation": "portrait-primary",
+  "prefer_related_applications": false,
+  "icons": [
+    {
+      "src": "icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ]
+}

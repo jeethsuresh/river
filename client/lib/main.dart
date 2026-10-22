@@ -1,0 +1,969 @@
+import 'dart:async';
+import 'dart:convert';
+import 'package:flutter/material.dart';
+import 'api.dart';
+
+void main() {
+  runApp(const RiverApp());
+}
+
+const blue = Color(0xff185adb),
+    ink = Color(0xff172d4b),
+    muted = Color(0xff64748b);
+
+class RiverApp extends StatefulWidget {
+  const RiverApp({super.key, this.api, this.boot = true});
+  final RiverApi? api;
+  final bool boot;
+  @override
+  State<RiverApp> createState() => _RiverAppState();
+}
+
+class _RiverAppState extends State<RiverApp> with WidgetsBindingObserver {
+  late final app = widget.api ?? RiverApi();
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    if (widget.boot) unawaited(app.boot());
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    app.active = state == AppLifecycleState.resumed;
+    if (app.active && app.user != null) unawaited(app.refresh());
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    app.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => MaterialApp(
+    title: 'River',
+    debugShowCheckedModeBanner: false,
+    theme: ThemeData(
+      useMaterial3: true,
+      colorScheme: ColorScheme.fromSeed(
+        seedColor: blue,
+        primary: blue,
+        surface: Colors.white,
+      ),
+      scaffoldBackgroundColor: const Color(0xfff4f7fc),
+      textTheme: const TextTheme(bodyMedium: TextStyle(color: ink)),
+      cardTheme: const CardThemeData(
+        elevation: 0,
+        color: Colors.white,
+        margin: EdgeInsets.zero,
+      ),
+      inputDecorationTheme: InputDecorationTheme(
+        filled: true,
+        fillColor: const Color(0xfff4f7fc),
+        border: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(12),
+          borderSide: BorderSide.none,
+        ),
+      ),
+    ),
+    home: AnimatedBuilder(
+      animation: app,
+      builder:
+          (_, _) =>
+              app.loading
+                  ? const Scaffold(
+                    body: Center(child: CircularProgressIndicator()),
+                  )
+                  : RiverShell(key: ValueKey(app.user?['sub']), app: app),
+    ),
+  );
+}
+
+class RiverShell extends StatefulWidget {
+  const RiverShell({super.key, required this.app});
+  final RiverApi app;
+  @override
+  State<RiverShell> createState() => _RiverShellState();
+}
+
+class _RiverShellState extends State<RiverShell> {
+  RiverApi get app => widget.app;
+  String section = 'Home', filter = 'Chat';
+  final draft = TextEditingController();
+  String? reply, retryTxn, retryPayload;
+  final scaffold = GlobalKey<ScaffoldState>();
+  bool sending = false;
+  @override
+  void dispose() {
+    draft.dispose();
+    super.dispose();
+  }
+
+  Future<void> action(Future<void> Function() operation) async {
+    try {
+      await operation();
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('$e')));
+      }
+    }
+  }
+
+  void open(String? id) {
+    scaffold.currentState?.closeDrawer();
+    setState(() {
+      section = 'Home';
+      filter = 'Chat';
+      reply = null;
+      retryTxn = null;
+      draft.clear();
+    });
+    unawaited(app.open(id));
+  }
+
+  Future<String?> ask(String title, String label) async {
+    final c = TextEditingController();
+    final result = await showDialog<String>(
+      context: context,
+      builder:
+          (ctx) => AlertDialog(
+            title: Text(title),
+            content: TextField(
+              controller: c,
+              autofocus: true,
+              maxLength: 160,
+              decoration: InputDecoration(labelText: label),
+              onSubmitted: (v) {
+                if (v.trim().isNotEmpty) Navigator.pop(ctx, v.trim());
+              },
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(ctx),
+                child: const Text('Cancel'),
+              ),
+              FilledButton(
+                onPressed: () {
+                  if (c.text.trim().isNotEmpty) {
+                    Navigator.pop(ctx, c.text.trim());
+                  }
+                },
+                child: const Text('Continue'),
+              ),
+            ],
+          ),
+    );
+    await Future<void>.delayed(const Duration(milliseconds: 300));
+    c.dispose();
+    return result;
+  }
+
+  Future<void> create(String kind) async {
+    final name = await ask(
+      kind == 'space' ? 'Create a space' : 'New conversation',
+      kind == 'space' ? 'Space name' : 'Conversation name',
+    );
+    if (name != null) {
+      await action(() => app.create(name, kind));
+      if (mounted) {
+        setState(() {
+          section = 'Home';
+          filter = 'Chat';
+        });
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (app.user == null) return welcome();
+    final group = app.groups.where((g) => g['id'] == app.selected).firstOrNull;
+    return LayoutBuilder(
+      builder: (context, box) {
+        final wide = box.maxWidth >= 1000;
+        final body = Column(
+          children: [
+            if (app.error != null)
+              MaterialBanner(
+                content: Text(app.error!),
+                actions: [
+                  TextButton(
+                    onPressed: () => app.refresh(),
+                    child: const Text('Retry'),
+                  ),
+                ],
+              ),
+            Expanded(
+              child:
+                  group != null
+                      ? groupView(group)
+                      : section == 'Friends'
+                      ? friends()
+                      : home(),
+            ),
+          ],
+        );
+        return Scaffold(
+          appBar:
+              wide
+                  ? null
+                  : AppBar(
+                    title: Text(
+                      group?['name'] as String? ?? 'River',
+                      style: const TextStyle(fontWeight: FontWeight.w800),
+                    ),
+                    actions: [
+                      IconButton(
+                        tooltip: 'Refresh',
+                        onPressed: () => app.refresh(),
+                        icon: const Icon(Icons.refresh),
+                      ),
+                      IconButton(
+                        tooltip: 'New space',
+                        onPressed: () => create('space'),
+                        icon: const Icon(Icons.add),
+                      ),
+                    ],
+                  ),
+          drawer: wide ? null : Drawer(child: SafeArea(child: navigation())),
+          body: Row(
+            children: [
+              if (wide) SizedBox(width: 260, child: navigation()),
+              Expanded(child: body),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  Widget welcome() => Scaffold(
+    body: Center(
+      child: SingleChildScrollView(
+        padding: const EdgeInsets.all(28),
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 480),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Icon(Icons.waves_rounded, color: blue, size: 64),
+              const SizedBox(height: 20),
+              const Text(
+                'river',
+                style: TextStyle(
+                  fontSize: 52,
+                  fontWeight: FontWeight.w800,
+                  color: ink,
+                  letterSpacing: -2,
+                ),
+              ),
+              const SizedBox(height: 18),
+              const Text(
+                'A little closer,\nwherever you are.',
+                style: TextStyle(
+                  fontSize: 32,
+                  fontWeight: FontWeight.w700,
+                  height: 1.15,
+                ),
+              ),
+              const SizedBox(height: 16),
+              const Text(
+                'Your Gravitas spaces, conversations and ideas, together in one place.',
+                style: TextStyle(fontSize: 17, color: muted),
+              ),
+              const SizedBox(height: 32),
+              FilledButton.icon(
+                onPressed:
+                    app.pairingLabel == null ? () => action(app.login) : null,
+                icon: const Icon(Icons.arrow_forward),
+                label: const Padding(
+                  padding: EdgeInsets.all(12),
+                  child: Text('Continue with Gravitas'),
+                ),
+              ),
+              if (app.pairingLabel != null)
+                Padding(
+                  padding: const EdgeInsets.only(top: 20),
+                  child: Text(
+                    'In your browser, confirm device ${app.pairingLabel}. Then return here.',
+                  ),
+                ),
+              const SizedBox(height: 24),
+              const Text(
+                'Early access · Messages, posts and discussions. Calls are coming later.',
+                style: TextStyle(color: muted, fontSize: 12),
+              ),
+            ],
+          ),
+        ),
+      ),
+    ),
+  );
+  Widget navigation() => ColoredBox(
+    color: Colors.white,
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        const Padding(
+          padding: EdgeInsets.fromLTRB(24, 30, 24, 24),
+          child: Row(
+            children: [
+              Icon(Icons.waves_rounded, color: blue, size: 32),
+              SizedBox(width: 10),
+              Text(
+                'river',
+                style: TextStyle(
+                  fontWeight: FontWeight.w800,
+                  fontSize: 30,
+                  letterSpacing: -1,
+                ),
+              ),
+            ],
+          ),
+        ),
+        for (final entry in [
+          ('Home', Icons.home_outlined),
+          ('Friends', Icons.people_outline),
+        ])
+          ListTile(
+            selected: app.selected == null && section == entry.$1,
+            selectedColor: blue,
+            leading: Icon(entry.$2),
+            title: Text(entry.$1),
+            onTap: () {
+              if (Scaffold.maybeOf(context)?.isDrawerOpen ?? false) {
+                Navigator.pop(context);
+              }
+              setState(() => section = entry.$1);
+              unawaited(app.open(null));
+            },
+          ),
+        const Divider(indent: 20, endIndent: 20),
+        Expanded(
+          child: ListView(
+            children: [
+              for (final kind in ['space', 'dm']) ...[
+                ListTile(
+                  dense: true,
+                  title: Text(
+                    kind == 'space' ? 'YOUR SPACES' : 'CONVERSATIONS',
+                    style: const TextStyle(
+                      fontSize: 11,
+                      fontWeight: FontWeight.w700,
+                      color: muted,
+                      letterSpacing: 1,
+                    ),
+                  ),
+                  trailing: IconButton(
+                    tooltip: kind == 'space' ? 'New space' : 'New conversation',
+                    icon: const Icon(Icons.add, size: 18),
+                    onPressed: () => create(kind),
+                  ),
+                ),
+                for (final g in app.groups.where(
+                  (g) => (kind == 'dm' ? g['kind'] == 'dm' : g['kind'] != 'dm'),
+                ))
+                  ListTile(
+                    selected: app.selected == g['id'],
+                    leading: Icon(
+                      g['membership'] == 'invite'
+                          ? Icons.mark_email_unread_outlined
+                          : kind == 'space'
+                          ? Icons.tag
+                          : Icons.chat_bubble_outline,
+                      size: 20,
+                    ),
+                    title: Text(
+                      g['name'] as String,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    subtitle:
+                        g['membership'] == 'invite'
+                            ? const Text('Invitation')
+                            : null,
+                    onTap: () => open(g['id'] as String),
+                  ),
+              ],
+            ],
+          ),
+        ),
+        const Divider(),
+        ListTile(
+          leading: const CircleAvatar(
+            backgroundColor: Color(0xffe8efff),
+            child: Icon(Icons.person_outline, color: blue),
+          ),
+          title: Text(app.user?['username'] as String? ?? ''),
+          subtitle: const Text('Gravitas account'),
+          trailing: IconButton(
+            tooltip: 'Sign out',
+            icon: const Icon(Icons.logout, size: 19),
+            onPressed: () => action(app.logout),
+          ),
+        ),
+        const SizedBox(height: 12),
+      ],
+    ),
+  );
+  Widget panel(String title, IconData icon, List<Widget> children) => Card(
+    child: Padding(
+      padding: const EdgeInsets.all(22),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(icon, size: 20, color: blue),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  title,
+                  style: const TextStyle(
+                    fontWeight: FontWeight.w700,
+                    fontSize: 17,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 18),
+          ...children,
+        ],
+      ),
+    ),
+  );
+  Widget empty(String text) => Padding(
+    padding: const EdgeInsets.symmetric(vertical: 12),
+    child: Text(text, style: const TextStyle(color: muted, height: 1.5)),
+  );
+  Widget home() => LayoutBuilder(
+    builder:
+        (context, box) => ListView(
+          padding: EdgeInsets.all(box.maxWidth < 600 ? 20 : 36),
+          children: [
+            const Text(
+              'A LITTLE CLOSER, WHEREVER YOU ARE',
+              style: TextStyle(
+                color: blue,
+                fontSize: 11,
+                fontWeight: FontWeight.w700,
+                letterSpacing: 1.5,
+              ),
+            ),
+            const SizedBox(height: 10),
+            Text(
+              'Welcome to your river, ${app.user?['username']}.',
+              style: TextStyle(
+                fontSize: box.maxWidth < 600 ? 29 : 38,
+                fontWeight: FontWeight.w800,
+                color: ink,
+                letterSpacing: -1,
+              ),
+            ),
+            const SizedBox(height: 10),
+            const Text(
+              'Catch up, find your people, or start something good.',
+              style: TextStyle(color: muted, fontSize: 16),
+            ),
+            const SizedBox(height: 24),
+            Wrap(
+              spacing: 12,
+              runSpacing: 12,
+              children: [
+                FilledButton.icon(
+                  onPressed: () => create('dm'),
+                  icon: const Icon(Icons.add),
+                  label: const Text('New conversation'),
+                ),
+                OutlinedButton.icon(
+                  onPressed: () => create('space'),
+                  icon: const Icon(Icons.grid_view_outlined),
+                  label: const Text('Create a space'),
+                ),
+              ],
+            ),
+            const SizedBox(height: 28),
+            for (final kind in ['post', 'discussion'])
+              Padding(
+                padding: const EdgeInsets.only(bottom: 18),
+                child: panel(
+                  kind == 'post' ? 'Recent posts' : 'Recent discussions',
+                  kind == 'post'
+                      ? Icons.article_outlined
+                      : Icons.forum_outlined,
+                  [
+                    if (!app.recent.any(
+                      (e) => e['type'] == 'cool.gravitas.river.$kind.v1',
+                    ))
+                      empty(
+                        'Nothing here yet. Share an idea in one of your spaces.',
+                      ),
+                    for (final e in app.recent
+                        .where(
+                          (e) => e['type'] == 'cool.gravitas.river.$kind.v1',
+                        )
+                        .take(6))
+                      ListTile(
+                        contentPadding: EdgeInsets.zero,
+                        title: Text((e['content'] as Json)['title'] as String),
+                        subtitle: Text('${e['group_name']} · ${e['sender']}'),
+                        trailing: const Icon(Icons.north_east, size: 18),
+                        onTap: () => open(e['group_id'] as String),
+                      ),
+                  ],
+                ),
+              ),
+            panel('Your people & spaces', Icons.chat_bubble_outline, [
+              if (app.groups.isEmpty)
+                empty(
+                  'Bring your people together. Create your first space or conversation.',
+                ),
+              for (final g in app.groups.take(12))
+                ListTile(
+                  contentPadding: EdgeInsets.zero,
+                  leading: Icon(
+                    g['kind'] == 'dm' ? Icons.chat_outlined : Icons.tag,
+                    color: blue,
+                  ),
+                  title: Text(g['name'] as String),
+                  subtitle: Text(
+                    g['membership'] == 'invite'
+                        ? 'You have an invitation'
+                        : '${(g['members'] as List).length} members',
+                  ),
+                  trailing: const Icon(Icons.chevron_right),
+                  onTap: () => open(g['id'] as String),
+                ),
+            ]),
+            const SizedBox(height: 18),
+            panel('Drop-in calls', Icons.graphic_eq, [
+              empty(
+                'Voice, video, screen sharing and MatrixRTC rooms are planned. They are not enabled in this release.',
+              ),
+            ]),
+          ],
+        ),
+  );
+  Widget friends() => ListView(
+    padding: const EdgeInsets.all(32),
+    children: [
+      const Text(
+        'Your people',
+        style: TextStyle(fontSize: 32, fontWeight: FontWeight.w800),
+      ),
+      const SizedBox(height: 16),
+      panel('People in your groups', Icons.people_outline, [
+        empty(
+          'These are your group members. Friend requests and a separate friends list are planned.',
+        ),
+        for (final person in {
+          for (final g in app.groups)
+            for (final m in (g['members'] as List))
+              (m as Json)['username'] as String,
+        }.where((name) => name != app.user?['username']))
+          ListTile(
+            leading: const CircleAvatar(child: Icon(Icons.person_outline)),
+            title: Text(person),
+          ),
+      ]),
+    ],
+  );
+  Widget groupView(Json g) {
+    if (g['membership'] == 'invite') {
+      return Center(
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Icon(Icons.mail_outline, size: 48, color: blue),
+              Text(
+                'Join ${g['name']}?',
+                style: const TextStyle(
+                  fontSize: 28,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+              const SizedBox(height: 16),
+              FilledButton(
+                onPressed:
+                    () => action(
+                      () => app.membership(g['id'] as String, 'accept'),
+                    ),
+                child: const Text('Accept invitation'),
+              ),
+              TextButton(
+                onPressed:
+                    () => action(
+                      () => app.membership(g['id'] as String, 'leave'),
+                    ),
+                child: const Text('Decline'),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+    final items =
+        app.events
+            .where(
+              (e) =>
+                  filter == 'Chat'
+                      ? e['type'] == 'm.room.message'
+                      : e['type'] ==
+                          'cool.gravitas.river.${filter == 'Posts' ? 'post' : 'discussion'}.v1',
+            )
+            .toList();
+    return Column(
+      children: [
+        Container(
+          color: Colors.white,
+          padding: const EdgeInsets.all(18),
+          child: Column(
+            children: [
+              Row(
+                children: [
+                  IconButton(
+                    tooltip: 'Home',
+                    onPressed: () => open(null),
+                    icon: const Icon(Icons.arrow_back),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          g['name'] as String,
+                          style: const TextStyle(
+                            fontSize: 21,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                        Text(
+                          '${g['kind'] == 'dm' ? 'Conversation' : 'Space'} · ${(g['members'] as List).length} members',
+                          style: const TextStyle(color: muted, fontSize: 12),
+                        ),
+                      ],
+                    ),
+                  ),
+                  PopupMenuButton<String>(
+                    tooltip: 'Group options',
+                    onSelected:
+                        (v) => action(() async {
+                          if (v == 'invite') {
+                            final u = await ask(
+                              'Invite a person',
+                              '@username:gravitas.cool',
+                            );
+                            if (u != null) {
+                              await app.membership(
+                                g['id'] as String,
+                                'invite',
+                                u,
+                              );
+                            }
+                          }
+                          if (v == 'rename') {
+                            final name = await ask('Rename group', 'Name');
+                            if (name != null) {
+                              await app.request(
+                                '/api/groups/${g['id']}',
+                                method: 'PATCH',
+                                body: {'name': name},
+                              );
+                              await app.refresh();
+                            }
+                          }
+                          if (v == 'leave') {
+                            await app.membership(g['id'] as String, 'leave');
+                          }
+                        }),
+                    itemBuilder:
+                        (_) => [
+                          if (g['owner'] == true)
+                            const PopupMenuItem(
+                              value: 'invite',
+                              child: Text('Invite member'),
+                            ),
+                          if (g['owner'] == true)
+                            const PopupMenuItem(
+                              value: 'rename',
+                              child: Text('Rename'),
+                            ),
+                          const PopupMenuItem(
+                            value: 'leave',
+                            child: Text('Leave group'),
+                          ),
+                        ],
+                  ),
+                ],
+              ),
+              const SizedBox(height: 12),
+              SegmentedButton<String>(
+                segments: const [
+                  ButtonSegment(
+                    value: 'Chat',
+                    label: Text('Chat'),
+                    icon: Icon(Icons.tag),
+                  ),
+                  ButtonSegment(
+                    value: 'Discussions',
+                    label: Text('Discussions'),
+                  ),
+                  ButtonSegment(value: 'Posts', label: Text('Posts')),
+                ],
+                selected: {filter},
+                onSelectionChanged: (v) => setState(() => filter = v.first),
+              ),
+            ],
+          ),
+        ),
+        Expanded(
+          child:
+              items.isEmpty
+                  ? Center(
+                    child: Text(
+                      'Start the ${filter == 'Chat' ? 'conversation' : filter.toLowerCase()}.',
+                      style: const TextStyle(color: muted),
+                    ),
+                  )
+                  : ListView.builder(
+                    padding: const EdgeInsets.all(20),
+                    itemCount: items.length,
+                    itemBuilder: (context, index) => eventCard(items[index], g),
+                  ),
+        ),
+        SafeArea(
+          top: false,
+          child: Container(
+            color: Colors.white,
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              children: [
+                if (reply != null)
+                  Row(
+                    children: [
+                      const Icon(Icons.reply, size: 16),
+                      const SizedBox(width: 8),
+                      const Expanded(child: Text('Replying to message')),
+                      IconButton(
+                        tooltip: 'Cancel reply',
+                        onPressed: () => setState(() => reply = null),
+                        icon: const Icon(Icons.close),
+                      ),
+                    ],
+                  ),
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.end,
+                  children: [
+                    Expanded(
+                      child: TextField(
+                        controller: draft,
+                        minLines: 1,
+                        maxLines: 5,
+                        maxLength: 16000,
+                        decoration: InputDecoration(
+                          hintText:
+                              filter == 'Chat'
+                                  ? 'Message ${g['name']}…'
+                                  : 'Write ${filter == 'Posts' ? 'a post' : 'a discussion'}…',
+                          counterText: '',
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    IconButton.filled(
+                      tooltip: 'Send',
+                      onPressed: sending ? null : () => send(g),
+                      icon: Icon(
+                        sending ? Icons.hourglass_top : Icons.arrow_upward,
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget eventCard(Json e, Json g) {
+    final c = e['content'] as Json;
+    final reactions =
+        app.events
+            .where(
+              (r) =>
+                  r['type'] == 'm.reaction' &&
+                  ((r['content'] as Json)['m.relates_to']
+                          as Json?)?['event_id'] ==
+                      e['event_id'],
+            )
+            .toList();
+    final reacted = reactions.any((r) => r['sender'] == app.user?['user_id']);
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 14),
+      child: Card(
+        child: Padding(
+          padding: const EdgeInsets.all(18),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  const CircleAvatar(
+                    radius: 16,
+                    backgroundColor: Color(0xffe8efff),
+                    child: Icon(Icons.person_outline, color: blue, size: 20),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Text(
+                      e['sender'] as String,
+                      style: const TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ),
+                  Text(
+                    time(e['origin_server_ts'] as int),
+                    style: const TextStyle(color: muted, fontSize: 11),
+                  ),
+                ],
+              ),
+              if (c['m.relates_to'] != null)
+                const Padding(
+                  padding: EdgeInsets.only(top: 10),
+                  child: Text(
+                    '↳ Reply',
+                    style: TextStyle(color: muted, fontSize: 12),
+                  ),
+                ),
+              if (c['title'] != null)
+                Padding(
+                  padding: const EdgeInsets.only(top: 14),
+                  child: Text(
+                    c['title'] as String,
+                    style: const TextStyle(
+                      fontSize: 20,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ),
+              Padding(
+                padding: const EdgeInsets.only(top: 12),
+                child: SelectableText(
+                  c['body'] as String? ?? '',
+                  style: const TextStyle(height: 1.5, fontSize: 15),
+                ),
+              ),
+              const SizedBox(height: 8),
+              Wrap(
+                spacing: 8,
+                children: [
+                  TextButton.icon(
+                    onPressed:
+                        reacted
+                            ? null
+                            : () => action(
+                              () => app.send(g['id'] as String, 'm.reaction', {
+                                'm.relates_to': {
+                                  'rel_type': 'm.annotation',
+                                  'event_id': e['event_id'],
+                                  'key': '👍',
+                                },
+                              }, transactionId()),
+                            ),
+                    icon: const Icon(Icons.thumb_up_outlined, size: 15),
+                    label: Text(
+                      reactions.isEmpty ? 'React' : '${reactions.length}',
+                    ),
+                  ),
+                  TextButton.icon(
+                    onPressed:
+                        () => setState(() {
+                          reply = e['event_id'] as String;
+                          filter = 'Chat';
+                        }),
+                    icon: const Icon(Icons.reply, size: 17),
+                    label: const Text('Reply'),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  String time(int ms) {
+    final t = DateTime.fromMillisecondsSinceEpoch(ms);
+    return '${t.hour.toString().padLeft(2, '0')}:${t.minute.toString().padLeft(2, '0')}';
+  }
+
+  Future<void> send(Json g) async {
+    final body = draft.text.trim();
+    if (body.isEmpty || sending) return;
+    String? title;
+    if (filter != 'Chat') {
+      title = await ask(
+        filter == 'Posts' ? 'New post' : 'New discussion',
+        'Title',
+      );
+      if (title == null) return;
+    }
+    final type =
+        filter == 'Chat'
+            ? 'm.room.message'
+            : 'cool.gravitas.river.${filter == 'Posts' ? 'post' : 'discussion'}.v1';
+    final content = <String, dynamic>{
+      'body': body,
+      if (type == 'm.room.message') 'msgtype': 'm.text',
+      if (title != null) ...{'title': title, 'version': 1},
+      if (reply != null)
+        'm.relates_to': {
+          'm.in_reply_to': {'event_id': reply},
+        },
+      'cool.gravitas.river': {
+        'version': 1,
+        'kind':
+            reply != null
+                ? 'reply'
+                : filter == 'Chat'
+                ? 'message'
+                : filter == 'Posts'
+                ? 'post'
+                : 'discussion',
+      },
+    };
+    setState(() => sending = true);
+    final payload = jsonEncode(content);
+    if (payload != retryPayload) {
+      retryTxn = transactionId();
+      retryPayload = payload;
+    }
+    retryTxn ??= transactionId();
+    try {
+      await app.send(g['id'] as String, type, content, retryTxn!);
+      draft.clear();
+      reply = null;
+      retryTxn = null;
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('$e · Your draft is kept.')));
+      }
+    } finally {
+      if (mounted) setState(() => sending = false);
+    }
+  }
+}

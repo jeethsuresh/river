@@ -1,0 +1,12 @@
+.git
+client/build
+client/.dart_tool
+client/android/.gradle
+client/android/local.properties
+client/.idea
+**/*.jks
+**/*.keystore
+**/key.properties
+**/local.properties
+.env*
+work
