@@ -1,0 +1,40 @@
+# syntax=docker/dockerfile:1
+FROM debian:bookworm-slim AS flutter-sdk
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates curl git unzip xz-utils zip libglu1-mesa libglib2.0-0 libfontconfig1 \
+    && rm -rf /var/lib/apt/lists/*
+ARG FLUTTER_REVISION=d3abd00e69a89a615e13969c02832ef1e0119639
+ARG FLUTTER_VERSION=3.32.0-0.2.pre
+RUN git init /opt/flutter && git -C /opt/flutter remote add origin https://github.com/flutter/flutter.git \
+    && git -C /opt/flutter fetch --depth 1 origin "refs/tags/$FLUTTER_VERSION:refs/tags/$FLUTTER_VERSION" \
+    && git -C /opt/flutter checkout --detach "$FLUTTER_VERSION" \
+    && test "$(git -C /opt/flutter rev-parse HEAD)" = "$FLUTTER_REVISION"
+ENV PATH=/opt/flutter/bin:$PATH CI=true
+RUN flutter config --no-analytics --enable-web && flutter precache --web
+WORKDIR /src/client
+COPY client/pubspec.yaml client/pubspec.lock ./
+RUN flutter pub get --enforce-lockfile
+COPY client/ ./
+
+FROM flutter-sdk AS frontend-test
+RUN flutter analyze && flutter test
+
+FROM flutter-sdk AS frontend-build
+RUN flutter build web --release --no-pub --no-web-resources-cdn
+
+FROM golang:1.25.2-bookworm AS backend-source
+WORKDIR /src/backend
+COPY backend/ ./
+FROM backend-source AS backend-test
+RUN go test -race ./... && go vet ./...
+FROM backend-source AS backend-build
+RUN CGO_ENABLED=0 go build -trimpath -ldflags='-s -w' -o /out/river .
+FROM gcr.io/distroless/static-debian12:nonroot AS runtime
+LABEL org.opencontainers.image.source=https://github.com/jeethsuresh/river
+WORKDIR /app
+COPY --from=backend-build /out/river /app/river
+COPY --from=frontend-build /src/client/build/web /app/web
+ENV ADDR=0.0.0.0:8080 STATIC_DIR=/app/web
+USER 10001:10001
+EXPOSE 8080
+ENTRYPOINT ["/app/river"]
