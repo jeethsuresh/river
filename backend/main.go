@@ -140,7 +140,7 @@ func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case "/auth/native/start":
 		s.nativeStart(w, r)
 		return
-	case "/auth/native/finish":
+	case "/device/link":
 		s.nativeFinish(w, r)
 		return
 	case "/api/native/session":
@@ -325,7 +325,7 @@ func (s *server) nativeStart(w http.ResponseWriter, r *http.Request) {
 	clone := r.Clone(r.Context())
 	u := *r.URL
 	clone.URL = &u
-	clone.URL.RawQuery = url.Values{"next": {"/auth/native/finish?id=" + id}}.Encode()
+	clone.URL.RawQuery = url.Values{"next": {"/device/link?id=" + id}}.Encode()
 	if err := s.auth.Start(w, clone, false); err != nil {
 		fail(w, 503, "Sign-in is temporarily unavailable")
 	}
@@ -358,7 +358,7 @@ func (s *server) nativeFinish(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	_, _ = fmt.Fprintf(w, `<!doctype html><html><meta name="viewport" content="width=device-width,initial-scale=1"><title>Link River</title><body style="font:18px system-ui;max-width:36rem;margin:10vh auto;padding:24px;background:#f3f7ff;color:#142744"><h1>Link your River app</h1><p>Only continue if your River app shows <strong>%s</strong>.</p><p>This device will use the group and chat permissions you approved.</p><button id="link" style="padding:16px;background:#185adb;color:white;border:0;border-radius:12px">Link this River device</button><p id="result"></p><script>document.getElementById('link').onclick=async()=>{let r=await fetch('/auth/native/finish?id=%s',{method:'POST',headers:{'X-Gravitas-CSRF':'1'}});document.getElementById('result').textContent=r.ok?'Linked. Return to River.':'Request failed. Start again.';document.getElementById('link').disabled=r.ok}</script></body></html>`, p.Label, id)
+	_, _ = fmt.Fprintf(w, `<!doctype html><html><meta name="viewport" content="width=device-width,initial-scale=1"><title>Link River</title><body style="font:18px system-ui;max-width:36rem;margin:10vh auto;padding:24px;background:#f3f7ff;color:#142744"><h1>Link your River app</h1><p>Only continue if your River app shows <strong>%s</strong>.</p><p>This device will use the group and chat permissions you approved.</p><button id="link" style="padding:16px;background:#185adb;color:white;border:0;border-radius:12px">Link this River device</button><p id="result"></p><script>document.getElementById('link').onclick=async()=>{let r=await fetch('/device/link?id=%s',{method:'POST',headers:{'X-Gravitas-CSRF':'1'}});document.getElementById('result').textContent=r.ok?'Linked. Return to River.':'Request failed. Start again.';document.getElementById('link').disabled=r.ok}</script></body></html>`, p.Label, id)
 }
 func (s *server) nativeSession(w http.ResponseWriter, r *http.Request) {
 	if r.Method != "POST" {

@@ -7,6 +7,7 @@ import (
 	"github.com/jeethsuresh/river/backend/internal/gravitas"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -23,6 +24,11 @@ func fixture(t *testing.T) (*server, string, *bool, *int) {
 		switch r.URL.Path {
 		case "/.well-known/iam-configuration":
 			respond(w, 200, map[string]string{"issuer": iam.URL, "identity_domain": strings.TrimPrefix(iam.URL, "https://"), "browser_initiation_endpoint": iam.URL + "/oauth/start", "token_endpoint": iam.URL + "/oauth/token", "userinfo_endpoint": iam.URL + "/app/v1/me", "session_check_endpoint": iam.URL + "/oauth/session"})
+		case "/oauth/token":
+			respond(w, 200, map[string]any{"access_token": "upstream-only", "token_type": "Bearer", "session_check_token": base64.RawURLEncoding.EncodeToString(make([]byte, 32)), "session_check_expires_in": 3600, "session_id": "11111111-1111-4111-8111-111111111111"})
+		case "/app/v1/me":
+			origin, _ := url.Parse(iam.URL)
+			respond(w, 200, map[string]string{"sub": "alice", "username": "alice", "domain": origin.Hostname(), "user_id": "@alice:" + origin.Hostname()})
 		case "/oauth/session":
 			checks++
 			if revoked {
@@ -117,7 +123,7 @@ func TestNativePairingNeedsProofAndExplicitApproval(t *testing.T) {
 	if poll(random()).Code != 403 || poll(proof).Code != 202 {
 		t.Fatal("pairing proof/pending failure")
 	}
-	r := httptest.NewRequest("POST", "https://chat.gravitas.cool/auth/native/finish?id="+p["id"], nil)
+	r := httptest.NewRequest("POST", "https://chat.gravitas.cool/device/link?id="+p["id"], nil)
 	r.AddCookie(&http.Cookie{Name: gravitas.SessionCookie, Value: token})
 	r.Header.Set("X-Gravitas-CSRF", "1")
 	r.Header.Set("Origin", "https://evil.example")
@@ -165,5 +171,44 @@ func TestRouteAndStaticBoundaries(t *testing.T) {
 	w = request(s, "GET", "/api/rtc", "", token)
 	if w.Code != 200 || !strings.Contains(w.Body.String(), `"enabled":false`) {
 		t.Fatal("RTC capability misreported")
+	}
+}
+
+func TestNativeBrowserHandoffReturnsToConfirmation(t *testing.T) {
+	s, _, _, _ := fixture(t)
+	body, _ := json.Marshal(map[string]string{"challenge": challenge(random())})
+	created := request(s, "POST", "/api/native/new", string(body), "")
+	var pair map[string]string
+	if err := json.Unmarshal(created.Body.Bytes(), &pair); err != nil {
+		t.Fatal(err)
+	}
+	started := request(s, "GET", "/auth/native/start?id="+pair["id"], "", "")
+	if started.Code != 303 {
+		t.Fatal(started.Code, started.Body.String())
+	}
+	location, err := url.Parse(started.Header().Get("Location"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := httptest.NewRequest("GET", "https://chat.gravitas.cool/auth/gravitas/callback?code=test-code&state="+url.QueryEscape(location.Query().Get("state")), nil)
+	for _, c := range started.Result().Cookies() {
+		r.AddCookie(c)
+	}
+	completed := httptest.NewRecorder()
+	s.ServeHTTP(completed, r)
+	expected := "/device/link?id=" + pair["id"]
+	if completed.Code != 303 || completed.Header().Get("Location") != expected {
+		t.Fatal("native login lost its confirmation destination", completed.Code, completed.Header().Get("Location"))
+	}
+	r = httptest.NewRequest("GET", "https://chat.gravitas.cool"+expected, nil)
+	for _, c := range completed.Result().Cookies() {
+		if c.Name == gravitas.SessionCookie {
+			r.AddCookie(c)
+		}
+	}
+	confirmed := httptest.NewRecorder()
+	s.ServeHTTP(confirmed, r)
+	if confirmed.Code != 200 || !strings.Contains(confirmed.Body.String(), pair["label"]) {
+		t.Fatal("confirmation page unavailable", confirmed.Code)
 	}
 }
