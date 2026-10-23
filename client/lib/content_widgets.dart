@@ -53,21 +53,22 @@ class RichBody extends StatelessWidget {
   const RichBody(this.body, {super.key});
   final String body;
   @override
-  Widget build(BuildContext context) => MarkdownBody(
-    data: body,
-    selectable: true,
-    onTapLink: (_, href, _) => openContentLink(context, href),
-    // Message content never loads local files, assets, data URLs, or remote
-    // tracking images. Images remain explicit links that a person can open.
-    imageBuilder:
-        (uri, title, alt) => TextButton.icon(
-          onPressed:
-              ['http', 'https'].contains(uri.scheme)
-                  ? () => openContentLink(context, '$uri')
-                  : null,
-          icon: const Icon(Icons.image_outlined),
-          label: Text(alt?.isNotEmpty == true ? alt! : 'Open image'),
-        ),
+  Widget build(BuildContext context) => SelectionArea(
+    child: MarkdownBody(
+      data: body,
+      onTapLink: (_, href, _) => openContentLink(context, href),
+      // Message content never loads local files, assets, data URLs, or remote
+      // tracking images. Images remain explicit links that a person can open.
+      imageBuilder:
+          (uri, title, alt) => TextButton.icon(
+            onPressed:
+                ['http', 'https'].contains(uri.scheme)
+                    ? () => openContentLink(context, '$uri')
+                    : null,
+            icon: const Icon(Icons.image_outlined),
+            label: Text(alt?.isNotEmpty == true ? alt! : 'Open image'),
+          ),
+    ),
   );
 }
 
@@ -179,6 +180,7 @@ class ContentCard extends StatelessWidget {
               event['origin_server_ts'] as int,
             ).toLocal();
     final summary = ((event['reaction_summary'] as List?) ?? []).cast<Json>();
+    final replies = event['reply_count'] as int? ?? 0;
     final canEdit =
         event['sender'] == app.user?['user_id'] &&
         [
@@ -249,9 +251,11 @@ class ContentCard extends StatelessWidget {
                   onPressed: reply,
                   icon: const Icon(Icons.reply, size: 18),
                   label: Text(
-                    (event['reply_count'] as int? ?? 0) == 0
+                    replies == 0
                         ? 'Reply'
-                        : '${event['reply_count']} replies',
+                        : replies == 1
+                        ? '1 reply'
+                        : '$replies replies',
                   ),
                 ),
                 if (canEdit)

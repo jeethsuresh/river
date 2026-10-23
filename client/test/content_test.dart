@@ -38,6 +38,7 @@ void main() {
   testWidgets(
     'thread routes keep replies separate and send canonical root plus quoted parent',
     (tester) async {
+      final semantics = tester.ensureSemantics();
       await tester.binding.setSurfaceSize(const Size(1200, 1100));
       final root = message(r'$root', 'Root message');
       final first = message(
@@ -99,6 +100,7 @@ void main() {
       await tester.pumpWidget(RiverApp(api: api, boot: false));
       await tester.pumpAndSettle();
       expect(find.byType(ContentCard), findsOneWidget);
+      expect(find.bySemanticsLabel(RegExp('Root message')), findsWidgets);
       await tester.tap(find.text('Reply'));
       await tester.pumpAndSettle();
       expect(find.text('Thread'), findsOneWidget);
@@ -130,6 +132,7 @@ void main() {
       expect(tester.takeException(), isNull);
       await tester.pumpWidget(const SizedBox());
       await tester.binding.setSurfaceSize(null);
+      semantics.dispose();
     },
   );
 
