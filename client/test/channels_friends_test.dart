@@ -310,11 +310,15 @@ void main() {
               }),
             )
             ..user = alice
-            ..friends = [bob];
+            ..friends = [bob]
+            ..otherContacts = [
+              {...bob, 'username': 'carol'},
+            ];
       await api.refresh();
       expect(api.groups, hasLength(1));
       expect(api.friends, isEmpty);
       expect(api.friendsStatus, 403);
+      expect(api.otherContacts, isEmpty);
       expect(api.error, isNull);
       api.dispose();
     },

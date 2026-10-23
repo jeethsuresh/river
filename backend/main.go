@@ -38,7 +38,7 @@ type server struct {
 var uuidPattern = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)
 var txnPattern = regexp.MustCompile(`^[a-zA-Z0-9_-]{1,128}$`)
 
-const scopes = "profile.name chats.list chats.read chats.write groups.create groups.manage groups.join spaces.channels friends.read friends.manage"
+const scopes = "profile.name chats.list chats.read chats.write groups.create groups.manage groups.join spaces.channels contacts.read contacts.manage"
 
 func env(k, def string) string {
 	if v := os.Getenv(k); v != "" {

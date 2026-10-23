@@ -227,7 +227,7 @@ class _RiverShellState extends State<RiverShell> {
             if (app.friendsStatus == 403)
               MaterialBanner(
                 content: const Text(
-                  'Reconnect with Gravitas to enable friends and channel access.',
+                  'Reconnect with Gravitas to approve contacts access and find your River friends.',
                 ),
                 actions: [
                   TextButton(

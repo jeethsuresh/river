@@ -39,7 +39,7 @@ class _FriendsViewState extends State<FriendsView> {
       context: context,
       builder:
           (ctx) => AlertDialog(
-            title: const Text('Add a friend'),
+            title: const Text('Add a Gravitas contact'),
             content: TextField(
               controller: controller,
               autofocus: true,
@@ -151,7 +151,9 @@ class _FriendsViewState extends State<FriendsView> {
         style: TextStyle(fontSize: 32, fontWeight: FontWeight.w800),
       ),
       const SizedBox(height: 8),
-      const Text('Your people, with a little more room to stay close.'),
+      const Text(
+        'Your Gravitas contacts who connect River are already your friends here. Contact requests, removals and blocks apply across your apps.',
+      ),
       const SizedBox(height: 20),
       Wrap(
         spacing: 12,
@@ -240,9 +242,12 @@ class _FriendsViewState extends State<FriendsView> {
                     (_) => const [
                       PopupMenuItem(
                         value: 'remove',
-                        child: Text('Remove friend'),
+                        child: Text('Remove contact everywhere'),
                       ),
-                      PopupMenuItem(value: 'block', child: Text('Block')),
+                      PopupMenuItem(
+                        value: 'block',
+                        child: Text('Block across apps'),
+                      ),
                     ],
               ),
             ]),
@@ -251,9 +256,24 @@ class _FriendsViewState extends State<FriendsView> {
             ? 'Add someone you know to get started.'
             : 'No friends match your search.',
       ),
+      if (app.otherContacts.isNotEmpty)
+        section(
+          'Other Gravitas contacts · ${app.otherContacts.length}',
+          [
+            const Text(
+              'These contacts will appear as friends when they approve River’s contacts access.',
+            ),
+            for (final p in app.otherContacts.where(matches))
+              person(p, [
+                button(p, 'remove', 'Remove contact everywhere'),
+                button(p, 'block', 'Block across apps'),
+              ]),
+          ],
+          'All your contacts with River access appear above.',
+        ),
       section('Blocked people', [
         const Text(
-          'Blocking stops friend requests and direct messages. You may still share space channels.',
+          'Blocking applies across Gravitas apps and stops contact requests and direct messages. You may still share space channels.',
         ),
         for (final p in app.blocked.where(matches))
           person(p, [button(p, 'unblock', 'Unblock')]),
