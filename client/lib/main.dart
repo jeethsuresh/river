@@ -43,42 +43,43 @@ class _RiverAppState extends State<RiverApp> with WidgetsBindingObserver {
   }
 
   @override
-  Widget build(BuildContext context) => MaterialApp(
-    title: 'River',
-    debugShowCheckedModeBanner: false,
-    theme: ThemeData(
-      useMaterial3: true,
-      colorScheme: ColorScheme.fromSeed(
-        seedColor: blue,
-        primary: blue,
-        surface: Colors.white,
-      ),
-      scaffoldBackgroundColor: const Color(0xfff4f7fc),
-      textTheme: const TextTheme(bodyMedium: TextStyle(color: ink)),
-      cardTheme: const CardThemeData(
-        elevation: 0,
-        color: Colors.white,
-        margin: EdgeInsets.zero,
-      ),
-      inputDecorationTheme: InputDecorationTheme(
-        filled: true,
-        fillColor: const Color(0xfff4f7fc),
-        border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(12),
-          borderSide: BorderSide.none,
-        ),
-      ),
-    ),
-    home: AnimatedBuilder(
-      animation: app,
-      builder:
-          (_, _) =>
+  Widget build(BuildContext context) => AnimatedBuilder(
+    animation: app,
+    builder:
+        (_, _) => MaterialApp(
+          key: ValueKey(app.user?['sub']),
+          title: 'River',
+          debugShowCheckedModeBanner: false,
+          theme: ThemeData(
+            useMaterial3: true,
+            colorScheme: ColorScheme.fromSeed(
+              seedColor: blue,
+              primary: blue,
+              surface: Colors.white,
+            ),
+            scaffoldBackgroundColor: const Color(0xfff4f7fc),
+            textTheme: const TextTheme(bodyMedium: TextStyle(color: ink)),
+            cardTheme: const CardThemeData(
+              elevation: 0,
+              color: Colors.white,
+              margin: EdgeInsets.zero,
+            ),
+            inputDecorationTheme: InputDecorationTheme(
+              filled: true,
+              fillColor: const Color(0xfff4f7fc),
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(12),
+                borderSide: BorderSide.none,
+              ),
+            ),
+          ),
+          home:
               app.loading
                   ? const Scaffold(
                     body: Center(child: CircularProgressIndicator()),
                   )
                   : RiverShell(key: ValueKey(app.user?['sub']), app: app),
-    ),
+        ),
   );
 }
 
