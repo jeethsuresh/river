@@ -207,4 +207,4 @@ The migration adds a persisted event type while preserving existing social data.
 Follow the main server's contacts contract in `jeethsuresh/iam-server/docs/contacts.md`.
 River's permanent package/certificate are unchanged; the existing Private Store
 catalog can ingest a verified stable 0.3.0 release after manual release approval.
-A locally built contacts candidate has not been deployed or published automatically.
+Publish the stable APK after the matching API and web release is verified.
