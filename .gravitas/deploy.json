@@ -1,0 +1,15 @@
+{
+  "schema": 1,
+  "app": "river",
+  "namespace": "river",
+  "host": "chat.gravitas.cool",
+  "health_path": "/healthz",
+  "image_repository": "ghcr.io/jeethsuresh/river",
+  "release": {
+    "command": [
+      "bash",
+      "deploy/gravitas/deploy.sh"
+    ]
+  },
+  "verify": []
+}
