@@ -168,6 +168,19 @@ func TestRouteAndStaticBoundaries(t *testing.T) {
 	if w.Code != 303 || !strings.Contains(w.Header().Get("Location"), "groups.create") {
 		t.Fatal("delegation scopes missing", w.Code)
 	}
+	login, err := url.Parse(w.Header().Get("Location"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	requested := " " + login.Query().Get("scope") + " "
+	for _, permission := range []string{"contacts.read", "contacts.manage"} {
+		if !strings.Contains(requested, " "+permission+" ") {
+			t.Fatalf("contact consent missing: %s", permission)
+		}
+	}
+	if strings.Contains(requested, " friends.") {
+		t.Fatal("legacy friend scopes requested instead of contact consent")
+	}
 	w = request(s, "GET", "/api/rtc", "", token)
 	if w.Code != 200 || !strings.Contains(w.Body.String(), `"enabled":false`) {
 		t.Fatal("RTC capability misreported")

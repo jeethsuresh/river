@@ -13,8 +13,10 @@ Next.js River code; Git history retains that implementation.
 - Separate text/drop-in channel rooms with standard Matrix parent/child links;
   new spaces start with a lobby and lounge. Space membership changes update all
   channel memberships atomically, including through legacy Matrix membership APIs.
-- Private friend requests, incoming/outgoing lists, acceptance, ignore/cancel,
+- Shared Gravitas contact requests, incoming/outgoing lists, acceptance, ignore/cancel,
   removal/block/unblock, and a canonical direct conversation per friend pair.
+  Accepted contacts who approve River contacts access appear as friends on login
+  and refresh, without creating another request or a copied friendship.
 - Private saved read positions, unread counts and earlier-message pagination.
 - Persistent messages, posts, discussions, replies and reactions, stored centrally.
 - A responsive home and chat UI for phones, tablets and desktop.
@@ -55,14 +57,27 @@ second group table. River preserves that single source of access decisions.
   child also requires parent membership. `groups.join` permits invitation metadata
   and extends selected access only upon acceptance. Existing tokens need renewed
   consent; no existing selected grant is silently broadened.
-- Friend relationships are private account data, not a group's public roster.
-  `friends.read` / `friends.manage` separately authorize reading/actions. Every
-  action appends a `cool.gravitas.river.friend.v1` account event with actor, target,
-  action, app origin and version. Only the pair can read their events, and block/
-  unblock events are visible only to their actor. These are available through the
-  delegated account API; full standard Matrix account-data endpoints remain pending.
-  A block stops friend requests and direct messages, while shared space channels
-  retain their normal group ACL. Reopening an already-joined DM still requires
+- Contacts are private Gravitas account data, not a group's public roster.
+  `contacts.read` / `contacts.manage` separately authorize reading/actions across
+  apps. River requests these explicit scopes at sign-in; old sessions need one
+  reconnect. Old `friends.read/manage` credentials cannot inherit contacts access.
+  River's `/app/v1/friends` response is a projection over the same central graph:
+  accepted contacts with current River `contacts.read` consent become `friends`;
+  other accepted people appear in `other_contacts`. Requests still need acceptance.
+  Both people must approve River contacts access. App logout does not remove a
+  contact; revoking app consent removes their River participation on refresh.
+  The shared Flutter client only reads this list during login, with no automatic
+  request/accept writes or separate app friendship store. Removals and blocks are
+  global across apps, as explained in the UI and consent screen. Unblocking does
+  not restore a relationship. Existing friendship/request/block rows and IDs are
+  preserved in place. New immutable actions use `cool.gravitas.contact.v1` with
+  version, actor, target, originating app and action. Historical River friend events
+  retain their types. App event queries expose only the calling app's actions and
+  hide another person's block events. These are delegated private account APIs;
+  full standard Matrix account-data endpoints remain pending.
+  Blocks stop contact requests and direct messages, while shared space channels
+  retain their normal group ACL. Creating a canonical DM additionally checks the
+  contact's current app consent. Reopening an already-joined DM still requires
   that room in the app's approved selection.
 - A future RTC channel also needs its own room/group. MatrixRTC membership/signaling
   and media authorization must bind to that room and the current membership.
@@ -92,7 +107,9 @@ Delegated endpoints live on the main Gravitas server at `/app/v1/groups`:
 `PUT /:id/events/:type/:txn_id`, `GET/POST /:id/channels` and `POST /:id/read`.
 `GET /app/v1/overview` batches accessible groups and the latest 200 content events.
 `GET/POST /app/v1/friends`, `GET /app/v1/friends/events`, and `POST /app/v1/direct`
-handle private relationships and canonical direct conversations. They use opaque,
+handle the River contacts projection and canonical direct conversations. Generic
+`GET/POST /app/v1/contacts` and `GET /app/v1/contacts/events` are owned by Gravitas.
+They use opaque,
 revocable app tokens. The additive API migration creates channel links, direct
 pairs, private social state/events and read positions; it must release before this
 client. Event pagination uses a same-room event ID cursor with a stable database
@@ -182,3 +199,12 @@ namespace-limited `GRAVITAS_KUBECONFIG`, following RSS/Office/Spacetime patterns
 
 Protocol references: [Matrix events and spaces](https://spec.matrix.org/v1.16/client-server-api/),
 [MatrixRTC](https://github.com/matrix-org/matrix-spec-proposals/pull/4143).
+
+## Contacts release compatibility
+
+Install IAM contacts API/migration `20261023120000` before this client/backend.
+The migration adds a persisted event type while preserving existing social data.
+Follow the main server's contacts contract in `jeethsuresh/iam-server/docs/contacts.md`.
+River's permanent package/certificate are unchanged; the existing Private Store
+catalog can ingest a verified stable 0.3.0 release after manual release approval.
+A locally built contacts candidate has not been deployed or published automatically.

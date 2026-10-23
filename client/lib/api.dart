@@ -45,6 +45,7 @@ class RiverApi extends ChangeNotifier {
       events = [],
       recent = [],
       friends = [],
+      otherContacts = [],
       requests = [],
       blocked = [];
   String? friendsError, nextCursor;
@@ -66,6 +67,7 @@ class RiverApi extends ChangeNotifier {
     events = [];
     recent = [];
     friends = [];
+    otherContacts = [];
     requests = [];
     blocked = [];
     selected = null;
@@ -166,6 +168,8 @@ class RiverApi extends ChangeNotifier {
         final social = await request('/api/friends');
         if (account != user?['sub']) return;
         friends = (social['friends'] as List).cast<Json>();
+        otherContacts =
+            ((social['other_contacts'] as List?) ?? []).cast<Json>();
         requests = (social['requests'] as List).cast<Json>();
         blocked = (social['blocked'] as List).cast<Json>();
         friendsError = null;
@@ -176,6 +180,7 @@ class RiverApi extends ChangeNotifier {
         friendsStatus = e.status;
         if (e.status == 403) {
           friends = [];
+          otherContacts = [];
           requests = [];
           blocked = [];
         }
