@@ -391,63 +391,11 @@ class _RiverShellState extends State<RiverShell> {
                 ),
                 for (final g in app.groups.where(
                   (g) =>
-                      (kind == 'dm'
+                      kind == 'dm'
                           ? g['kind'] == 'dm'
-                          : g['kind'] != 'dm' && g['kind'] != 'channel'),
+                          : g['kind'] != 'dm' && g['kind'] != 'channel',
                 ))
-                  ListTile(
-                    selected: app.selected == g['id'],
-                    leading: Icon(
-                      g['membership'] == 'invite'
-                          ? Icons.mark_email_unread_outlined
-                          : kind == 'space'
-                          ? Icons.tag
-                          : Icons.chat_bubble_outline,
-                      size: 20,
-                    ),
-                    title: Text(
-                      g['name'] as String,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                    subtitle:
-                        g['membership'] == 'invite'
-                            ? const Text('Invitation')
-                            : null,
-                    trailing:
-                        (g['unread_count'] as int? ?? 0) > 0
-                            ? Badge(label: Text('${g['unread_count']}'))
-                            : null,
-                    onTap: () => open(g['id'] as String),
-                  ),
-                if (kind == 'space')
-                  for (final g in app.spaces)
-                    for (final channel in app.channels(g['id'] as String))
-                      ListTile(
-                        dense: true,
-                        contentPadding: const EdgeInsets.only(
-                          left: 42,
-                          right: 20,
-                        ),
-                        selected: app.selected == channel['id'],
-                        leading: Icon(
-                          channel['channel_kind'] == 'drop_in'
-                              ? Icons.headphones_outlined
-                              : Icons.tag,
-                          size: 17,
-                        ),
-                        title: Text(
-                          '${g['name']} / ${channel['name']}',
-                          overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(fontSize: 12),
-                        ),
-                        trailing:
-                            (channel['unread_count'] as int? ?? 0) > 0
-                                ? Badge(
-                                  label: Text('${channel['unread_count']}'),
-                                )
-                                : null,
-                        onTap: () => open(channel['id'] as String),
-                      ),
+                  navigationGroup(g, kind),
               ],
             ],
           ),
@@ -470,6 +418,52 @@ class _RiverShellState extends State<RiverShell> {
       ],
     ),
   );
+  Widget navigationGroup(Json g, String kind) => Column(
+    children: [
+      ListTile(
+        selected: app.selected == g['id'],
+        leading: Icon(
+          g['membership'] == 'invite'
+              ? Icons.mark_email_unread_outlined
+              : kind == 'space'
+              ? Icons.grid_view_outlined
+              : Icons.chat_bubble_outline,
+          size: 20,
+        ),
+        title: Text(g['name'] as String, overflow: TextOverflow.ellipsis),
+        subtitle: g['membership'] == 'invite' ? const Text('Invitation') : null,
+        trailing:
+            (g['unread_count'] as int? ?? 0) > 0
+                ? Badge(label: Text('${g['unread_count']}'))
+                : null,
+        onTap: () => open(g['id'] as String),
+      ),
+      if (kind == 'space' && g['membership'] == 'join')
+        for (final channel in app.channels(g['id'] as String))
+          ListTile(
+            dense: true,
+            contentPadding: const EdgeInsets.only(left: 42, right: 20),
+            selected: app.selected == channel['id'],
+            leading: Icon(
+              channel['channel_kind'] == 'drop_in'
+                  ? Icons.headphones_outlined
+                  : Icons.tag,
+              size: 17,
+            ),
+            title: Text(
+              channel['name'] as String,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(fontSize: 13),
+            ),
+            trailing:
+                (channel['unread_count'] as int? ?? 0) > 0
+                    ? Badge(label: Text('${channel['unread_count']}'))
+                    : null,
+            onTap: () => open(channel['id'] as String),
+          ),
+    ],
+  );
+
   Widget panel(String title, IconData icon, List<Widget> children) => Card(
     child: Padding(
       padding: const EdgeInsets.all(22),

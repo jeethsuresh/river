@@ -5,11 +5,17 @@ It follows Orbit's home experience: a blue workspace sidebar, a welcome view,
 recent posts/discussions, spaces and conversations. This replaces the previous
 Next.js River code; Git history retains that implementation.
 
-## Initial vertical slice
+## Current capabilities
 
 - Gravitas PKCE sign-in with explicit scopes and group selection.
 - Spaces and DM/group conversations backed by real Gravitas groups/Matrix rooms.
-- Owner invitations, invitation acceptance/decline, rename and leaving.
+- Owner invitations, invitation acceptance/decline, rename, member removal and leaving.
+- Separate text/drop-in channel rooms with standard Matrix parent/child links;
+  new spaces start with a lobby and lounge. Space membership changes update all
+  channel memberships atomically, including through legacy Matrix membership APIs.
+- Private friend requests, incoming/outgoing lists, acceptance, ignore/cancel,
+  removal/block/unblock, and a canonical direct conversation per friend pair.
+- Private saved read positions, unread counts and earlier-message pagination.
 - Persistent messages, posts, discussions, replies and reactions, stored centrally.
 - A responsive home and chat UI for phones, tablets and desktop.
 - Browser cookies are encrypted, Secure, HttpOnly, host-only and SameSite=Lax.
@@ -37,11 +43,27 @@ second group table. River preserves that single source of access decisions.
   `cool.gravitas.river.group.v1` state identifies `kind=dm`. Invitations use
   `m.room.member` with `is_direct=true`. Private Matrix `m.direct` account data is
   not yet implemented, so automatic DM recognition by other clients is incomplete.
-- Currently each space has a single root timeline. Separate channels are not yet
-  implemented. The next slice should create one room/group per channel, link it via
-  `m.space.child`/`m.space.parent`, and atomically maintain child membership with
-  parent membership. Matrix space links alone do not grant access. Never approximate
-  this by trusting a client-supplied parent ID.
+- Each channel is a separate room/group linked by `m.space.child` and canonical
+  `m.space.parent`. A `river_channels` row is the authoritative parent link.
+  The root timeline is retained for existing content and space posts/discussions.
+  Membership changes and child creation take the same space row lock; accepting,
+  leaving or removing a member propagates to every channel in the transaction.
+  Independent child joins/invites/leaves are denied. Child writes recheck the
+  current parent and child memberships while holding the root lock.
+- `spaces.channels` explicitly authorizes access to current/future channels of an
+  approved space, still subject to chat scopes and membership. A directly selected
+  child also requires parent membership. `groups.join` permits invitation metadata
+  and extends selected access only upon acceptance. Existing tokens need renewed
+  consent; no existing selected grant is silently broadened.
+- Friend relationships are private account data, not a group's public roster.
+  `friends.read` / `friends.manage` separately authorize reading/actions. Every
+  action appends a `cool.gravitas.river.friend.v1` account event with actor, target,
+  action, app origin and version. Only the pair can read their events, and block/
+  unblock events are visible only to their actor. These are available through the
+  delegated account API; full standard Matrix account-data endpoints remain pending.
+  A block stops friend requests and direct messages, while shared space channels
+  retain their normal group ACL. Reopening an already-joined DM still requires
+  that room in the app's approved selection.
 - A future RTC channel also needs its own room/group. MatrixRTC membership/signaling
   and media authorization must bind to that room and the current membership.
 - Standard chat messages and replies are separate `m.room.message` events, with
@@ -67,9 +89,14 @@ members cannot read through River. End-to-end encryption is not implemented.
 
 Delegated endpoints live on the main Gravitas server at `/app/v1/groups`:
 `GET/POST`, `PATCH /:id`, `POST /:id/membership`, `GET /:id/events`, and
-`PUT /:id/events/:type/:txn_id`. They use opaque, revocable app tokens, not IAM JWTs.
-The additive server change is in `jeethsuresh/iam-server` branch
-`codex/river-groups-events`, based on the existing Gravitas deployment branch.
+`PUT /:id/events/:type/:txn_id`, `GET/POST /:id/channels` and `POST /:id/read`.
+`GET /app/v1/overview` batches accessible groups and the latest 200 content events.
+`GET/POST /app/v1/friends`, `GET /app/v1/friends/events`, and `POST /app/v1/direct`
+handle private relationships and canonical direct conversations. They use opaque,
+revocable app tokens. The additive API migration creates channel links, direct
+pairs, private social state/events and read positions; it must release before this
+client. Event pagination uses a same-room event ID cursor with a stable database
+(timestamp, UUID) ordering. Private read positions cannot move backwards.
 
 ## Build and test
 
@@ -122,13 +149,12 @@ namespace-limited `GRAVITAS_KUBECONFIG`, following RSS/Office/Spacetime patterns
 
 ## Next implementation tasks
 
-1. Separate text/RTC channel rooms, standard space hierarchy and atomic ACL
-   propagation/removal, with cross-channel/parent membership tests.
-2. Persisted read positions, unread counts, pagination and event-driven updates.
-   Current views show the latest 100 events and refresh every 15 seconds while
-   foregrounded; home inspects 12 groups and 30 recent events per group.
-3. Friend requests, acceptance/removal, blocking and a private friends list.
-   The current People view lists group members and makes no friendship claim.
+1. Complete Orbit's content flows: threaded replies/comments, reaction toggles,
+   edits/public posts and comment policies, shareable entry links and discovery.
+2. Event-driven updates and private presence. The current frontend refreshes every
+   five seconds while foregrounded; timelines paginate beyond the latest 100 events,
+   and home uses a single batched feed across all accessible groups (latest 200).
+3. Friend-selected multi-person conversations and attachments/file exchange.
 4. Deploy TURN (UDP/TCP/TLS, ephemeral credentials, quotas) and a MatrixRTC-compatible
    SFU/focus, then implement MatrixRTC membership, signaling, voice/video/screen
    sharing and cleanup. STUN discovers addresses; **TURN relays media**.

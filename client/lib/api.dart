@@ -397,11 +397,11 @@ class RiverApi extends ChangeNotifier {
     await open(result['id'] as String);
   }
 
-  Future<void> membership(String id, String action, [String? userId]) async {
+  Future<void> membership(String id, String action, [String? person]) async {
     await request(
       '/api/groups/$id/membership',
       method: 'POST',
-      body: {'action': action, if (userId != null) 'user_id': userId},
+      body: {'action': action, if (person != null) 'user_id': userId(person)},
     );
     await refresh();
   }
