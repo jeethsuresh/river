@@ -10,3 +10,5 @@ client/.idea
 **/local.properties
 .env*
 work
+.signing
+.release

@@ -5,6 +5,17 @@ plugins {
     id("dev.flutter.flutter-gradle-plugin")
 }
 
+val releaseKey = System.getenv("RIVER_KEYSTORE")
+val releaseStorePassword = System.getenv("RIVER_STORE_PASSWORD")
+val releaseAlias = System.getenv("RIVER_KEY_ALIAS")
+val releaseKeyPassword = System.getenv("RIVER_KEY_PASSWORD")
+if (gradle.startParameter.taskNames.any { it.contains("release", ignoreCase = true) }) {
+    require(listOf(releaseKey, releaseStorePassword, releaseAlias, releaseKeyPassword).all { !it.isNullOrBlank() }) {
+        "River release signing is required. Use scripts/build-android.py with the protected original key."
+    }
+    require(releaseAlias == "river-release") { "Use River's permanent release signing alias." }
+}
+
 android {
     namespace = "cool.gravitas.river"
     compileSdk = 36
@@ -30,11 +41,17 @@ android {
         versionName = flutter.versionName
     }
 
+    signingConfigs {
+        create("riverRelease") {
+            storeFile = releaseKey?.let { file(it) }
+            storePassword = releaseStorePassword
+            keyAlias = releaseAlias
+            keyPassword = releaseKeyPassword
+        }
+    }
     buildTypes {
         release {
-            // TODO: Add your own signing config for the release build.
-            // Signing with the debug keys for now, so `flutter run --release` works.
-            signingConfig = signingConfigs.getByName("debug")
+            signingConfig = signingConfigs.getByName("riverRelease")
         }
     }
 }
