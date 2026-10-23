@@ -1,6 +1,10 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:math';
+import 'live_updates.dart';
+import 'calls.dart';
+import 'peer_files.dart';
+import 'file_models.dart' show FileScope;
 import 'package:crypto/crypto.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
@@ -36,7 +40,17 @@ class ApiException implements Exception {
 }
 
 class RiverApi extends ChangeNotifier {
-  RiverApi({http.Client? client}) : client = client ?? http.Client();
+  RiverApi({http.Client? client, bool? live})
+    : client = client ?? http.Client(),
+      liveEnabled = live ?? client == null;
+  final bool liveEnabled;
+  LiveUpdates? _live;
+  final changes = StreamController<void>.broadcast();
+  Set<String> online = {};
+  PeerFiles? files;
+  RiverCalls? _calls;
+  RiverCalls get calls => _calls ??= RiverCalls(this);
+  List<Json> activeCalls = [];
   final http.Client client;
   final storage = const FlutterSecureStorage();
   String? token;
@@ -47,7 +61,9 @@ class RiverApi extends ChangeNotifier {
       friends = [],
       otherContacts = [],
       requests = [],
-      blocked = [];
+      blocked = [],
+      catchUp = [],
+      threads = [];
   String? friendsError, nextCursor;
   int? friendsStatus;
   bool loadingOlder = false;
@@ -56,16 +72,29 @@ class RiverApi extends ChangeNotifier {
   final _transactions = <String, String>{};
   final _read = <String, String>{};
 
-  Iterable<Json> get spaces =>
-      groups.where((g) => g['kind'] != 'dm' && g['kind'] != 'channel');
+  Iterable<Json> get spaces => groups.where(
+    (g) => g['kind'] != 'dm' && g['kind'] != 'group' && g['kind'] != 'channel',
+  );
   Iterable<Json> channels(String parent) =>
       groups.where((g) => g['parent_id'] == parent);
   int get incomingRequests =>
       requests.where((r) => r['direction'] == 'incoming').length;
   void _clear() {
+    _live?.close();
+    _live = null;
+    unawaited(_calls?.leave());
+    activeCalls = [];
+    final oldFiles = files;
+    files = null;
+    if (oldFiles != null) {
+      unawaited(oldFiles.close().then((_) => oldFiles.dispose()));
+    }
+    online = {};
     groups = [];
     events = [];
     recent = [];
+    catchUp = [];
+    threads = [];
     friends = [];
     otherContacts = [];
     requests = [];
@@ -88,7 +117,38 @@ class RiverApi extends ChangeNotifier {
   }
 
   String? selected, error, pairingLabel;
-  bool loading = true, busy = false, active = true, again = false;
+  bool loading = true, busy = false, _active = true, again = false;
+  bool get active => _active;
+  set active(bool value) {
+    _active = value;
+    files?.setActive(value);
+    if (!value) {
+      _live?.close();
+      _live = null;
+    } else if (user != null) {
+      startLive();
+      unawaited(refresh());
+    }
+  }
+
+  void startLive() {
+    if (!liveEnabled || !active || _live != null || user == null) return;
+    _live = LiveUpdates(
+      url: uri('/api/live'),
+      headers: () => {
+        if (!kIsWeb && token != null) 'Authorization': 'Bearer $token',
+      },
+      changed: () {
+        if (active && user != null) {
+          changes.add(null);
+          unawaited(refresh());
+        }
+      },
+      revoked: _expired,
+    );
+    unawaited(_live!.connect());
+  }
+
   Timer? timer;
   static const endpoint = String.fromEnvironment(
     'RIVER_URL',
@@ -136,15 +196,26 @@ class RiverApi extends ChangeNotifier {
       final next = data['user'] as Json;
       if (user?['sub'] != next['sub']) _clear();
       user = next;
+      if (liveEnabled && files == null) {
+        final nextFiles = await PeerFiles.create(
+          this,
+          uri('/'),
+          next['sub'] as String,
+        );
+        if (user?['sub'] == next['sub']) {
+          files = nextFiles;
+        } else {
+          await nextFiles.close();
+          nextFiles.dispose();
+        }
+      }
       await refresh();
     } catch (e) {
       if (user != null) error = '$e';
     }
     loading = false;
     notifyListeners();
-    timer ??= Timer.periodic(const Duration(seconds: 5), (_) {
-      if (active && user != null && !busy) unawaited(refresh());
-    });
+    startLive();
   }
 
   Future<void> refresh() async {
@@ -158,7 +229,22 @@ class RiverApi extends ChangeNotifier {
       final result = await request('/api/overview');
       if (account != user?['sub']) return;
       groups = (result['groups'] as List).cast<Json>();
+      await files?.setScopes([
+        for (final g in groups.where((g) => g['membership'] == 'join'))
+          FileScope('room', g['id'] as String),
+      ], active: active);
       recent = (result['recent'] as List).cast<Json>();
+      if (liveEnabled) {
+        final home = await request('/api/home');
+        catchUp = ((home['catch_up'] as List?) ?? []).cast<Json>();
+        threads = ((home['threads'] as List?) ?? []).cast<Json>();
+        try {
+          activeCalls = ((await request('/api/calls'))['calls'] as List)
+              .cast<Json>();
+        } on ApiException {
+          activeCalls = [];
+        }
+      }
       if (selected != null && !groups.any((g) => g['id'] == selected)) {
         selected = null;
         events = [];
@@ -168,8 +254,8 @@ class RiverApi extends ChangeNotifier {
         final social = await request('/api/friends');
         if (account != user?['sub']) return;
         friends = (social['friends'] as List).cast<Json>();
-        otherContacts =
-            ((social['other_contacts'] as List?) ?? []).cast<Json>();
+        otherContacts = ((social['other_contacts'] as List?) ?? [])
+            .cast<Json>();
         requests = (social['requests'] as List).cast<Json>();
         blocked = (social['blocked'] as List).cast<Json>();
         friendsError = null;
@@ -201,6 +287,14 @@ class RiverApi extends ChangeNotifier {
           if (initial || (!overlap && latest.isNotEmpty)) {
             nextCursor = data['next_cursor'] as String?;
           }
+        }
+      }
+      if (liveEnabled) {
+        try {
+          final presence = await request('/api/presence');
+          online = ((presence['online'] as List?) ?? []).cast<String>().toSet();
+        } on ApiException catch (e) {
+          if (e.status == 403) online = {};
         }
       }
       error = null;
@@ -297,10 +391,9 @@ class RiverApi extends ChangeNotifier {
     nextCursor = null;
     await refresh();
     if (kind == 'space') {
-      final lobby =
-          channels(
-            selected!,
-          ).where((c) => c['channel_kind'] == 'text').firstOrNull;
+      final lobby = channels(
+        selected!,
+      ).where((c) => c['channel_kind'] == 'text').firstOrNull;
       if (lobby != null) await open(lobby['id'] as String);
     }
   }
@@ -312,22 +405,20 @@ class RiverApi extends ChangeNotifier {
     for (final e in incoming) {
       merged[e['event_id'] as String] = e;
     }
-    events =
-        merged.values.toList()..sort((a, b) {
-          final ax =
-              (a['unsigned'] as Json?)?['cool.gravitas.stream_order']
-                  as String?;
-          final bx =
-              (b['unsigned'] as Json?)?['cool.gravitas.stream_order']
-                  as String?;
-          if (ax != null && bx != null) return ax.compareTo(bx);
-          final t = (a['origin_server_ts'] as int).compareTo(
-            b['origin_server_ts'] as int,
-          );
-          return t == 0
-              ? (a['event_id'] as String).compareTo(b['event_id'] as String)
-              : t;
-        });
+    events = merged.values.toList()
+      ..sort((a, b) {
+        final ax =
+            (a['unsigned'] as Json?)?['cool.gravitas.stream_order'] as String?;
+        final bx =
+            (b['unsigned'] as Json?)?['cool.gravitas.stream_order'] as String?;
+        if (ax != null && bx != null) return ax.compareTo(bx);
+        final t = (a['origin_server_ts'] as int).compareTo(
+          b['origin_server_ts'] as int,
+        );
+        return t == 0
+            ? (a['event_id'] as String).compareTo(b['event_id'] as String)
+            : t;
+      });
   }
 
   Future<void> older() async {
@@ -425,6 +516,45 @@ class RiverApi extends ChangeNotifier {
     await open(result['id'] as String);
   }
 
+  Future<void> conversation(String name, List<String> members) async {
+    final key = 'conversation:$name:${members.join(',')}';
+    final result = await request(
+      '/api/conversations',
+      method: 'POST',
+      body: {
+        'name': name,
+        'member_ids': members,
+        'txn_id': _transactions.putIfAbsent(key, transactionId),
+      },
+    );
+    _transactions.remove(key);
+    await open(result['id'] as String);
+  }
+
+  Future<void> inviteSpace(String conversation, String space) async {
+    final key = 'invite:$conversation:$space';
+    await request(
+      '/api/groups/$conversation/invitations',
+      method: 'POST',
+      body: {
+        'space_id': space,
+        'txn_id': _transactions.putIfAbsent(key, transactionId),
+      },
+    );
+    _transactions.remove(key);
+    await refresh();
+  }
+
+  Future<void> readEntry(String room, String event) async {
+    await request(
+      '/api/groups/$room/entry/read',
+      method: 'POST',
+      body: {'event_id': event},
+    );
+    catchUp.removeWhere((e) => e['event_id'] == event);
+    notifyListeners();
+  }
+
   Future<Json> thread(String room, String event, {String? before}) => request(
     '/api/groups/$room/thread?event_id=${Uri.encodeQueryComponent(event)}${before == null ? '' : '&before=${Uri.encodeQueryComponent(before)}'}',
   );
@@ -499,6 +629,13 @@ class RiverApi extends ChangeNotifier {
     _disposed = true;
     _generation++;
     timer?.cancel();
+    _live?.close();
+    _calls?.dispose();
+    final oldFiles = files;
+    if (oldFiles != null) {
+      unawaited(oldFiles.close().then((_) => oldFiles.dispose()));
+    }
+    changes.close();
     client.close();
     super.dispose();
   }

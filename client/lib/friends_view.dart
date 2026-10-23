@@ -37,36 +37,35 @@ class _FriendsViewState extends State<FriendsView> {
     final controller = TextEditingController();
     final name = await showDialog<String>(
       context: context,
-      builder:
-          (ctx) => AlertDialog(
-            title: const Text('Add a Gravitas contact'),
-            content: TextField(
-              controller: controller,
-              autofocus: true,
-              maxLength: 100,
-              decoration: const InputDecoration(
-                labelText: 'Gravitas username',
-                hintText: 'alice',
-              ),
-              onSubmitted: (v) {
-                if (v.trim().isNotEmpty) Navigator.pop(ctx, v.trim());
-              },
-            ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(ctx),
-                child: const Text('Cancel'),
-              ),
-              FilledButton(
-                onPressed: () {
-                  if (controller.text.trim().isNotEmpty) {
-                    Navigator.pop(ctx, controller.text.trim());
-                  }
-                },
-                child: const Text('Send request'),
-              ),
-            ],
+      builder: (ctx) => AlertDialog(
+        title: const Text('Add a Gravitas contact'),
+        content: TextField(
+          controller: controller,
+          autofocus: true,
+          maxLength: 100,
+          decoration: const InputDecoration(
+            labelText: 'Gravitas username',
+            hintText: 'alice',
           ),
+          onSubmitted: (v) {
+            if (v.trim().isNotEmpty) Navigator.pop(ctx, v.trim());
+          },
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () {
+              if (controller.text.trim().isNotEmpty) {
+                Navigator.pop(ctx, controller.text.trim());
+              }
+            },
+            child: const Text('Send request'),
+          ),
+        ],
+      ),
     );
     await Future<void>.delayed(const Duration(milliseconds: 300));
     controller.dispose();
@@ -187,8 +186,8 @@ class _FriendsViewState extends State<FriendsView> {
         section('Friends unavailable', [
           Text(app.friendsError!),
           TextButton(
-            onPressed:
-                () => run(app.friendsStatus == 403 ? app.login : app.refresh),
+            onPressed: () =>
+                run(app.friendsStatus == 403 ? app.login : app.refresh),
             child: Text(
               app.friendsStatus == 403 ? 'Reconnect with Gravitas' : 'Retry',
             ),
@@ -197,9 +196,10 @@ class _FriendsViewState extends State<FriendsView> {
       section(
         'Friend requests',
         [
-          for (final p in app.requests
-              .where((r) => r['direction'] == 'incoming')
-              .where(matches))
+          for (final p
+              in app.requests
+                  .where((r) => r['direction'] == 'incoming')
+                  .where(matches))
             person(p, [
               button(p, 'accept', 'Accept', filled: true),
               button(p, 'ignore', 'Ignore'),
@@ -211,9 +211,10 @@ class _FriendsViewState extends State<FriendsView> {
             : 'No requests match your search.',
       ),
       section('Sent requests', [
-        for (final p in app.requests
-            .where((r) => r['direction'] == 'outgoing')
-            .where(matches))
+        for (final p
+            in app.requests
+                .where((r) => r['direction'] == 'outgoing')
+                .where(matches))
           person(p, [button(p, 'cancel', 'Cancel request')]),
       ], 'No pending sent requests.'),
       section(
@@ -222,33 +223,30 @@ class _FriendsViewState extends State<FriendsView> {
           for (final p in app.friends.where(matches))
             person(p, [
               FilledButton.tonalIcon(
-                onPressed:
-                    busy
-                        ? null
-                        : () => run(() async {
-                          await app.messageFriend(p['user_id'] as String);
-                          if (mounted) widget.onConversation();
-                        }),
+                onPressed: busy
+                    ? null
+                    : () => run(() async {
+                        await app.messageFriend(p['user_id'] as String);
+                        if (mounted) widget.onConversation();
+                      }),
                 icon: const Icon(Icons.chat_bubble_outline, size: 18),
                 label: const Text('Message'),
               ),
               PopupMenuButton<String>(
                 enabled: !busy,
                 tooltip: 'Options for ${p['username']}',
-                onSelected:
-                    (v) =>
-                        run(() => app.friendAction(p['user_id'] as String, v)),
-                itemBuilder:
-                    (_) => const [
-                      PopupMenuItem(
-                        value: 'remove',
-                        child: Text('Remove contact everywhere'),
-                      ),
-                      PopupMenuItem(
-                        value: 'block',
-                        child: Text('Block across apps'),
-                      ),
-                    ],
+                onSelected: (v) =>
+                    run(() => app.friendAction(p['user_id'] as String, v)),
+                itemBuilder: (_) => const [
+                  PopupMenuItem(
+                    value: 'remove',
+                    child: Text('Remove contact everywhere'),
+                  ),
+                  PopupMenuItem(
+                    value: 'block',
+                    child: Text('Block across apps'),
+                  ),
+                ],
               ),
             ]),
         ],
@@ -257,20 +255,16 @@ class _FriendsViewState extends State<FriendsView> {
             : 'No friends match your search.',
       ),
       if (app.otherContacts.isNotEmpty)
-        section(
-          'Other Gravitas contacts · ${app.otherContacts.length}',
-          [
-            const Text(
-              'These contacts will appear as friends when they approve River’s contacts access.',
-            ),
-            for (final p in app.otherContacts.where(matches))
-              person(p, [
-                button(p, 'remove', 'Remove contact everywhere'),
-                button(p, 'block', 'Block across apps'),
-              ]),
-          ],
-          'All your contacts with River access appear above.',
-        ),
+        section('Other Gravitas contacts · ${app.otherContacts.length}', [
+          const Text(
+            'These contacts will appear as friends when they approve River’s contacts access.',
+          ),
+          for (final p in app.otherContacts.where(matches))
+            person(p, [
+              button(p, 'remove', 'Remove contact everywhere'),
+              button(p, 'block', 'Block across apps'),
+            ]),
+        ], 'All your contacts with River access appear above.'),
       section('Blocked people', [
         const Text(
           'Blocking applies across Gravitas apps and stops contact requests and direct messages. You may still share space channels.',

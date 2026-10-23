@@ -221,7 +221,7 @@ void main() {
       await tester.pumpWidget(RiverApp(api: api, boot: false));
       await tester.tap(find.byTooltip('Open navigation menu'));
       await tester.pumpAndSettle();
-      await tester.tap(find.text('plans'));
+      await tester.tap(find.descendant(of: find.byType(Drawer), matching: find.text('plans')));
       await tester.pumpAndSettle();
       expect(api.selected, childId);
       expect(find.text('Back to space'), findsOneWidget);

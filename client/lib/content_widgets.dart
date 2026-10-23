@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_markdown_plus/flutter_markdown_plus.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'api.dart';
+import 'attachment_widgets.dart';
 
 const reactionEmojis = [
   '👍',
@@ -59,15 +60,13 @@ class RichBody extends StatelessWidget {
       onTapLink: (_, href, _) => openContentLink(context, href),
       // Message content never loads local files, assets, data URLs, or remote
       // tracking images. Images remain explicit links that a person can open.
-      imageBuilder:
-          (uri, title, alt) => TextButton.icon(
-            onPressed:
-                ['http', 'https'].contains(uri.scheme)
-                    ? () => openContentLink(context, '$uri')
-                    : null,
-            icon: const Icon(Icons.image_outlined),
-            label: Text(alt?.isNotEmpty == true ? alt! : 'Open image'),
-          ),
+      imageBuilder: (uri, title, alt) => TextButton.icon(
+        onPressed: ['http', 'https'].contains(uri.scheme)
+            ? () => openContentLink(context, '$uri')
+            : null,
+        icon: const Icon(Icons.image_outlined),
+        label: Text(alt?.isNotEmpty == true ? alt! : 'Open image'),
+      ),
     ),
   );
 }
@@ -104,31 +103,30 @@ class _ReactionBarState extends State<ReactionBar> {
   Future<void> choose() async {
     final emoji = await showModalBottomSheet<String>(
       context: context,
-      builder:
-          (ctx) => SafeArea(
-            child: Padding(
-              padding: const EdgeInsets.all(24),
-              child: Wrap(
-                spacing: 8,
-                runSpacing: 8,
-                children: [
-                  for (final e in reactionEmojis)
-                    Semantics(
-                      label: 'React $e',
-                      button: true,
-                      child: InkWell(
-                        onTap: () => Navigator.pop(ctx, e),
-                        borderRadius: BorderRadius.circular(12),
-                        child: Padding(
-                          padding: const EdgeInsets.all(12),
-                          child: Text(e, style: const TextStyle(fontSize: 26)),
-                        ),
-                      ),
+      builder: (ctx) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              for (final e in reactionEmojis)
+                Semantics(
+                  label: 'React $e',
+                  button: true,
+                  child: InkWell(
+                    onTap: () => Navigator.pop(ctx, e),
+                    borderRadius: BorderRadius.circular(12),
+                    child: Padding(
+                      padding: const EdgeInsets.all(12),
+                      child: Text(e, style: const TextStyle(fontSize: 26)),
                     ),
-                ],
-              ),
-            ),
+                  ),
+                ),
+            ],
           ),
+        ),
+      ),
     );
     if (emoji != null && mounted) await react(emoji);
   }
@@ -143,10 +141,9 @@ class _ReactionBarState extends State<ReactionBar> {
         FilterChip(
           label: Text('${r['key']} ${r['count']}'),
           selected: r['mine'] == true,
-          tooltip:
-              r['mine'] == true
-                  ? 'Remove ${r['key']} reaction'
-                  : 'React ${r['key']}',
+          tooltip: r['mine'] == true
+              ? 'Remove ${r['key']} reaction'
+              : 'React ${r['key']}',
           onSelected: busy ? null : (_) => react(r['key'] as String),
         ),
       IconButton(
@@ -175,10 +172,9 @@ class ContentCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final c = rendered(event),
-        t =
-            DateTime.fromMillisecondsSinceEpoch(
-              event['origin_server_ts'] as int,
-            ).toLocal();
+        t = DateTime.fromMillisecondsSinceEpoch(
+          event['origin_server_ts'] as int,
+        ).toLocal();
     final summary = ((event['reaction_summary'] as List?) ?? []).cast<Json>();
     final replies = event['reply_count'] as int? ?? 0;
     final canEdit =
@@ -231,6 +227,10 @@ class ContentCard extends StatelessWidget {
               ),
             const SizedBox(height: 12),
             RichBody(c['body'] as String? ?? ''),
+            for (final file
+                in ((c['cool.gravitas.river.attachments'] as List?) ?? [])
+                    .cast<Json>())
+              AttachmentCard(app: app, file: file),
             const SizedBox(height: 10),
             ReactionBar(
               summary: summary,
@@ -263,9 +263,8 @@ class ContentCard extends StatelessWidget {
                     onPressed: () async {
                       await showDialog<bool>(
                         context: context,
-                        builder:
-                            (_) =>
-                                EntryEditor(app: app, room: room, entry: event),
+                        builder: (_) =>
+                            EntryEditor(app: app, room: room, entry: event),
                       );
                       await changed?.call();
                     },
@@ -298,12 +297,14 @@ class EntryEditor extends StatefulWidget {
 
 class _EntryEditorState extends State<EntryEditor> {
   late final title = TextEditingController(
-    text:
-        widget.entry == null ? '' : rendered(widget.entry!)['title'] as String?,
+    text: widget.entry == null
+        ? ''
+        : rendered(widget.entry!)['title'] as String?,
   );
   late final body = TextEditingController(
-    text:
-        widget.entry == null ? '' : rendered(widget.entry!)['body'] as String?,
+    text: widget.entry == null
+        ? ''
+        : rendered(widget.entry!)['body'] as String?,
   );
   bool preview = false, busy = false;
   String? error, payload;
@@ -376,8 +377,8 @@ class _EntryEditorState extends State<EntryEditor> {
               autofocus: true,
               maxLength: 160,
               decoration: const InputDecoration(labelText: 'Title'),
-              validator:
-                  (v) => v?.trim().isNotEmpty == true ? null : 'Add a title.',
+              validator: (v) =>
+                  v?.trim().isNotEmpty == true ? null : 'Add a title.',
             ),
             const SizedBox(height: 12),
             if (preview)
@@ -395,11 +396,9 @@ class _EntryEditorState extends State<EntryEditor> {
                   labelText: 'Body',
                   hintText: 'Share an idea. Markdown formatting is supported.',
                 ),
-                validator:
-                    (v) =>
-                        v?.trim().isNotEmpty == true
-                            ? null
-                            : 'Write something first.',
+                validator: (v) => v?.trim().isNotEmpty == true
+                    ? null
+                    : 'Write something first.',
               ),
             TextButton.icon(
               onPressed: () => setState(() => preview = !preview),
@@ -459,13 +458,15 @@ class _ThreadScreenState extends State<ThreadScreen> {
   String txn = transactionId();
   bool loading = false, loaded = false, again = false, sending = false;
   final draft = TextEditingController(), scroll = ScrollController();
-  Timer? timer;
+  StreamSubscription<void>? subscription;
   @override
   void initState() {
     super.initState();
     unawaited(load());
-    timer = Timer.periodic(const Duration(seconds: 5), (_) {
-      if (widget.app.active && (ModalRoute.of(context)?.isCurrent ?? false)) {
+    subscription = widget.app.changes.stream.listen((_) {
+      if (mounted &&
+          widget.app.active &&
+          (ModalRoute.of(context)?.isCurrent ?? false)) {
         unawaited(load());
       }
     });
@@ -473,7 +474,7 @@ class _ThreadScreenState extends State<ThreadScreen> {
 
   @override
   void dispose() {
-    timer?.cancel();
+    subscription?.cancel();
     draft.dispose();
     scroll.dispose();
     super.dispose();
@@ -484,20 +485,18 @@ class _ThreadScreenState extends State<ThreadScreen> {
     for (final e in incoming) {
       all[e['event_id'] as String] = e;
     }
-    events =
-        all.values.toList()..sort((a, b) {
-          final ax =
-              (a['unsigned'] as Json?)?['cool.gravitas.stream_order']
-                  as String?;
-          final bx =
-              (b['unsigned'] as Json?)?['cool.gravitas.stream_order']
-                  as String?;
-          return ax != null && bx != null
-              ? ax.compareTo(bx)
-              : (a['origin_server_ts'] as int).compareTo(
+    events = all.values.toList()
+      ..sort((a, b) {
+        final ax =
+            (a['unsigned'] as Json?)?['cool.gravitas.stream_order'] as String?;
+        final bx =
+            (b['unsigned'] as Json?)?['cool.gravitas.stream_order'] as String?;
+        return ax != null && bx != null
+            ? ax.compareTo(bx)
+            : (a['origin_server_ts'] as int).compareTo(
                 b['origin_server_ts'] as int,
               );
-        });
+      });
   }
 
   Future<void> load({bool older = false}) async {
