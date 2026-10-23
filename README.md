@@ -116,9 +116,24 @@ flutter build web --release --no-web-resources-cdn
 flutter build apk --debug --target-platform android-arm64,android-x64
 ```
 
-The Android identifier is `cool.gravitas.river`. Debug builds are development
-artifacts; a stable signing identity and distribution policy are needed before
-publishing an upgradeable release. Never reuse Orbit's identity or signing key.
+The Android identifier is `cool.gravitas.river`. The permanent public certificate
+is pinned in `client/android/release-certificate.sha256`; preserve the original
+private key for updates. Never reuse Orbit's identity or signing key. Debug APKs
+use a different certificate and are development artifacts.
+
+Set `RIVER_SIGNING_CONFIG` to the protected original `signing.json`, then run
+`python3 scripts/build-android.py`. The helper builds a non-debuggable APK and
+verifies the package, version, minimum Android version, v2/v3 signature and
+permanent certificate. A new independent app can create its first key with
+`scripts/create-signing-key.py --directory /private/path`; it refuses an existing
+directory or certificate pin. Back up the private key and passwords securely.
+Signing material is excluded from Git and container builds and is never uploaded
+as a release asset. Release builds fail when signing configuration is absent.
+
+After tests pass and source merges to `main`, `scripts/release.py` creates a draft
+stable GitHub release with only `River-vVERSION-android.apk` and `SHA256SUMS`.
+`--publish` publishes that verified release for Private Store ingestion. Existing
+versions/tags are never overwritten. The store pins the same package/certificate.
 
 Configure the Go process with `GRAVITAS_SESSION_KEY` (32 random bytes, base64url),
 `GRAVITAS_ISSUER=https://gravitas.cool`, `APP_URL=https://chat.gravitas.cool`,
@@ -149,8 +164,8 @@ namespace-limited `GRAVITAS_KUBECONFIG`, following RSS/Office/Spacetime patterns
 
 ## Next implementation tasks
 
-1. Complete Orbit's content flows: threaded replies/comments, reaction toggles,
-   edits/public posts and comment policies, shareable entry links and discovery.
+1. Extend the implemented threaded replies, reversible reactions, authored edits
+   and Markdown previews with public posts/comment policies, shareable links and discovery.
 2. Event-driven updates and private presence. The current frontend refreshes every
    five seconds while foregrounded; timelines paginate beyond the latest 100 events,
    and home uses a single batched feed across all accessible groups (latest 200).
@@ -162,7 +177,7 @@ namespace-limited `GRAVITAS_KUBECONFIG`, following RSS/Office/Spacetime patterns
 5. Standard-client interoperability tests, complete Matrix discovery/capabilities,
    account data, event relations/pagination, moderation, encryption and federation
    where required. Standard replies/reactions alone do not imply full compatibility.
-6. App token refresh and durable single-use native handoffs; Android release signing,
+6. App token refresh and durable single-use native handoffs;
    browser-to-phone media/network tests, accessibility and background/lifecycle work.
 
 Protocol references: [Matrix events and spaces](https://spec.matrix.org/v1.16/client-server-api/),

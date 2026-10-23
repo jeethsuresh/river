@@ -224,6 +224,9 @@ func TestChannelAndFriendRelayRoutes(t *testing.T) {
 		{"GET", "/api/groups/" + id + "/channels", "/app/v1/groups/" + id + "/channels"},
 		{"POST", "/api/groups/" + id + "/channels", "/app/v1/groups/" + id + "/channels"},
 		{"POST", "/api/groups/" + id + "/read", "/app/v1/groups/" + id + "/read"},
+		{"GET", "/api/groups/" + id + "/thread", "/app/v1/groups/" + id + "/thread"},
+		{"POST", "/api/groups/" + id + "/reactions", "/app/v1/groups/" + id + "/reactions"},
+		{"POST", "/api/groups/" + id + "/entry", "/app/v1/groups/" + id + "/entry"},
 	} {
 		r := httptest.NewRequest(c.method, "https://chat.gravitas.cool"+c.path, nil)
 		upstream, ok := proxyRoute(r)
@@ -239,7 +242,7 @@ func TestChannelAndFriendRelayRoutes(t *testing.T) {
 	}
 	s, token, revoked, _ := fixture(t)
 	*revoked = true
-	for _, p := range []string{"/api/overview", "/api/friends", "/api/friends/events", "/api/groups/" + id + "/channels"} {
+	for _, p := range []string{"/api/overview", "/api/friends", "/api/friends/events", "/api/groups/" + id + "/channels", "/api/groups/" + id + "/thread", "/api/groups/" + id + "/reactions", "/api/groups/" + id + "/entry"} {
 		if w := request(s, "GET", p, "", token); w.Code != 401 {
 			t.Fatalf("revoked session reached %s: %d", p, w.Code)
 		}

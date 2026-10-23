@@ -249,6 +249,12 @@ func proxyRoute(r *http.Request) (string, bool) {
 	if len(parts) == 4 && parts[3] == "read" && r.Method == "POST" {
 		return "/app/v1/groups/" + parts[2] + "/read", true
 	}
+	if len(parts) == 4 && parts[3] == "thread" && r.Method == "GET" {
+		return "/app/v1/groups/" + parts[2] + "/thread", true
+	}
+	if len(parts) == 4 && (parts[3] == "reactions" || parts[3] == "entry") && r.Method == "POST" {
+		return "/app/v1/groups/" + parts[2] + "/" + parts[3], true
+	}
 	if len(parts) == 4 && parts[3] == "events" && r.Method == "GET" {
 		return "/app/v1/groups/" + parts[2] + "/events", true
 	}
@@ -267,7 +273,7 @@ func (s *server) proxy(w http.ResponseWriter, r *http.Request, token, upstream s
 		return
 	}
 	q := url.Values{}
-	for _, key := range []string{"limit", "before"} {
+	for _, key := range []string{"limit", "before", "event_id"} {
 		if value := r.URL.Query().Get(key); value != "" {
 			q.Set(key, value)
 		}

@@ -13,3 +13,6 @@
 *.iml
 work/
 .gravitas-runtime/
+.signing/
+.release/
+__pycache__/

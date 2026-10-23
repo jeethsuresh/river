@@ -308,11 +308,21 @@ class RiverApi extends ChangeNotifier {
       merged[e['event_id'] as String] = e;
     }
     events =
-        merged.values.toList()..sort(
-          (a, b) => (a['origin_server_ts'] as int).compareTo(
+        merged.values.toList()..sort((a, b) {
+          final ax =
+              (a['unsigned'] as Json?)?['cool.gravitas.stream_order']
+                  as String?;
+          final bx =
+              (b['unsigned'] as Json?)?['cool.gravitas.stream_order']
+                  as String?;
+          if (ax != null && bx != null) return ax.compareTo(bx);
+          final t = (a['origin_server_ts'] as int).compareTo(
             b['origin_server_ts'] as int,
-          ),
-        );
+          );
+          return t == 0
+              ? (a['event_id'] as String).compareTo(b['event_id'] as String)
+              : t;
+        });
   }
 
   Future<void> older() async {
@@ -408,6 +418,52 @@ class RiverApi extends ChangeNotifier {
       body: {'user_id': userId(person)},
     );
     await open(result['id'] as String);
+  }
+
+  Future<Json> thread(String room, String event, {String? before}) => request(
+    '/api/groups/$room/thread?event_id=${Uri.encodeQueryComponent(event)}${before == null ? '' : '&before=${Uri.encodeQueryComponent(before)}'}',
+  );
+
+  Future<void> react(
+    String room,
+    String event,
+    String emoji,
+    bool active,
+  ) async {
+    final key = 'reaction:$room:$event:$emoji:$active';
+    await request(
+      '/api/groups/$room/reactions',
+      method: 'POST',
+      body: {
+        'event_id': event,
+        'key': emoji,
+        'active': active,
+        'txn_id': _transactions.putIfAbsent(key, transactionId),
+      },
+    );
+    _transactions.remove(key);
+    await refresh();
+  }
+
+  Future<void> editEntry(
+    String room,
+    String event,
+    String title,
+    String body,
+  ) async {
+    final key = 'edit:$room:$event:$title:$body';
+    await request(
+      '/api/groups/$room/entry',
+      method: 'POST',
+      body: {
+        'event_id': event,
+        'title': title,
+        'body': body,
+        'txn_id': _transactions.putIfAbsent(key, transactionId),
+      },
+    );
+    _transactions.remove(key);
+    await refresh();
   }
 
   Future<void> membership(String id, String action, [String? person]) async {
