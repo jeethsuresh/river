@@ -57,6 +57,10 @@ func (s *server) fileSignal(w http.ResponseWriter, r *http.Request, session grav
 		return
 	}
 	origin, _ := url.Parse(s.auth.AppURL)
+	if value := r.Header.Get("Origin"); value != "" && value != origin.Scheme+"://"+origin.Host {
+		fail(w, 403, "Invalid origin")
+		return
+	}
 	conn, err := websocket.Accept(w, r, &websocket.AcceptOptions{OriginPatterns: []string{origin.Host}})
 	if err != nil {
 		return

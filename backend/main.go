@@ -36,6 +36,7 @@ type server struct {
 }
 
 var uuidPattern = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)
+var eventPattern = regexp.MustCompile(`^\$[a-zA-Z0-9_.:-]{1,511}$`)
 var txnPattern = regexp.MustCompile(`^[a-zA-Z0-9_-]{1,128}$`)
 
 const scopes = "profile.name chats.list chats.read chats.write groups.create groups.manage groups.join spaces.channels contacts.read contacts.manage calls.read calls.join posts.publish"
@@ -148,6 +149,16 @@ func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		s.nativeSession(w, r)
 		return
 	}
+	if upstream, ok := publicRoute(r); ok {
+		token := ""
+		// Anonymous publication reads work independently of sign-in. A valid
+		// session additionally permits this account's private member comments.
+		if session, err := s.session(r); err == nil {
+			token = session.LocalToken
+		}
+		s.proxy(w, r, token, upstream)
+		return
+	}
 	if strings.HasPrefix(r.URL.Path, "/api/") {
 		session, err := s.session(r)
 		if err != nil {
@@ -210,6 +221,9 @@ func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if file == "" {
 		file = "index.html"
 	}
+	if publicPage(r.URL.Path) {
+		file = "index.html"
+	}
 	f, err := os.OpenRoot(s.static)
 	if err != nil {
 		http.NotFound(w, r)
@@ -229,8 +243,29 @@ func (s *server) session(r *http.Request) (gravitas.AppSession, error) {
 	}
 	return s.auth.AppSession(r, gravitas.SessionCookie)
 }
+func publicPage(p string) bool {
+	parts := strings.Split(strings.Trim(p, "/"), "/")
+	return len(parts) == 2 && parts[0] == "posts" && eventPattern.MatchString(parts[1]) || len(parts) == 3 && parts[0] == "spaces" && uuidPattern.MatchString(parts[1]) && parts[2] == "posts"
+}
+func publicRoute(r *http.Request) (string, bool) {
+	if r.Method != "GET" {
+		return "", false
+	}
+	p := strings.TrimPrefix(r.URL.Path, "/api/public")
+	if !strings.HasPrefix(r.URL.Path, "/api/public/") || !publicPage(p) {
+		return "", false
+	}
+	parts := strings.Split(strings.Trim(p, "/"), "/")
+	if len(parts) == 2 {
+		return "/public/v1/posts/" + url.PathEscape(parts[1]), true
+	}
+	return "/public/v1/spaces/" + parts[1] + "/posts", true
+}
 func proxyRoute(r *http.Request) (string, bool) {
 	parts := strings.Split(strings.Trim(r.URL.Path, "/"), "/")
+	if len(parts) == 4 && parts[0] == "api" && parts[1] == "posts" && eventPattern.MatchString(parts[2]) && (parts[3] == "comment" || parts[3] == "reactions") && r.Method == "POST" {
+		return "/app/v1/posts/" + url.PathEscape(parts[2]) + "/" + parts[3], true
+	}
 	if r.URL.Path == "/api/calls" && r.Method == "GET" {
 		return "/app/v1/calls", true
 	}
@@ -264,6 +299,9 @@ func proxyRoute(r *http.Request) (string, bool) {
 	if len(parts) == 3 && r.Method == "PATCH" {
 		return "/app/v1/groups/" + parts[2], true
 	}
+	if len(parts) == 4 && parts[3] == "publication" && r.Method == "POST" {
+		return "/app/v1/groups/" + parts[2] + "/publication", true
+	}
 	if len(parts) == 4 && parts[3] == "files" && r.Method == "GET" {
 		return "/app/v1/groups/" + parts[2] + "/files", true
 	}
@@ -281,6 +319,9 @@ func proxyRoute(r *http.Request) (string, bool) {
 	}
 	if len(parts) == 4 && parts[3] == "read" && r.Method == "POST" {
 		return "/app/v1/groups/" + parts[2] + "/read", true
+	}
+	if len(parts) == 4 && parts[3] == "entries" && r.Method == "GET" {
+		return "/app/v1/groups/" + parts[2] + "/entries", true
 	}
 	if len(parts) == 4 && parts[3] == "thread" && r.Method == "GET" {
 		return "/app/v1/groups/" + parts[2] + "/thread", true
@@ -300,13 +341,13 @@ func proxyRoute(r *http.Request) (string, bool) {
 	return "", false
 }
 func (s *server) proxy(w http.ResponseWriter, r *http.Request, token, upstream string) {
-	raw, err := io.ReadAll(io.LimitReader(r.Body, 40001))
-	if err != nil || len(raw) > 40000 {
+	raw, err := io.ReadAll(io.LimitReader(r.Body, 300001))
+	if err != nil || len(raw) > 300000 {
 		fail(w, 413, "Request is too large")
 		return
 	}
 	q := url.Values{}
-	for _, key := range []string{"limit", "before", "event_id", "file_id"} {
+	for _, key := range []string{"limit", "before", "event_id", "file_id", "kind"} {
 		if value := r.URL.Query().Get(key); value != "" {
 			q.Set(key, value)
 		}
@@ -316,7 +357,9 @@ func (s *server) proxy(w http.ResponseWriter, r *http.Request, token, upstream s
 		fail(w, 400, "Invalid request")
 		return
 	}
-	req.Header.Set("Authorization", "Bearer "+token)
+	if token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
+	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "application/json")
 	resp, err := s.auth.HTTP.Do(req)

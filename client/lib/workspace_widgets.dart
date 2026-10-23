@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'api.dart';
 import 'content_widgets.dart';
+import 'publishing_widgets.dart';
 
 class ConversationPicker extends StatefulWidget {
   const ConversationPicker({super.key, required this.app});
@@ -134,11 +135,13 @@ Future<void> openRiverThread(
   if (context.mounted) {
     await Navigator.of(context).push<void>(
       MaterialPageRoute(
-        builder: (_) => ThreadScreen(
-          app: app,
-          room: room,
-          rootId: event['event_id'] as String,
-        ),
+        builder: (_) => event['type'] == 'cool.gravitas.river.post.v1'
+            ? PostScreen(app: app, event: event['event_id'] as String)
+            : ThreadScreen(
+                app: app,
+                room: room,
+                rootId: event['event_id'] as String,
+              ),
       ),
     );
   }

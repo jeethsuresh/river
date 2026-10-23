@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:livekit_client/livekit_client.dart';
 import 'api.dart';
 import 'calls.dart';
+import 'call_chat.dart';
 
 Future<void> joinRiverCall(
   BuildContext context,
@@ -147,7 +148,15 @@ class RiverCallScreen extends StatelessWidget {
             actions: [
               IconButton(
                 tooltip: 'Call chat',
-                onPressed: () => Navigator.pop(context),
+                onPressed: calls.chat == null
+                    ? null
+                    : () => Navigator.push<void>(
+                        context,
+                        MaterialPageRoute(
+                          builder: (_) =>
+                              CallChatScreen(api: api, room: calls.chat!),
+                        ),
+                      ),
                 icon: const Icon(Icons.chat_bubble_outline),
               ),
             ],

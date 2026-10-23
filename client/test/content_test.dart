@@ -218,20 +218,14 @@ void main() {
           MaterialApp(
             home: Scaffold(
               body: Builder(
-                builder:
-                    (context) => TextButton(
-                      onPressed:
-                          () => showDialog<void>(
-                            context: context,
-                            builder:
-                                (_) => EntryEditor(
-                                  app: api,
-                                  room: roomId,
-                                  entry: post,
-                                ),
-                          ),
-                      child: const Text('Open editor'),
-                    ),
+                builder: (context) => TextButton(
+                  onPressed: () => showDialog<void>(
+                    context: context,
+                    builder: (_) =>
+                        EntryEditor(app: api, room: roomId, entry: post),
+                  ),
+                  child: const Text('Open editor'),
+                ),
               ),
             ),
           ),
@@ -288,12 +282,11 @@ void main() {
       );
       await tester.pumpAndSettle();
       expect(find.byType(Image), findsNothing);
-      final buttons =
-          tester
-              .widgetList<TextButton>(
-                find.byWidgetPredicate((w) => w is TextButton),
-              )
-              .toList();
+      final buttons = tester
+          .widgetList<TextButton>(
+            find.byWidgetPredicate((w) => w is TextButton),
+          )
+          .toList();
       expect(buttons, hasLength(4));
       expect(buttons.where((b) => b.onPressed != null), hasLength(1));
       expect(tester.takeException(), isNull);

@@ -120,7 +120,9 @@ class _FriendsViewState extends State<FriendsView> {
                     style: const TextStyle(fontWeight: FontWeight.w700),
                   ),
                   Text(
-                    p['user_id'] as String,
+                    app.online.contains(p['user_id'])
+                        ? 'Online · ${p['user_id']}'
+                        : p['user_id'] as String,
                     overflow: TextOverflow.ellipsis,
                     style: const TextStyle(fontSize: 12),
                   ),

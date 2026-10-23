@@ -11,7 +11,7 @@ class RiverCalls extends ChangeNotifier {
   static const native = MethodChannel('cool.gravitas.river/call');
   Room? room;
   Json? target;
-  String? member, identity, error;
+  String? member, identity, chat, error;
   Timer? heartbeat;
   EventsListener<RoomEvent>? listener;
   bool busy = false,
@@ -24,9 +24,24 @@ class RiverCalls extends ChangeNotifier {
   bool get android =>
       !kIsWeb && defaultTargetPlatform == TargetPlatform.android;
   bool get active => room != null;
-  bool get muted => !(room?.localParticipant?.isMicrophoneEnabled() ?? false);
-  bool get cameraOn => room?.localParticipant?.isCameraEnabled() ?? false;
-  bool get sharing => room?.localParticipant?.isScreenShareEnabled() ?? false;
+  bool get muted =>
+      room?.localParticipant
+          ?.getTrackPublicationBySource(TrackSource.microphone)
+          ?.track
+          ?.muted ??
+      true;
+  bool get cameraOn =>
+      !(room?.localParticipant
+              ?.getTrackPublicationBySource(TrackSource.camera)
+              ?.track
+              ?.muted ??
+          true);
+  bool get sharing =>
+      !(room?.localParticipant
+              ?.getTrackPublicationBySource(TrackSource.screenShareVideo)
+              ?.track
+              ?.muted ??
+          true);
   Future<void> service({bool projection = false}) async {
     if (android) {
       await native.invokeMethod('start', {
@@ -41,9 +56,10 @@ class RiverCalls extends ChangeNotifier {
     busy = true;
     error = null;
     notifyListeners();
+    var joiningEpoch = 0;
     try {
       await leave();
-      final epoch = ++_epoch;
+      final epoch = joiningEpoch = ++_epoch;
       final id =
           transactionId().substring(0, 32) + transactionId().substring(0, 11);
       member = id;
@@ -62,6 +78,7 @@ class RiverCalls extends ChangeNotifier {
         return;
       }
       identity = result['identity'] as String;
+      chat = result['call_chat_id'] as String?;
       if (android) {
         final permission = await rtc.navigator.mediaDevices.getUserMedia({
           'audio': true,
@@ -83,6 +100,18 @@ class RiverCalls extends ChangeNotifier {
           error = 'The call ended or access changed.';
           unawaited(leave());
         })
+        ..on<LocalTrackUnpublishedEvent>((event) {
+          if (android &&
+              !busy &&
+              event.publication.source == TrackSource.screenShareVideo) {
+            unawaited(
+              service(projection: false).catchError((Object _) {
+                error = 'Android could not update the ongoing call indicator.';
+                changed();
+              }),
+            );
+          }
+        })
         ..on<TrackSubscribedEvent>((event) {
           if (deafened && event.track is AudioTrack) {
             unawaited(event.publication.unsubscribe());
@@ -92,11 +121,7 @@ class RiverCalls extends ChangeNotifier {
         result['transport_url'] as String,
         result['jwt'] as String,
       );
-      if (epoch != _epoch) {
-        await media.disconnect();
-        await media.dispose();
-        return;
-      }
+      if (epoch != _epoch) return;
       await media.localParticipant?.setMicrophoneEnabled(true);
       if (android) {
         await AudioManager.instance.setSpeakerOutputPreferred(speaker);
@@ -107,6 +132,7 @@ class RiverCalls extends ChangeNotifier {
       );
       await api.refresh();
     } catch (_) {
+      if (joiningEpoch != 0 && joiningEpoch != _epoch) return;
       await leave();
       error =
           'Could not join this call. Check microphone permission, your connection and River access, then try again.';
@@ -230,6 +256,7 @@ class RiverCalls extends ChangeNotifier {
     target = null;
     member = null;
     identity = null;
+    chat = null;
     heartbeat?.cancel();
     heartbeat = null;
     await listener?.dispose();

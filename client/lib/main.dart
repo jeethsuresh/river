@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'api.dart';
+import 'publishing_widgets.dart';
 import 'friends_view.dart';
 import 'content_widgets.dart';
 import 'workspace_widgets.dart';
@@ -79,9 +80,19 @@ class _RiverAppState extends State<RiverApp> with WidgetsBindingObserver {
       ),
       home: app.loading
           ? const Scaffold(body: Center(child: CircularProgressIndicator()))
-          : RiverShell(key: ValueKey(app.user?['sub']), app: app),
+          : deepLink() ?? RiverShell(key: ValueKey(app.user?['sub']), app: app),
     ),
   );
+  Widget? deepLink() {
+    final parts = Uri.base.pathSegments;
+    if (parts.length == 2 && parts[0] == 'posts' && parts[1].startsWith(r'$')) {
+      return PostScreen(app: app, event: parts[1]);
+    }
+    if (parts.length == 3 && parts[0] == 'spaces' && parts[2] == 'posts') {
+      return BlogScreen(app: app, room: parts[1]);
+    }
+    return null;
+  }
 }
 
 class RiverShell extends StatefulWidget {
@@ -98,7 +109,7 @@ class _RiverShellState extends State<RiverShell> {
   final attachments = <Json>[];
   final timeline = ScrollController();
   String? renderedList, renderedLast;
-  bool newMessages = false;
+  bool newMessages = false, chatPreview = false;
   final collapsed = <String>{};
   @override
   void initState() {
@@ -164,7 +175,7 @@ class _RiverShellState extends State<RiverShell> {
     unawaited(app.open(id));
   }
 
-  Future<String?> ask(String title, String label) async {
+  Future<String?> ask(String title, String label, {int maxLength = 160}) async {
     final c = TextEditingController();
     final result = await showDialog<String>(
       context: context,
@@ -173,7 +184,7 @@ class _RiverShellState extends State<RiverShell> {
         content: TextField(
           controller: c,
           autofocus: true,
-          maxLength: 160,
+          maxLength: maxLength,
           decoration: InputDecoration(labelText: label),
           onSubmitted: (v) {
             if (v.trim().isNotEmpty) Navigator.pop(ctx, v.trim());
@@ -488,9 +499,29 @@ class _RiverShellState extends State<RiverShell> {
         ),
         title: Text(g['name'] as String, overflow: TextOverflow.ellipsis),
         subtitle: g['membership'] == 'invite' ? const Text('Invitation') : null,
-        trailing: (g['unread_count'] as int? ?? 0) > 0
-            ? Badge(label: Text('${g['unread_count']}'))
-            : null,
+        trailing: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if ((g['unread_count'] as int? ?? 0) > 0)
+              Badge(label: Text('${g['unread_count']}')),
+            if (kind == 'space')
+              IconButton(
+                tooltip: collapsed.contains(g['id'])
+                    ? 'Expand channels'
+                    : 'Collapse channels',
+                onPressed: () => setState(() {
+                  if (!collapsed.add(g['id'] as String)) {
+                    collapsed.remove(g['id']);
+                  }
+                }),
+                icon: Icon(
+                  collapsed.contains(g['id'])
+                      ? Icons.chevron_right
+                      : Icons.expand_more,
+                ),
+              ),
+          ],
+        ),
         onLongPress: kind == 'space'
             ? () => setState(() {
                 if (!collapsed.add(g['id'] as String)) {
@@ -904,6 +935,7 @@ class _RiverShellState extends State<RiverShell> {
                         final description = await ask(
                           'Space description',
                           'Description',
+                          maxLength: 500,
                         );
                         if (description != null) {
                           await app.request(
@@ -1077,7 +1109,14 @@ class _RiverShellState extends State<RiverShell> {
             ),
           ),
         Expanded(
-          child: items.isEmpty
+          child: viewFilter != 'Chat'
+              ? EntryFeed(
+                  key: ValueKey('${g['id']}:$viewFilter'),
+                  app: app,
+                  room: g['id'] as String,
+                  kind: viewFilter == 'Posts' ? 'post' : 'discussion',
+                )
+              : items.isEmpty
               ? Center(
                   child: Text(
                     'Start the ${viewFilter == 'Chat' ? 'conversation' : viewFilter.toLowerCase()}.',
@@ -1102,6 +1141,29 @@ class _RiverShellState extends State<RiverShell> {
                   PendingAttachments(
                     files: attachments,
                     remove: (f) => setState(() => attachments.remove(f)),
+                  ),
+                if (viewFilter == 'Chat')
+                  Row(
+                    children: [
+                      Expanded(child: MarkdownToolbar(controller: draft)),
+                      IconButton(
+                        tooltip: chatPreview
+                            ? 'Write message'
+                            : 'Preview message',
+                        onPressed: () =>
+                            setState(() => chatPreview = !chatPreview),
+                        icon: Icon(
+                          chatPreview
+                              ? Icons.edit_outlined
+                              : Icons.visibility_outlined,
+                        ),
+                      ),
+                    ],
+                  ),
+                if (viewFilter == 'Chat' && chatPreview)
+                  ConstrainedBox(
+                    constraints: const BoxConstraints(maxHeight: 150),
+                    child: SingleChildScrollView(child: RichBody(draft.text)),
                   ),
                 if (viewFilter != 'Chat')
                   FilledButton.icon(
@@ -1184,11 +1246,13 @@ class _RiverShellState extends State<RiverShell> {
                   : e['event_id'] as String;
               await Navigator.of(context).push<void>(
                 MaterialPageRoute(
-                  builder: (_) => ThreadScreen(
-                    app: app,
-                    room: g['id'] as String,
-                    rootId: rootId,
-                  ),
+                  builder: (_) => e['type'] == 'cool.gravitas.river.post.v1'
+                      ? PostScreen(app: app, event: rootId)
+                      : ThreadScreen(
+                          app: app,
+                          room: g['id'] as String,
+                          rootId: rootId,
+                        ),
                 ),
               );
               if (mounted) await app.refresh();

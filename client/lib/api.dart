@@ -73,7 +73,12 @@ class RiverApi extends ChangeNotifier {
   final _read = <String, String>{};
 
   Iterable<Json> get spaces => groups.where(
-    (g) => g['kind'] != 'dm' && g['kind'] != 'group' && g['kind'] != 'channel',
+    (g) =>
+        g['kind'] != 'dm' &&
+        g['kind'] != 'group' &&
+        g['kind'] != 'channel' &&
+        g['kind'] != 'post_comments' &&
+        g['kind'] != 'call_chat',
   );
   Iterable<Json> channels(String parent) =>
       groups.where((g) => g['parent_id'] == parent);
@@ -318,9 +323,14 @@ class RiverApi extends ChangeNotifier {
     await refresh();
   }
 
-  Future<void> login() async {
+  Future<void> login({String? next}) async {
     if (kIsWeb) {
-      await launchUrl(uri('/auth/gravitas/start'), webOnlyWindowName: '_self');
+      await launchUrl(
+        uri(
+          '/auth/gravitas/start${next == null ? '' : '?next=${Uri.encodeQueryComponent(next)}'}',
+        ),
+        webOnlyWindowName: '_self',
+      );
       return;
     }
     final verifier = transactionId() + transactionId();
@@ -610,13 +620,73 @@ class RiverApi extends ChangeNotifier {
     await refresh();
   }
 
-  Future<void> send(String id, String type, Json content, String txn) async {
-    await request(
+  Future<Json> send(String id, String type, Json content, String txn) async {
+    final result = await request(
       '/api/groups/$id/events/$type/$txn',
       method: 'PUT',
       body: {'content': content},
     );
     await refresh();
+    return result;
+  }
+
+  Future<Json> publicPost(String event, {String? before}) => request(
+    '/api/public/posts/${Uri.encodeComponent(event)}${before == null ? '' : '?before=${Uri.encodeQueryComponent(before)}'}',
+  );
+  Future<Json> blog(String room, {String? before}) => request(
+    '/api/public/spaces/$room/posts${before == null ? '' : '?before=${Uri.encodeQueryComponent(before)}'}',
+  );
+  Future<void> publication(
+    String room,
+    String event,
+    String visibility,
+    String comments,
+  ) async {
+    final key = 'publish:$room:$event:$visibility:$comments';
+    await request(
+      '/api/groups/$room/publication',
+      method: 'POST',
+      body: {
+        'event_id': event,
+        'visibility': visibility,
+        'comments_policy': comments,
+        'txn_id': _transactions.putIfAbsent(key, transactionId),
+      },
+    );
+    _transactions.remove(key);
+    await refresh();
+  }
+
+  Future<void> postComment(
+    String event,
+    String body,
+    String txn, {
+    String? parent,
+  }) async {
+    await request(
+      '/api/posts/${Uri.encodeComponent(event)}/comment',
+      method: 'POST',
+      body: {
+        'body': body,
+        'txn_id': txn,
+        if (parent != null) 'parent_id': parent,
+      },
+    );
+    await refresh();
+  }
+
+  Future<void> postReaction(String event, String emoji, bool active) async {
+    final key = 'public-reaction:$event:$emoji:$active';
+    await request(
+      '/api/posts/${Uri.encodeComponent(event)}/reactions',
+      method: 'POST',
+      body: {
+        'key': emoji,
+        'active': active,
+        'txn_id': _transactions.putIfAbsent(key, transactionId),
+      },
+    );
+    _transactions.remove(key);
   }
 
   @override

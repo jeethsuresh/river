@@ -4,6 +4,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_markdown_plus/flutter_markdown_plus.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'api.dart';
+import 'publishing_widgets.dart';
+import 'package:flutter/services.dart';
 import 'attachment_widgets.dart';
 
 const reactionEmojis = [
@@ -232,23 +234,24 @@ class ContentCard extends StatelessWidget {
                     .cast<Json>())
               AttachmentCard(app: app, file: file),
             const SizedBox(height: 10),
-            ReactionBar(
-              summary: summary,
-              change: (emoji, active) async {
-                await app.react(
-                  room,
-                  event['event_id'] as String,
-                  emoji,
-                  active,
-                );
-                await changed?.call();
-              },
-            ),
+            if (app.user != null)
+              ReactionBar(
+                summary: summary,
+                change: (emoji, active) async {
+                  await app.react(
+                    room,
+                    event['event_id'] as String,
+                    emoji,
+                    active,
+                  );
+                  await changed?.call();
+                },
+              ),
             Wrap(
               spacing: 8,
               children: [
                 TextButton.icon(
-                  onPressed: reply,
+                  onPressed: app.user == null ? null : reply,
                   icon: const Icon(Icons.reply, size: 18),
                   label: Text(
                     replies == 0
@@ -258,6 +261,17 @@ class ContentCard extends StatelessWidget {
                         : '$replies replies',
                   ),
                 ),
+                if (event['type'] == 'cool.gravitas.river.post.v1' &&
+                    (event['publication'] as Json?)?['visibility'] == 'public')
+                  TextButton.icon(
+                    onPressed: () => Clipboard.setData(
+                      ClipboardData(
+                        text: postLink(event['event_id'] as String),
+                      ),
+                    ),
+                    icon: const Icon(Icons.link, size: 17),
+                    label: const Text('Copy public link'),
+                  ),
                 if (canEdit)
                   TextButton.icon(
                     onPressed: () async {
@@ -306,6 +320,16 @@ class _EntryEditorState extends State<EntryEditor> {
         ? ''
         : rendered(widget.entry!)['body'] as String?,
   );
+  late String visibility =
+      (widget.entry?['publication'] as Json?)?['visibility'] as String? ??
+      'members';
+  late String commentsPolicy =
+      (widget.entry?['publication'] as Json?)?['comments_policy'] as String? ??
+      'members';
+  bool get isPost => widget.entry == null
+      ? widget.kind == 'post'
+      : widget.entry!['type'] == 'cool.gravitas.river.post.v1';
+  String? createdEvent;
   bool preview = false, busy = false;
   String? error, payload;
   String txn = transactionId();
@@ -334,19 +358,40 @@ class _EntryEditorState extends State<EntryEditor> {
       txn = transactionId();
     }
     try {
-      if (widget.entry != null) {
+      final existing = widget.entry?['event_id'] as String? ?? createdEvent;
+      if (isPost &&
+          existing != null &&
+          visibility == 'members' &&
+          (widget.entry?['publication'] as Json?)?['visibility'] == 'public') {
+        await widget.app.publication(
+          widget.room,
+          existing,
+          visibility,
+          commentsPolicy,
+        );
+      }
+      if (existing != null) {
         await widget.app.editEntry(
           widget.room,
-          widget.entry!['event_id'] as String,
+          existing,
           content['title'] as String,
           content['body'] as String,
         );
       } else {
-        await widget.app.send(
+        final result = await widget.app.send(
           widget.room,
           'cool.gravitas.river.${widget.kind}.v1',
           content,
           txn,
+        );
+        createdEvent = result['event_id'] as String;
+      }
+      if (isPost) {
+        await widget.app.publication(
+          widget.room,
+          existing ?? createdEvent!,
+          visibility,
+          commentsPolicy,
         );
       }
       if (mounted) Navigator.pop(context, true);
@@ -381,6 +426,65 @@ class _EntryEditorState extends State<EntryEditor> {
                   v?.trim().isNotEmpty == true ? null : 'Add a title.',
             ),
             const SizedBox(height: 12),
+            if (!preview) MarkdownToolbar(controller: body),
+            if (isPost) ...[
+              DropdownButtonFormField<String>(
+                isExpanded: true,
+                initialValue: visibility,
+                decoration: const InputDecoration(labelText: 'Post audience'),
+                items: const [
+                  DropdownMenuItem(
+                    value: 'members',
+                    child: Text('Space members'),
+                  ),
+                  DropdownMenuItem(
+                    value: 'public',
+                    child: Text('Public · anyone with the link'),
+                  ),
+                ],
+                onChanged: busy
+                    ? null
+                    : (v) => setState(() {
+                        visibility = v!;
+                        if (v != 'public' && commentsPolicy == 'public') {
+                          commentsPolicy = 'members';
+                        }
+                      }),
+              ),
+              const SizedBox(height: 12),
+              DropdownButtonFormField<String>(
+                isExpanded: true,
+                key: ValueKey('$visibility:$commentsPolicy'),
+                initialValue: commentsPolicy,
+                decoration: const InputDecoration(labelText: 'Who can comment'),
+                items: [
+                  const DropdownMenuItem(
+                    value: 'members',
+                    child: Text('Space members'),
+                  ),
+                  if (visibility == 'public')
+                    const DropdownMenuItem(
+                      value: 'public',
+                      child: Text('Anyone signed in with Gravitas'),
+                    ),
+                  const DropdownMenuItem(
+                    value: 'disabled',
+                    child: Text('Comments disabled'),
+                  ),
+                ],
+                onChanged: busy
+                    ? null
+                    : (v) => setState(() => commentsPolicy = v!),
+              ),
+              if (visibility == 'public')
+                const Padding(
+                  padding: EdgeInsets.symmetric(vertical: 10),
+                  child: Text(
+                    'The post and new public comments can be read and copied by anyone. Earlier member comments stay private.',
+                  ),
+                ),
+              const SizedBox(height: 12),
+            ],
             if (preview)
               Padding(
                 padding: const EdgeInsets.all(12),
@@ -391,7 +495,7 @@ class _EntryEditorState extends State<EntryEditor> {
                 controller: body,
                 minLines: 6,
                 maxLines: 16,
-                maxLength: 16000,
+                maxLength: 40000,
                 decoration: const InputDecoration(
                   labelText: 'Body',
                   hintText: 'Share an idea. Markdown formatting is supported.',
@@ -711,3 +815,112 @@ String? getReplyParent(Json e) =>
     (((e['content'] as Json)['m.relates_to'] as Json?)?['m.in_reply_to']
             as Json?)?['event_id']
         as String?;
+
+class EntryFeed extends StatefulWidget {
+  const EntryFeed({
+    super.key,
+    required this.app,
+    required this.room,
+    required this.kind,
+  });
+  final RiverApi app;
+  final String room, kind;
+  @override
+  State<EntryFeed> createState() => _EntryFeedState();
+}
+
+class _EntryFeedState extends State<EntryFeed> {
+  final events = <Json>[];
+  String? cursor, error;
+  bool loading = false;
+  StreamSubscription<void>? changes;
+  @override
+  void initState() {
+    super.initState();
+    unawaited(load());
+    changes = widget.app.changes.stream.listen((_) => load());
+  }
+
+  @override
+  void dispose() {
+    changes?.cancel();
+    super.dispose();
+  }
+
+  Future<void> load({bool more = false}) async {
+    if (loading || !mounted) return;
+    setState(() => loading = true);
+    try {
+      final r = await widget.app.request(
+        '/api/groups/${widget.room}/entries?kind=${widget.kind}${more && cursor != null ? '&before=${Uri.encodeQueryComponent(cursor!)}' : ''}',
+      );
+      if (!mounted) return;
+      setState(() {
+        final all = {for (final e in events) e['event_id']: e};
+        for (final e in (r['events'] as List).cast<Json>()) {
+          all[e['event_id']] = e;
+        }
+        events
+          ..clear()
+          ..addAll(all.values);
+        events.sort(
+          (a, b) => '${(b['unsigned'] as Json?)?['cool.gravitas.stream_order']}'
+              .compareTo(
+                '${(a['unsigned'] as Json?)?['cool.gravitas.stream_order']}',
+              ),
+        );
+        if (more || cursor == null) cursor = r['next_cursor'] as String?;
+        error = null;
+      });
+    } catch (e) {
+      if (mounted) setState(() => error = '$e');
+    } finally {
+      if (mounted) setState(() => loading = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) => ListView(
+    padding: const EdgeInsets.all(20),
+    children: [
+      if (loading) const LinearProgressIndicator(),
+      if (error != null)
+        ListTile(
+          title: Text(error!),
+          trailing: TextButton(onPressed: load, child: const Text('Retry')),
+        ),
+      if (events.isEmpty && !loading && error == null)
+        Text('Start the ${widget.kind == 'post' ? 'posts' : 'discussions'}.'),
+      for (final e in events)
+        Padding(
+          padding: const EdgeInsets.only(bottom: 14),
+          child: ContentCard(
+            app: widget.app,
+            room: widget.room,
+            event: e,
+            changed: load,
+            reply: () => Navigator.push<void>(
+              context,
+              MaterialPageRoute(
+                builder: (_) => widget.kind == 'post'
+                    ? PostScreen(
+                        app: widget.app,
+                        event: e['event_id'] as String,
+                      )
+                    : ThreadScreen(
+                        app: widget.app,
+                        room: widget.room,
+                        rootId: e['event_id'] as String,
+                      ),
+              ),
+            ),
+          ),
+        ),
+      if (cursor != null)
+        TextButton(
+          onPressed: loading ? null : () => load(more: true),
+          child: const Text('Load older entries'),
+        ),
+    ],
+  );
+}

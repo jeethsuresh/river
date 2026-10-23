@@ -9,14 +9,13 @@ void main() {
     (tester) async {
       for (final width in [390.0, 768.0, 1440.0]) {
         await tester.binding.setSurfaceSize(Size(width, 900));
-        final api =
-            RiverApi()
-              ..loading = false
-              ..user = {
-                'username': 'Alice',
-                'sub': 'alice',
-                'user_id': '@alice:gravitas.cool',
-              };
+        final api = RiverApi()
+          ..loading = false
+          ..user = {
+            'username': 'Alice',
+            'sub': 'alice',
+            'user_id': '@alice:gravitas.cool',
+          };
         api.groups = [
           {
             'id': 'space',
@@ -54,10 +53,9 @@ void main() {
   testWidgets('account changes discard the previous account composer', (
     tester,
   ) async {
-    final api =
-        RiverApi()
-          ..loading = false
-          ..user = {'username': 'Alice', 'sub': 'alice'};
+    final api = RiverApi()
+      ..loading = false
+      ..user = {'username': 'Alice', 'sub': 'alice'};
     api.groups = [
       {
         'id': 'one',
@@ -80,10 +78,9 @@ void main() {
   testWidgets('account changes dismiss private member sheets and dialogs', (
     tester,
   ) async {
-    final api =
-        RiverApi()
-          ..loading = false
-          ..user = {'sub': 'alice', 'username': 'alice'};
+    final api = RiverApi()
+      ..loading = false
+      ..user = {'sub': 'alice', 'username': 'alice'};
     api.groups = [
       {
         'id': 'one',
