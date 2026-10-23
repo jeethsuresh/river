@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'api.dart';
 import 'friends_view.dart';
+import 'content_widgets.dart';
 
 void main() {
   runApp(const RiverApp());
@@ -127,7 +128,7 @@ class _RiverShellState extends State<RiverShell> {
     });
   }
 
-  String? reply, retryTxn, retryPayload;
+  String? retryTxn, retryPayload;
   final scaffold = GlobalKey<ScaffoldState>();
   bool sending = false;
   @override
@@ -154,7 +155,6 @@ class _RiverShellState extends State<RiverShell> {
     setState(() {
       section = 'Home';
       filter = 'Chat';
-      reply = null;
       retryTxn = null;
       draft.clear();
     });
@@ -209,7 +209,6 @@ class _RiverShellState extends State<RiverShell> {
         setState(() {
           section = 'Home';
           filter = 'Chat';
-          reply = null;
           draft.clear();
         });
       }
@@ -258,7 +257,6 @@ class _RiverShellState extends State<RiverShell> {
                             () => setState(() {
                               section = 'Home';
                               filter = 'Chat';
-                              reply = null;
                               draft.clear();
                             }),
                       )
@@ -601,7 +599,7 @@ class _RiverShellState extends State<RiverShell> {
                         .take(6))
                       ListTile(
                         contentPadding: EdgeInsets.zero,
-                        title: Text((e['content'] as Json)['title'] as String),
+                        title: Text(rendered(e)['title'] as String),
                         subtitle: Text('${e['group_name']} · ${e['sender']}'),
                         trailing: const Icon(Icons.north_east, size: 18),
                         onTap: () => open(e['group_id'] as String),
@@ -736,15 +734,15 @@ class _RiverShellState extends State<RiverShell> {
     }
     final viewFilter = g['kind'] == 'channel' ? 'Chat' : filter;
     final items =
-        app.events
-            .where(
-              (e) =>
-                  viewFilter == 'Chat'
-                      ? e['type'] == 'm.room.message'
-                      : e['type'] ==
-                          'cool.gravitas.river.${viewFilter == 'Posts' ? 'post' : 'discussion'}.v1',
-            )
-            .toList();
+        app.events.where((e) {
+          if (viewFilter == 'Chat') {
+            final relation = (e['content'] as Json)['m.relates_to'] as Json?;
+            return e['type'] == 'm.room.message' &&
+                relation?['rel_type'] != 'm.thread';
+          }
+          return e['type'] ==
+              'cool.gravitas.river.${viewFilter == 'Posts' ? 'post' : 'discussion'}.v1';
+        }).toList();
     final listKey = '${g['id']}:$viewFilter';
     final last = items.lastOrNull?['event_id'] as String?;
     if (renderedList != listKey || renderedLast != last) {
@@ -816,7 +814,6 @@ class _RiverShellState extends State<RiverShell> {
                               if (mounted) {
                                 setState(() {
                                   filter = 'Chat';
-                                  reply = null;
                                   draft.clear();
                                 });
                               }
@@ -992,47 +989,55 @@ class _RiverShellState extends State<RiverShell> {
             padding: const EdgeInsets.all(16),
             child: Column(
               children: [
-                if (reply != null)
+                if (viewFilter != 'Chat')
+                  FilledButton.icon(
+                    onPressed:
+                        () => showDialog<bool>(
+                          context: context,
+                          builder:
+                              (_) => EntryEditor(
+                                app: app,
+                                room: g['id'] as String,
+                                kind:
+                                    viewFilter == 'Posts'
+                                        ? 'post'
+                                        : 'discussion',
+                              ),
+                        ),
+                    icon: const Icon(Icons.edit_outlined),
+                    label: Text(
+                      viewFilter == 'Posts' ? 'New post' : 'New discussion',
+                    ),
+                  )
+                else
                   Row(
+                    crossAxisAlignment: CrossAxisAlignment.end,
                     children: [
-                      const Icon(Icons.reply, size: 16),
-                      const SizedBox(width: 8),
-                      const Expanded(child: Text('Replying to message')),
-                      IconButton(
-                        tooltip: 'Cancel reply',
-                        onPressed: () => setState(() => reply = null),
-                        icon: const Icon(Icons.close),
+                      Expanded(
+                        child: TextField(
+                          controller: draft,
+                          minLines: 1,
+                          maxLines: 5,
+                          maxLength: 16000,
+                          decoration: InputDecoration(
+                            hintText:
+                                viewFilter == 'Chat'
+                                    ? 'Message ${g['name']}…'
+                                    : 'Write ${viewFilter == 'Posts' ? 'a post' : 'a discussion'}…',
+                            counterText: '',
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      IconButton.filled(
+                        tooltip: 'Send',
+                        onPressed: sending ? null : () => send(g),
+                        icon: Icon(
+                          sending ? Icons.hourglass_top : Icons.arrow_upward,
+                        ),
                       ),
                     ],
                   ),
-                Row(
-                  crossAxisAlignment: CrossAxisAlignment.end,
-                  children: [
-                    Expanded(
-                      child: TextField(
-                        controller: draft,
-                        minLines: 1,
-                        maxLines: 5,
-                        maxLength: 16000,
-                        decoration: InputDecoration(
-                          hintText:
-                              viewFilter == 'Chat'
-                                  ? 'Message ${g['name']}…'
-                                  : 'Write ${viewFilter == 'Posts' ? 'a post' : 'a discussion'}…',
-                          counterText: '',
-                        ),
-                      ),
-                    ),
-                    const SizedBox(width: 10),
-                    IconButton.filled(
-                      tooltip: 'Send',
-                      onPressed: sending ? null : () => send(g),
-                      icon: Icon(
-                        sending ? Icons.hourglass_top : Icons.arrow_upward,
-                      ),
-                    ),
-                  ],
-                ),
               ],
             ),
           ),
@@ -1041,155 +1046,41 @@ class _RiverShellState extends State<RiverShell> {
     );
   }
 
-  Widget eventCard(Json e, Json g) {
-    final c = e['content'] as Json;
-    final reactions =
-        app.events
-            .where(
-              (r) =>
-                  r['type'] == 'm.reaction' &&
-                  ((r['content'] as Json)['m.relates_to']
-                          as Json?)?['event_id'] ==
-                      e['event_id'],
-            )
-            .toList();
-    final reacted = reactions.any((r) => r['sender'] == app.user?['user_id']);
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 14),
-      child: Card(
-        child: Padding(
-          padding: const EdgeInsets.all(18),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                children: [
-                  const CircleAvatar(
-                    radius: 16,
-                    backgroundColor: Color(0xffe8efff),
-                    child: Icon(Icons.person_outline, color: blue, size: 20),
-                  ),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: Text(
-                      e['sender'] as String,
-                      style: const TextStyle(
-                        fontSize: 12,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                  ),
-                  Text(
-                    time(e['origin_server_ts'] as int),
-                    style: const TextStyle(color: muted, fontSize: 11),
-                  ),
-                ],
-              ),
-              if (c['m.relates_to'] != null)
-                const Padding(
-                  padding: EdgeInsets.only(top: 10),
-                  child: Text(
-                    '↳ Reply',
-                    style: TextStyle(color: muted, fontSize: 12),
-                  ),
+  Widget eventCard(Json e, Json g) => Padding(
+    padding: const EdgeInsets.only(bottom: 14),
+    child: ContentCard(
+      app: app,
+      room: g['id'] as String,
+      event: e,
+      reply: () async {
+        final relation = (e['content'] as Json)['m.relates_to'] as Json?;
+        final rootId =
+            relation?['rel_type'] == 'm.thread'
+                ? relation!['event_id'] as String
+                : e['event_id'] as String;
+        await Navigator.of(context).push<void>(
+          MaterialPageRoute(
+            builder:
+                (_) => ThreadScreen(
+                  app: app,
+                  room: g['id'] as String,
+                  rootId: rootId,
                 ),
-              if (c['title'] != null)
-                Padding(
-                  padding: const EdgeInsets.only(top: 14),
-                  child: Text(
-                    c['title'] as String,
-                    style: const TextStyle(
-                      fontSize: 20,
-                      fontWeight: FontWeight.w700,
-                    ),
-                  ),
-                ),
-              Padding(
-                padding: const EdgeInsets.only(top: 12),
-                child: SelectableText(
-                  c['body'] as String? ?? '',
-                  style: const TextStyle(height: 1.5, fontSize: 15),
-                ),
-              ),
-              const SizedBox(height: 8),
-              Wrap(
-                spacing: 8,
-                children: [
-                  TextButton.icon(
-                    onPressed:
-                        reacted
-                            ? null
-                            : () => action(
-                              () => app.send(g['id'] as String, 'm.reaction', {
-                                'm.relates_to': {
-                                  'rel_type': 'm.annotation',
-                                  'event_id': e['event_id'],
-                                  'key': '👍',
-                                },
-                              }, transactionId()),
-                            ),
-                    icon: const Icon(Icons.thumb_up_outlined, size: 15),
-                    label: Text(
-                      reactions.isEmpty ? 'React' : '${reactions.length}',
-                    ),
-                  ),
-                  TextButton.icon(
-                    onPressed:
-                        () => setState(() {
-                          reply = e['event_id'] as String;
-                          filter = 'Chat';
-                        }),
-                    icon: const Icon(Icons.reply, size: 17),
-                    label: const Text('Reply'),
-                  ),
-                ],
-              ),
-            ],
           ),
-        ),
-      ),
-    );
-  }
-
-  String time(int ms) {
-    final t = DateTime.fromMillisecondsSinceEpoch(ms);
-    return '${t.hour.toString().padLeft(2, '0')}:${t.minute.toString().padLeft(2, '0')}';
-  }
+        );
+        if (mounted) await app.refresh();
+      },
+    ),
+  );
 
   Future<void> send(Json g) async {
     final body = draft.text.trim();
     if (body.isEmpty || sending) return;
-    String? title;
-    if (filter != 'Chat') {
-      title = await ask(
-        filter == 'Posts' ? 'New post' : 'New discussion',
-        'Title',
-      );
-      if (title == null) return;
-    }
-    final type =
-        filter == 'Chat'
-            ? 'm.room.message'
-            : 'cool.gravitas.river.${filter == 'Posts' ? 'post' : 'discussion'}.v1';
+    const type = 'm.room.message';
     final content = <String, dynamic>{
       'body': body,
-      if (type == 'm.room.message') 'msgtype': 'm.text',
-      if (title != null) ...{'title': title, 'version': 1},
-      if (reply != null)
-        'm.relates_to': {
-          'm.in_reply_to': {'event_id': reply},
-        },
-      'cool.gravitas.river': {
-        'version': 1,
-        'kind':
-            reply != null
-                ? 'reply'
-                : filter == 'Chat'
-                ? 'message'
-                : filter == 'Posts'
-                ? 'post'
-                : 'discussion',
-      },
+      'msgtype': 'm.text',
+      'cool.gravitas.river': {'version': 1, 'kind': 'message'},
     };
     setState(() => sending = true);
     final payload = jsonEncode(content);
@@ -1202,7 +1093,6 @@ class _RiverShellState extends State<RiverShell> {
       await app.send(g['id'] as String, type, content, retryTxn!);
       if (mounted && app.selected == g['id'] && draft.text.trim() == body) {
         draft.clear();
-        reply = null;
         retryTxn = null;
       }
     } catch (e) {
