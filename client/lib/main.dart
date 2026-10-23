@@ -94,11 +94,45 @@ class _RiverShellState extends State<RiverShell> {
   RiverApi get app => widget.app;
   String section = 'Home', filter = 'Chat';
   final draft = TextEditingController();
+  final timeline = ScrollController();
+  String? renderedList, renderedLast;
+  bool newMessages = false;
+  @override
+  void initState() {
+    super.initState();
+    timeline.addListener(scrolled);
+  }
+
+  void scrolled() {
+    if (timeline.hasClients && timeline.position.extentAfter < 60) {
+      if (newMessages) setState(() => newMessages = false);
+      markVisibleRead();
+    }
+  }
+
+  void markVisibleRead() {
+    if (!app.active || !(ModalRoute.of(context)?.isCurrent ?? true)) return;
+    final id = app.selected,
+        event = app.events.lastOrNull?['event_id'] as String?;
+    if (id != null && event != null) {
+      unawaited(action(() => app.markRead(id, event)));
+    }
+  }
+
+  void scrollLatest(String id) {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || app.selected != id || !timeline.hasClients) return;
+      timeline.jumpTo(timeline.position.maxScrollExtent);
+      markVisibleRead();
+    });
+  }
+
   String? reply, retryTxn, retryPayload;
   final scaffold = GlobalKey<ScaffoldState>();
   bool sending = false;
   @override
   void dispose() {
+    timeline.dispose();
     draft.dispose();
     super.dispose();
   }
@@ -175,6 +209,8 @@ class _RiverShellState extends State<RiverShell> {
         setState(() {
           section = 'Home';
           filter = 'Chat';
+          reply = null;
+          draft.clear();
         });
       }
     }
@@ -709,6 +745,22 @@ class _RiverShellState extends State<RiverShell> {
                           'cool.gravitas.river.${viewFilter == 'Posts' ? 'post' : 'discussion'}.v1',
             )
             .toList();
+    final listKey = '${g['id']}:$viewFilter';
+    final last = items.lastOrNull?['event_id'] as String?;
+    if (renderedList != listKey || renderedLast != last) {
+      final stick =
+          renderedList != listKey ||
+          !timeline.hasClients ||
+          timeline.position.extentAfter < 100;
+      renderedList = listKey;
+      renderedLast = last;
+      if (stick) {
+        newMessages = false;
+        scrollLatest(g['id'] as String);
+      } else {
+        newMessages = true;
+      }
+    }
     return Column(
       children: [
         Container(
@@ -761,6 +813,13 @@ class _RiverShellState extends State<RiverShell> {
                                 name,
                                 v == 'channel' ? 'text' : 'drop_in',
                               );
+                              if (mounted) {
+                                setState(() {
+                                  filter = 'Chat';
+                                  reply = null;
+                                  draft.clear();
+                                });
+                              }
                             }
                           }
                           if (v == 'members') {
@@ -883,6 +942,15 @@ class _RiverShellState extends State<RiverShell> {
             ],
           ),
         ),
+        if (newMessages)
+          TextButton.icon(
+            onPressed: () {
+              setState(() => newMessages = false);
+              scrollLatest(g['id'] as String);
+            },
+            icon: const Icon(Icons.arrow_downward, size: 16),
+            label: const Text('New messages'),
+          ),
         if (app.nextCursor != null)
           TextButton.icon(
             onPressed: app.loadingOlder ? null : () => action(app.older),
@@ -911,6 +979,7 @@ class _RiverShellState extends State<RiverShell> {
                     ),
                   )
                   : ListView.builder(
+                    controller: timeline,
                     padding: const EdgeInsets.all(20),
                     itemCount: items.length,
                     itemBuilder: (context, index) => eventCard(items[index], g),

@@ -189,10 +189,12 @@ class RiverApi extends ChangeNotifier {
         if (account == user?['sub'] && selectedId == selected) {
           final latest = (data['events'] as List).cast<Json>();
           final initial = events.isEmpty;
+          final overlap = latest.any(
+            (e) => events.any((old) => old['event_id'] == e['event_id']),
+          );
           _mergeEvents(latest);
-          if (initial) nextCursor = data['next_cursor'] as String?;
-          if (active && latest.isNotEmpty) {
-            await markRead(selectedId, latest.last['event_id'] as String);
+          if (initial || (!overlap && latest.isNotEmpty)) {
+            nextCursor = data['next_cursor'] as String?;
           }
         }
       }
@@ -344,14 +346,25 @@ class RiverApi extends ChangeNotifier {
 
   Future<void> markRead(String room, String event) async {
     if (_read[room] == event) return;
-    await request(
-      '/api/groups/$room/read',
-      method: 'POST',
-      body: {'event_id': event},
-    );
+    final account = user?['sub'];
     _read[room] = event;
-    for (final g in groups.where((g) => g['id'] == room)) {
-      g['unread_count'] = 0;
+    try {
+      await request(
+        '/api/groups/$room/read',
+        method: 'POST',
+        body: {'event_id': event},
+      );
+      if (account == user?['sub'] &&
+          selected == room &&
+          events.lastOrNull?['event_id'] == event) {
+        for (final g in groups.where((g) => g['id'] == room)) {
+          g['unread_count'] = 0;
+        }
+        notifyListeners();
+      }
+    } catch (_) {
+      if (_read[room] == event) _read.remove(room);
+      rethrow;
     }
   }
 
