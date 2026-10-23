@@ -209,7 +209,8 @@ class _RiverShellState extends State<RiverShell> {
         setState(() {
           section = 'Home';
           filter = 'Chat';
-          reply = null; draft.clear();
+          reply = null;
+          draft.clear();
         });
       }
     }
@@ -812,7 +813,13 @@ class _RiverShellState extends State<RiverShell> {
                                 name,
                                 v == 'channel' ? 'text' : 'drop_in',
                               );
-                              if (mounted) setState(() { filter = 'Chat'; reply = null; draft.clear(); });
+                              if (mounted) {
+                                setState(() {
+                                  filter = 'Chat';
+                                  reply = null;
+                                  draft.clear();
+                                });
+                              }
                             }
                           }
                           if (v == 'members') {
