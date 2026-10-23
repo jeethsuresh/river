@@ -32,7 +32,8 @@ void main() {
       );
       await tester.tap(find.text('Continue'));
       await tester.pumpAndSettle();
-      await until(find.text('Chat'));
+      await until(find.byTooltip('Send'));
+      expect(find.text('lobby'), findsWidgets);
       await tester.enterText(
         find.byType(TextField).last,
         'Android renderer to Gravitas round trip',

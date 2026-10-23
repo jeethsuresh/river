@@ -319,4 +319,44 @@ void main() {
       api.dispose();
     },
   );
+  testWidgets(
+    'timeline opens at latest and new arrivals preserve an older scroll position',
+    (tester) async {
+      await tester.binding.setSurfaceSize(const Size(390, 900));
+      final reads = <String>[];
+      final api =
+          RiverApi(
+              client: MockClient((r) async {
+                if (r.url.path.endsWith('/read')) {
+                  reads.add((jsonDecode(r.body) as Json)['event_id'] as String);
+                }
+                return response({'ok': true});
+              }),
+            )
+            ..user = alice
+            ..loading = false
+            ..groups = [room(childId, 'plans', kind: 'channel', parent: rootId)]
+            ..selected = childId;
+      api.events = List.generate(30, (i) => event('m$i', 'Message $i', i));
+      await tester.pumpWidget(RiverApp(api: api, boot: false));
+      await tester.pumpAndSettle();
+      expect(find.text('Message 29'), findsOneWidget);
+      expect(reads.last, 'm29');
+      await tester.drag(find.byType(ListView).last, const Offset(0, 650));
+      await tester.pumpAndSettle();
+      final before = reads.length;
+      api.events = [...api.events, event('newest', 'Newest arrival', 31)];
+      api.notifyListeners();
+      await tester.pumpAndSettle();
+      expect(find.text('New messages'), findsOneWidget);
+      expect(reads.length, before);
+      await tester.tap(find.text('New messages'));
+      await tester.pumpAndSettle();
+      expect(find.text('Newest arrival'), findsOneWidget);
+      expect(reads.last, 'newest');
+      expect(tester.takeException(), isNull);
+      await tester.pumpWidget(const SizedBox());
+      await tester.binding.setSurfaceSize(null);
+    },
+  );
 }
