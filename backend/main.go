@@ -38,7 +38,7 @@ type server struct {
 var uuidPattern = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)
 var txnPattern = regexp.MustCompile(`^[a-zA-Z0-9_-]{1,128}$`)
 
-const scopes = "profile.name chats.list chats.read chats.write groups.create groups.manage"
+const scopes = "profile.name chats.list chats.read chats.write groups.create groups.manage groups.join spaces.channels friends.read friends.manage"
 
 func env(k, def string) string {
 	if v := os.Getenv(k); v != "" {
@@ -219,6 +219,18 @@ func (s *server) session(r *http.Request) (gravitas.AppSession, error) {
 }
 func proxyRoute(r *http.Request) (string, bool) {
 	parts := strings.Split(strings.Trim(r.URL.Path, "/"), "/")
+	if r.URL.Path == "/api/overview" && r.Method == "GET" {
+		return "/app/v1/overview", true
+	}
+	if r.URL.Path == "/api/friends" && (r.Method == "GET" || r.Method == "POST") {
+		return "/app/v1/friends", true
+	}
+	if r.URL.Path == "/api/friends/events" && r.Method == "GET" {
+		return "/app/v1/friends/events", true
+	}
+	if r.URL.Path == "/api/direct" && r.Method == "POST" {
+		return "/app/v1/direct", true
+	}
 	if len(parts) == 2 && parts[0] == "api" && parts[1] == "groups" && (r.Method == "GET" || r.Method == "POST") {
 		return "/app/v1/groups", true
 	}
@@ -230,6 +242,12 @@ func proxyRoute(r *http.Request) (string, bool) {
 	}
 	if len(parts) == 4 && parts[3] == "membership" && r.Method == "POST" {
 		return "/app/v1/groups/" + parts[2] + "/membership", true
+	}
+	if len(parts) == 4 && parts[3] == "channels" && (r.Method == "GET" || r.Method == "POST") {
+		return "/app/v1/groups/" + parts[2] + "/channels", true
+	}
+	if len(parts) == 4 && parts[3] == "read" && r.Method == "POST" {
+		return "/app/v1/groups/" + parts[2] + "/read", true
 	}
 	if len(parts) == 4 && parts[3] == "events" && r.Method == "GET" {
 		return "/app/v1/groups/" + parts[2] + "/events", true
@@ -249,8 +267,10 @@ func (s *server) proxy(w http.ResponseWriter, r *http.Request, token, upstream s
 		return
 	}
 	q := url.Values{}
-	if limit := r.URL.Query().Get("limit"); limit != "" {
-		q.Set("limit", limit)
+	for _, key := range []string{"limit", "before"} {
+		if value := r.URL.Query().Get(key); value != "" {
+			q.Set(key, value)
+		}
 	}
 	req, err := http.NewRequestWithContext(r.Context(), r.Method, s.auth.Issuer+upstream+"?"+q.Encode(), bytes.NewReader(raw))
 	if err != nil {

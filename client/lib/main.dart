@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'api.dart';
+import 'friends_view.dart';
 
 void main() {
   runApp(const RiverApp());
@@ -187,6 +188,18 @@ class _RiverShellState extends State<RiverShell> {
         final wide = box.maxWidth >= 1000;
         final body = Column(
           children: [
+            if (app.friendsStatus == 403)
+              MaterialBanner(
+                content: const Text(
+                  'Reconnect with Gravitas to enable friends and channel access.',
+                ),
+                actions: [
+                  TextButton(
+                    onPressed: () => action(app.login),
+                    child: const Text('Reconnect'),
+                  ),
+                ],
+              ),
             if (app.error != null)
               MaterialBanner(
                 content: Text(app.error!),
@@ -202,12 +215,22 @@ class _RiverShellState extends State<RiverShell> {
                   group != null
                       ? groupView(group)
                       : section == 'Friends'
-                      ? friends()
+                      ? FriendsView(
+                        app: app,
+                        onConversation:
+                            () => setState(() {
+                              section = 'Home';
+                              filter = 'Chat';
+                              reply = null;
+                              draft.clear();
+                            }),
+                      )
                       : home(),
             ),
           ],
         );
         return Scaffold(
+          key: scaffold,
           appBar:
               wide
                   ? null
@@ -334,10 +357,12 @@ class _RiverShellState extends State<RiverShell> {
             selectedColor: blue,
             leading: Icon(entry.$2),
             title: Text(entry.$1),
+            trailing:
+                entry.$1 == 'Friends' && app.incomingRequests > 0
+                    ? Badge(label: Text('${app.incomingRequests}'))
+                    : null,
             onTap: () {
-              if (Scaffold.maybeOf(context)?.isDrawerOpen ?? false) {
-                Navigator.pop(context);
-              }
+              scaffold.currentState?.closeDrawer();
               setState(() => section = entry.$1);
               unawaited(app.open(null));
             },
@@ -365,7 +390,10 @@ class _RiverShellState extends State<RiverShell> {
                   ),
                 ),
                 for (final g in app.groups.where(
-                  (g) => (kind == 'dm' ? g['kind'] == 'dm' : g['kind'] != 'dm'),
+                  (g) =>
+                      (kind == 'dm'
+                          ? g['kind'] == 'dm'
+                          : g['kind'] != 'dm' && g['kind'] != 'channel'),
                 ))
                   ListTile(
                     selected: app.selected == g['id'],
@@ -385,8 +413,41 @@ class _RiverShellState extends State<RiverShell> {
                         g['membership'] == 'invite'
                             ? const Text('Invitation')
                             : null,
+                    trailing:
+                        (g['unread_count'] as int? ?? 0) > 0
+                            ? Badge(label: Text('${g['unread_count']}'))
+                            : null,
                     onTap: () => open(g['id'] as String),
                   ),
+                if (kind == 'space')
+                  for (final g in app.spaces)
+                    for (final channel in app.channels(g['id'] as String))
+                      ListTile(
+                        dense: true,
+                        contentPadding: const EdgeInsets.only(
+                          left: 42,
+                          right: 20,
+                        ),
+                        selected: app.selected == channel['id'],
+                        leading: Icon(
+                          channel['channel_kind'] == 'drop_in'
+                              ? Icons.headphones_outlined
+                              : Icons.tag,
+                          size: 17,
+                        ),
+                        title: Text(
+                          '${g['name']} / ${channel['name']}',
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(fontSize: 12),
+                        ),
+                        trailing:
+                            (channel['unread_count'] as int? ?? 0) > 0
+                                ? Badge(
+                                  label: Text('${channel['unread_count']}'),
+                                )
+                                : null,
+                        onTap: () => open(channel['id'] as String),
+                      ),
               ],
             ],
           ),
@@ -522,7 +583,9 @@ class _RiverShellState extends State<RiverShell> {
                 empty(
                   'Bring your people together. Create your first space or conversation.',
                 ),
-              for (final g in app.groups.take(12))
+              for (final g in app.groups
+                  .where((g) => g['kind'] != 'channel')
+                  .take(12))
                 ListTile(
                   contentPadding: EdgeInsets.zero,
                   leading: Icon(
@@ -548,30 +611,62 @@ class _RiverShellState extends State<RiverShell> {
           ],
         ),
   );
-  Widget friends() => ListView(
-    padding: const EdgeInsets.all(32),
-    children: [
-      const Text(
-        'Your people',
-        style: TextStyle(fontSize: 32, fontWeight: FontWeight.w800),
-      ),
-      const SizedBox(height: 16),
-      panel('People in your groups', Icons.people_outline, [
-        empty(
-          'These are your group members. Friend requests and a separate friends list are planned.',
-        ),
-        for (final person in {
-          for (final g in app.groups)
-            for (final m in (g['members'] as List))
-              (m as Json)['username'] as String,
-        }.where((name) => name != app.user?['username']))
-          ListTile(
-            leading: const CircleAvatar(child: Icon(Icons.person_outline)),
-            title: Text(person),
+  Future<void> members(Json g) async {
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      builder:
+          (ctx) => SafeArea(
+            child: SizedBox(
+              height: MediaQuery.sizeOf(ctx).height * .65,
+              child: ListView(
+                padding: const EdgeInsets.all(24),
+                children: [
+                  Text(
+                    '${g['name']} · Members',
+                    style: const TextStyle(
+                      fontSize: 22,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                  if (g['kind'] == 'channel')
+                    const Padding(
+                      padding: EdgeInsets.symmetric(vertical: 12),
+                      child: Text('Channel members are managed by the space.'),
+                    ),
+                  for (final m in (g['members'] as List).cast<Json>())
+                    ListTile(
+                      leading: const CircleAvatar(
+                        child: Icon(Icons.person_outline),
+                      ),
+                      title: Text(m['username'] as String),
+                      trailing:
+                          g['owner'] == true &&
+                                  g['kind'] != 'channel' &&
+                                  m['principal_id'] != app.user?['sub']
+                              ? IconButton(
+                                tooltip: 'Remove ${m['username']}',
+                                icon: const Icon(Icons.person_remove_outlined),
+                                onPressed: () {
+                                  Navigator.pop(ctx);
+                                  action(
+                                    () => app.membership(
+                                      g['id'] as String,
+                                      'remove',
+                                      app.userId(m['username'] as String),
+                                    ),
+                                  );
+                                },
+                              )
+                              : null,
+                    ),
+                ],
+              ),
+            ),
           ),
-      ]),
-    ],
-  );
+    );
+  }
+
   Widget groupView(Json g) {
     if (g['membership'] == 'invite') {
       return Center(
@@ -608,14 +703,15 @@ class _RiverShellState extends State<RiverShell> {
         ),
       );
     }
+    final viewFilter = g['kind'] == 'channel' ? 'Chat' : filter;
     final items =
         app.events
             .where(
               (e) =>
-                  filter == 'Chat'
+                  viewFilter == 'Chat'
                       ? e['type'] == 'm.room.message'
                       : e['type'] ==
-                          'cool.gravitas.river.${filter == 'Posts' ? 'post' : 'discussion'}.v1',
+                          'cool.gravitas.river.${viewFilter == 'Posts' ? 'post' : 'discussion'}.v1',
             )
             .toList();
     return Column(
@@ -645,7 +741,11 @@ class _RiverShellState extends State<RiverShell> {
                           ),
                         ),
                         Text(
-                          '${g['kind'] == 'dm' ? 'Conversation' : 'Space'} · ${(g['members'] as List).length} members',
+                          '${g['kind'] == 'dm'
+                              ? 'Conversation'
+                              : g['kind'] == 'channel'
+                              ? 'Channel'
+                              : 'Space'} · ${(g['members'] as List).length} members',
                           style: const TextStyle(color: muted, fontSize: 12),
                         ),
                       ],
@@ -655,6 +755,22 @@ class _RiverShellState extends State<RiverShell> {
                     tooltip: 'Group options',
                     onSelected:
                         (v) => action(() async {
+                          if (v == 'channel' || v == 'drop_in') {
+                            final name = await ask(
+                              'Create a channel',
+                              'Channel name',
+                            );
+                            if (name != null) {
+                              await app.createChannel(
+                                g['id'] as String,
+                                name,
+                                v == 'channel' ? 'text' : 'drop_in',
+                              );
+                            }
+                          }
+                          if (v == 'members') {
+                            await members(g);
+                          }
                           if (v == 'invite') {
                             final u = await ask(
                               'Invite a person',
@@ -685,7 +801,21 @@ class _RiverShellState extends State<RiverShell> {
                         }),
                     itemBuilder:
                         (_) => [
-                          if (g['owner'] == true)
+                          const PopupMenuItem(
+                            value: 'members',
+                            child: Text('Members'),
+                          ),
+                          if (g['kind'] == 'space' && g['owner'] == true) ...[
+                            const PopupMenuItem(
+                              value: 'channel',
+                              child: Text('New text channel'),
+                            ),
+                            const PopupMenuItem(
+                              value: 'drop_in',
+                              child: Text('New drop-in channel'),
+                            ),
+                          ],
+                          if (g['owner'] == true && g['kind'] != 'channel')
                             const PopupMenuItem(
                               value: 'invite',
                               child: Text('Invite member'),
@@ -695,40 +825,93 @@ class _RiverShellState extends State<RiverShell> {
                               value: 'rename',
                               child: Text('Rename'),
                             ),
-                          const PopupMenuItem(
-                            value: 'leave',
-                            child: Text('Leave group'),
-                          ),
+                          if (g['kind'] != 'channel')
+                            const PopupMenuItem(
+                              value: 'leave',
+                              child: Text('Leave group'),
+                            ),
                         ],
                   ),
                 ],
               ),
+              if (g['parent_id'] != null)
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: TextButton.icon(
+                    onPressed: () => open(g['parent_id'] as String),
+                    icon: const Icon(Icons.grid_view_outlined, size: 16),
+                    label: const Text('Back to space'),
+                  ),
+                ),
+              if (g['kind'] == 'space' &&
+                  app.channels(g['id'] as String).isNotEmpty)
+                SizedBox(
+                  height: 44,
+                  child: ListView(
+                    scrollDirection: Axis.horizontal,
+                    children: [
+                      for (final c in app.channels(g['id'] as String))
+                        Padding(
+                          padding: const EdgeInsets.only(right: 8),
+                          child: ActionChip(
+                            avatar: Icon(
+                              c['channel_kind'] == 'drop_in'
+                                  ? Icons.headphones_outlined
+                                  : Icons.tag,
+                              size: 16,
+                            ),
+                            label: Text(c['name'] as String),
+                            onPressed: () => open(c['id'] as String),
+                          ),
+                        ),
+                    ],
+                  ),
+                ),
               const SizedBox(height: 12),
-              SegmentedButton<String>(
-                segments: const [
-                  ButtonSegment(
-                    value: 'Chat',
-                    label: Text('Chat'),
-                    icon: Icon(Icons.tag),
-                  ),
-                  ButtonSegment(
-                    value: 'Discussions',
-                    label: Text('Discussions'),
-                  ),
-                  ButtonSegment(value: 'Posts', label: Text('Posts')),
-                ],
-                selected: {filter},
-                onSelectionChanged: (v) => setState(() => filter = v.first),
-              ),
+              if (g['kind'] != 'channel')
+                SegmentedButton<String>(
+                  segments: const [
+                    ButtonSegment(
+                      value: 'Chat',
+                      label: Text('Chat'),
+                      icon: Icon(Icons.tag),
+                    ),
+                    ButtonSegment(
+                      value: 'Discussions',
+                      label: Text('Discussions'),
+                    ),
+                    ButtonSegment(value: 'Posts', label: Text('Posts')),
+                  ],
+                  selected: {filter},
+                  onSelectionChanged: (v) => setState(() => filter = v.first),
+                ),
             ],
           ),
         ),
+        if (app.nextCursor != null)
+          TextButton.icon(
+            onPressed: app.loadingOlder ? null : () => action(app.older),
+            icon: const Icon(Icons.history, size: 16),
+            label: Text(
+              app.loadingOlder ? 'Loading…' : 'Load earlier messages',
+            ),
+          ),
+        if (g['channel_kind'] == 'drop_in')
+          Padding(
+            padding: const EdgeInsets.all(12),
+            child: Text(
+              'This drop-in room has its own chat. Voice and video are not enabled yet.',
+              style: TextStyle(
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
+              ),
+            ),
+          ),
         Expanded(
           child:
               items.isEmpty
                   ? Center(
                     child: Text(
-                      'Start the ${filter == 'Chat' ? 'conversation' : filter.toLowerCase()}.',
+                      'Start the ${viewFilter == 'Chat' ? 'conversation' : viewFilter.toLowerCase()}.',
                       style: const TextStyle(color: muted),
                     ),
                   )
@@ -769,9 +952,9 @@ class _RiverShellState extends State<RiverShell> {
                         maxLength: 16000,
                         decoration: InputDecoration(
                           hintText:
-                              filter == 'Chat'
+                              viewFilter == 'Chat'
                                   ? 'Message ${g['name']}…'
-                                  : 'Write ${filter == 'Posts' ? 'a post' : 'a discussion'}…',
+                                  : 'Write ${viewFilter == 'Posts' ? 'a post' : 'a discussion'}…',
                           counterText: '',
                         ),
                       ),
@@ -953,9 +1136,11 @@ class _RiverShellState extends State<RiverShell> {
     retryTxn ??= transactionId();
     try {
       await app.send(g['id'] as String, type, content, retryTxn!);
-      draft.clear();
-      reply = null;
-      retryTxn = null;
+      if (mounted && app.selected == g['id'] && draft.text.trim() == body) {
+        draft.clear();
+        reply = null;
+        retryTxn = null;
+      }
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(

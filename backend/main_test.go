@@ -212,3 +212,36 @@ func TestNativeBrowserHandoffReturnsToConfirmation(t *testing.T) {
 		t.Fatal("confirmation page unavailable", confirmed.Code)
 	}
 }
+
+func TestChannelAndFriendRelayRoutes(t *testing.T) {
+	id := "11111111-1111-4111-8111-111111111111"
+	for _, c := range []struct{ method, path, upstream string }{
+		{"GET", "/api/overview", "/app/v1/overview"},
+		{"GET", "/api/friends", "/app/v1/friends"},
+		{"POST", "/api/friends", "/app/v1/friends"},
+		{"GET", "/api/friends/events", "/app/v1/friends/events"},
+		{"POST", "/api/direct", "/app/v1/direct"},
+		{"GET", "/api/groups/" + id + "/channels", "/app/v1/groups/" + id + "/channels"},
+		{"POST", "/api/groups/" + id + "/channels", "/app/v1/groups/" + id + "/channels"},
+		{"POST", "/api/groups/" + id + "/read", "/app/v1/groups/" + id + "/read"},
+	} {
+		r := httptest.NewRequest(c.method, "https://chat.gravitas.cool"+c.path, nil)
+		upstream, ok := proxyRoute(r)
+		if !ok || upstream != c.upstream {
+			t.Fatalf("route %s %s: %q %v", c.method, c.path, upstream, ok)
+		}
+		for _, badMethod := range []string{"DELETE", "TRACE", "PATCH"} {
+			r.Method = badMethod
+			if _, ok := proxyRoute(r); ok {
+				t.Fatalf("unexpected method %s on %s", badMethod, c.path)
+			}
+		}
+	}
+	s, token, revoked, _ := fixture(t)
+	*revoked = true
+	for _, p := range []string{"/api/overview", "/api/friends", "/api/friends/events", "/api/groups/" + id + "/channels"} {
+		if w := request(s, "GET", p, "", token); w.Code != 401 {
+			t.Fatalf("revoked session reached %s: %d", p, w.Code)
+		}
+	}
+}
