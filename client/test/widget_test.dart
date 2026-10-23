@@ -77,4 +77,39 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('Private unsent draft'), findsNothing);
   });
+  testWidgets('account changes dismiss private member sheets and dialogs', (
+    tester,
+  ) async {
+    final api =
+        RiverApi()
+          ..loading = false
+          ..user = {'sub': 'alice', 'username': 'alice'};
+    api.groups = [
+      {
+        'id': 'one',
+        'name': 'Private space',
+        'kind': 'space',
+        'membership': 'join',
+        'owner': true,
+        'members': <Json>[
+          {'username': 'private-member', 'principal_id': 'member'},
+        ],
+      },
+    ];
+    api.selected = 'one';
+    await tester.pumpWidget(RiverApp(api: api, boot: false));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byTooltip('Group options'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Members'));
+    await tester.pumpAndSettle();
+    expect(find.text('private-member'), findsOneWidget);
+    api.user = {'sub': 'bob', 'username': 'bob'};
+    api.groups = [];
+    api.selected = null;
+    api.notifyListeners();
+    await tester.pumpAndSettle();
+    expect(find.text('private-member'), findsNothing);
+    expect(find.text('Welcome to your river, bob.'), findsOneWidget);
+  });
 }
