@@ -20,10 +20,10 @@ func (s *server) live(w http.ResponseWriter, r *http.Request, session gravitas.A
 	}
 	ctx, cancel := context.WithDeadline(r.Context(), session.ExpiresAt)
 	defer cancel()
-	req, _ := http.NewRequestWithContext(ctx, "GET", s.auth.Issuer+"/app/v1/live", nil)
+	req, _ := http.NewRequestWithContext(ctx, "GET", s.upstream(ctx).Issuer+"/app/v1/live", nil)
 	req.Header.Set("Authorization", "Bearer "+session.LocalToken)
 	req.Header.Set("Accept", "text/event-stream")
-	client := *s.auth.HTTP
+	client := *s.upstream(ctx).HTTP
 	client.Timeout = 0
 	resp, err := client.Do(req)
 	if err != nil {

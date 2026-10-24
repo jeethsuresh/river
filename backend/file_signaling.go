@@ -33,9 +33,9 @@ func fileSignalRoom(r *http.Request) string {
 	return ""
 }
 func (s *server) fileAllowed(ctx context.Context, token, room string) bool {
-	req, _ := http.NewRequestWithContext(ctx, "GET", s.auth.Issuer+"/app/v1/groups/"+room+"/files", nil)
+	req, _ := http.NewRequestWithContext(ctx, "GET", s.upstream(ctx).Issuer+"/app/v1/groups/"+room+"/files", nil)
 	req.Header.Set("Authorization", "Bearer "+token)
-	resp, err := s.auth.HTTP.Do(req)
+	resp, err := s.upstream(ctx).HTTP.Do(req)
 	if err != nil {
 		return false
 	}
@@ -56,6 +56,7 @@ func (s *server) fileSignal(w http.ResponseWriter, r *http.Request, session grav
 		fail(w, 403, "You cannot access files in this room")
 		return
 	}
+	room = session.Authorization.Issuer + "|" + room
 	origin, _ := url.Parse(s.auth.AppURL)
 	if value := r.Header.Get("Origin"); value != "" && value != origin.Scheme+"://"+origin.Host {
 		fail(w, 403, "Invalid origin")
@@ -76,7 +77,7 @@ func (s *server) fileSignal(w http.ResponseWriter, r *http.Request, session grav
 	}
 	hub := s.files
 	s.mu.Unlock()
-	peer := &signalPeer{id: random(), account: session.Authorization.Subject, room: room, out: make(chan []byte, 32), cancel: cancel}
+	peer := &signalPeer{id: random(), account: session.Authorization.Issuer + "|" + session.Authorization.Subject, room: room, out: make(chan []byte, 32), cancel: cancel}
 	hub.mu.Lock()
 	if hub.rooms[room] == nil {
 		hub.rooms[room] = make(map[string]*signalPeer)

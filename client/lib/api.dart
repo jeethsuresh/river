@@ -1,10 +1,12 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:math';
+
 import 'live_updates.dart';
 import 'calls.dart';
 import 'peer_files.dart';
 import 'file_models.dart' show FileScope;
+
 import 'package:crypto/crypto.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
@@ -53,8 +55,14 @@ class RiverApi extends ChangeNotifier {
   List<Json> activeCalls = [];
   final http.Client client;
   final storage = const FlutterSecureStorage();
+  String defaultDomain = const String.fromEnvironment(
+    'GRAVITAS_IDENTITY_DOMAIN',
+    defaultValue: 'gravitas.cool',
+  );
   String? token;
   Json? user;
+  String? get accountKey =>
+      user == null ? null : "${user?['issuer']}|${user?['sub']}";
   List<Json> groups = [],
       events = [],
       recent = [],
@@ -163,7 +171,7 @@ class RiverApi extends ChangeNotifier {
       kIsWeb ? Uri.base.resolve(path) : Uri.parse('$endpoint$path');
   Future<Json> request(String path, {String method = 'GET', Json? body}) async {
     final generation = _generation;
-    final account = user?['sub'];
+    final account = accountKey;
     final r = http.Request(method, uri(path));
     r.headers.addAll({
       'Content-Type': 'application/json',
@@ -175,7 +183,7 @@ class RiverApi extends ChangeNotifier {
         .send(r)
         .then(http.Response.fromStream)
         .timeout(const Duration(seconds: 20));
-    if (generation != _generation || account != user?['sub']) {
+    if (generation != _generation || account != accountKey) {
       throw ApiException(409, 'session_changed');
     }
     Json data;
@@ -197,17 +205,19 @@ class RiverApi extends ChangeNotifier {
   Future<void> boot() async {
     if (!kIsWeb) token = await storage.read(key: 'river_session');
     try {
+      final config = await request('/auth/gravitas/config');
+      if (config['defaultDomain'] is String) {
+        defaultDomain = config['defaultDomain'] as String;
+      }
+    } catch (_) {}
+    try {
       final data = await request('/api/session');
       final next = data['user'] as Json;
-      if (user?['sub'] != next['sub']) _clear();
+      if (accountKey != "${next['issuer']}|${next['sub']}") _clear();
       user = next;
       if (liveEnabled && files == null) {
-        final nextFiles = await PeerFiles.create(
-          this,
-          uri('/'),
-          next['sub'] as String,
-        );
-        if (user?['sub'] == next['sub']) {
+        final nextFiles = await PeerFiles.create(this, uri('/'), accountKey!);
+        if (accountKey == "${next['issuer']}|${next['sub']}") {
           files = nextFiles;
         } else {
           await nextFiles.close();
@@ -229,10 +239,10 @@ class RiverApi extends ChangeNotifier {
       return;
     }
     busy = true;
-    final account = user?['sub'];
+    final account = accountKey;
     try {
       final result = await request('/api/overview');
-      if (account != user?['sub']) return;
+      if (account != accountKey) return;
       groups = (result['groups'] as List).cast<Json>();
       await files?.setScopes([
         for (final g in groups.where((g) => g['membership'] == 'join'))
@@ -263,7 +273,7 @@ class RiverApi extends ChangeNotifier {
       }
       try {
         final social = await request('/api/friends');
-        if (account != user?['sub']) return;
+        if (account != accountKey) return;
         friends = (social['friends'] as List).cast<Json>();
         otherContacts = ((social['other_contacts'] as List?) ?? [])
             .cast<Json>();
@@ -272,7 +282,7 @@ class RiverApi extends ChangeNotifier {
         friendsError = null;
         friendsStatus = null;
       } on ApiException catch (e) {
-        if (account != user?['sub']) return;
+        if (account != accountKey) return;
         friendsError = '$e';
         friendsStatus = e.status;
         if (e.status == 403) {
@@ -288,7 +298,7 @@ class RiverApi extends ChangeNotifier {
             (g) => g['id'] == selectedId && g['membership'] == 'join',
           )) {
         final data = await request('/api/groups/$selectedId/events');
-        if (account == user?['sub'] && selectedId == selected) {
+        if (account == accountKey && selectedId == selected) {
           final latest = (data['events'] as List).cast<Json>();
           final initial = events.isEmpty;
           final overlap = latest.any(
@@ -329,11 +339,22 @@ class RiverApi extends ChangeNotifier {
     await refresh();
   }
 
-  Future<void> login({String? next}) async {
+  Future<void> login({
+    String? next,
+    String? username,
+    bool register = false,
+  }) async {
+    if (!register) username ??= user?['user_id'] as String?;
     if (kIsWeb) {
       await launchUrl(
         uri(
-          '/auth/gravitas/start${next == null ? '' : '?next=${Uri.encodeQueryComponent(next)}'}',
+          Uri(
+            path: register ? '/auth/gravitas/register' : '/auth/gravitas/start',
+            queryParameters: {
+              if (next != null) 'next': next,
+              if (username != null) 'username': username,
+            },
+          ).toString(),
         ),
         webOnlyWindowName: '_self',
       );
@@ -347,7 +368,11 @@ class RiverApi extends ChangeNotifier {
     final pair = await request(
       '/api/native/new',
       method: 'POST',
-      body: {'challenge': challenge},
+      body: {
+        'challenge': challenge,
+        if (username != null) 'username': username,
+        if (register) 'register': true,
+      },
     );
     pairingLabel = pair['label'] as String;
     notifyListeners();
@@ -438,7 +463,7 @@ class RiverApi extends ChangeNotifier {
   }
 
   Future<void> older() async {
-    final cursor = nextCursor, room = selected, account = user?['sub'];
+    final cursor = nextCursor, room = selected, account = accountKey;
     if (cursor == null || room == null || loadingOlder) return;
     loadingOlder = true;
     notifyListeners();
@@ -446,7 +471,7 @@ class RiverApi extends ChangeNotifier {
       final data = await request(
         '/api/groups/$room/events?before=${Uri.encodeQueryComponent(cursor)}',
       );
-      if (account == user?['sub'] && room == selected) {
+      if (account == accountKey && room == selected) {
         _mergeEvents((data['events'] as List).cast<Json>());
         nextCursor = data['next_cursor'] as String?;
       }
@@ -458,7 +483,7 @@ class RiverApi extends ChangeNotifier {
 
   Future<void> markRead(String room, String event) async {
     if (_read[room] == event) return;
-    final account = user?['sub'];
+    final account = accountKey;
     _read[room] = event;
     try {
       await request(
@@ -466,7 +491,7 @@ class RiverApi extends ChangeNotifier {
         method: 'POST',
         body: {'event_id': event},
       );
-      if (account == user?['sub'] &&
+      if (account == accountKey &&
           selected == room &&
           events.lastOrNull?['event_id'] == event) {
         for (final g in groups.where((g) => g['id'] == room)) {

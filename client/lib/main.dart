@@ -1,7 +1,10 @@
 import 'dart:async';
 import 'dart:convert';
+
 import 'package:flutter/material.dart';
+
 import 'api.dart';
+import 'username_login.dart';
 import 'publishing_widgets.dart';
 import 'friends_view.dart';
 import 'content_widgets.dart';
@@ -55,7 +58,7 @@ class _RiverAppState extends State<RiverApp> with WidgetsBindingObserver {
   Widget build(BuildContext context) => AnimatedBuilder(
     animation: app,
     builder: (_, _) => MaterialApp(
-      key: ValueKey(app.user?['sub']),
+      key: ValueKey(app.accountKey),
       title: 'River',
       localizationsDelegates: FlutterQuillLocalizations.localizationsDelegates,
       debugShowCheckedModeBanner: false,
@@ -84,7 +87,7 @@ class _RiverAppState extends State<RiverApp> with WidgetsBindingObserver {
       ),
       home: app.loading
           ? const Scaffold(body: Center(child: CircularProgressIndicator()))
-          : deepLink() ?? RiverShell(key: ValueKey(app.user?['sub']), app: app),
+          : deepLink() ?? RiverShell(key: ValueKey(app.accountKey), app: app),
     ),
   );
   Widget? deepLink() {
@@ -365,15 +368,11 @@ class _RiverShellState extends State<RiverShell> {
                 style: TextStyle(fontSize: 17, color: muted),
               ),
               const SizedBox(height: 32),
-              FilledButton.icon(
-                onPressed: app.pairingLabel == null
-                    ? () => action(app.login)
-                    : null,
-                icon: const Icon(Icons.arrow_forward),
-                label: const Padding(
-                  padding: EdgeInsets.all(12),
-                  child: Text('Continue with Gravitas'),
-                ),
+              UsernameLogin(
+                defaultDomain: app.defaultDomain,
+                onSubmit: (username) =>
+                    action(() => app.login(username: username)),
+                onRegister: () => action(() => app.login(register: true)),
               ),
               if (app.pairingLabel != null)
                 Padding(

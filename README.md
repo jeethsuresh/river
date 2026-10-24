@@ -216,3 +216,13 @@ Follow the main server's contacts contract in `jeethsuresh/iam-server/docs/conta
 River's permanent package/certificate are unchanged; the existing Private Store
 catalog can ingest a verified stable 0.3.0 release after manual release approval.
 Publish the stable APK after the matching API and web release is verified.
+
+### Username sign-in
+
+Sign in by entering your username and pressing **🔥** (or Enter). A bare name
+such as `alice` uses the identity server configured by `GRAVITAS_ISSUER`, which
+also owns the registration button. The Gravitas deployment uses `gravitas.cool`.
+`alice@example.org`, `alice:example.org` and `@alice:example.org` select that
+public domain's compatible IAM service over HTTPS. Registration always stays on
+the configured default server. Login transactions and app sessions retain the
+selected issuer, including subsequent session-revocation checks.

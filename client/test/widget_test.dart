@@ -46,7 +46,9 @@ void main() {
       final api = RiverApi()..loading = false;
       await tester.pumpWidget(RiverApp(api: api, boot: false));
       await tester.pumpAndSettle();
-      expect(find.text('Continue with Gravitas'), findsOneWidget);
+      expect(find.text('🔥'), findsOneWidget);
+      expect(find.widgetWithText(TextField, 'Username'), findsOneWidget);
+      expect(find.text('Register at gravitas.cool'), findsOneWidget);
       expect(
         find.textContaining(
           'Messages, ideas and calls, connected through Gravitas.',

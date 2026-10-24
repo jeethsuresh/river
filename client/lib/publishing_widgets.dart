@@ -1,3 +1,4 @@
+import 'username_login.dart';
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -300,11 +301,15 @@ class _PostScreenState extends State<PostScreen> {
                           ),
                         ),
                       if (widget.app.user == null)
-                        FilledButton(
-                          onPressed: () =>
-                              widget.app.login(next: postPath(widget.event)),
-                          child: const Text(
-                            'Sign in with Gravitas to join the conversation',
+                        UsernameLogin(
+                          defaultDomain: widget.app.defaultDomain,
+                          onSubmit: (username) => widget.app.login(
+                            username: username,
+                            next: postPath(widget.event),
+                          ),
+                          onRegister: () => widget.app.login(
+                            register: true,
+                            next: postPath(widget.event),
                           ),
                         ),
                     ] else if (!loading && error == null)
