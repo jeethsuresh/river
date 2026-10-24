@@ -131,3 +131,18 @@ real SSE/network concurrency and no credentials in Dart defines. Only the local
 bridge injects the real native envelopes; API/SSE/media responses come from
 production. Peer-file discovery is excluded from this journey and retains its
 separate transport coverage. This does not verify a physical signed-app login UI.
+
+### Bugs reproduced during the fresh run
+
+- Concurrent refreshes: an action requesting a refresh while an older read was
+  running returned immediately, leaving stale membership/channel state. A focused
+  failing regression now passes with queued callers awaiting their fresh read.
+- Live invalidations: River requested upstream SSE with an SSE-only Accept header.
+  Gravitas's JSON API negotiation rejected it (500), and River returned 503. The
+  broker now accepts SSE plus JSON errors and still requires a text/event-stream
+  response. The relay regression reproduces the rejection and verifies the fix.
+
+A diagnostic journey can explicitly disable only the SSE assertion with
+`RIVER_JOURNEY_REQUIRE_SSE=false` while the backend fix awaits rollout; it prints
+that deferral and uses explicit refresh. Such a run is not an SSE pass. Final
+verification must use the default true setting against the fixed deployment.

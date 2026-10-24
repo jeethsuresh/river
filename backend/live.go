@@ -22,7 +22,9 @@ func (s *server) live(w http.ResponseWriter, r *http.Request, session gravitas.A
 	defer cancel()
 	req, _ := http.NewRequestWithContext(ctx, "GET", s.upstream(ctx).Issuer+"/app/v1/live", nil)
 	req.Header.Set("Authorization", "Bearer "+session.LocalToken)
-	req.Header.Set("Accept", "text/event-stream")
+	// Gravitas negotiates its API's JSON format before the live controller
+	// starts SSE. Accept JSON errors as well, and still require an SSE response.
+	req.Header.Set("Accept", "text/event-stream, application/json;q=0.5")
 	client := *s.upstream(ctx).HTTP
 	client.Timeout = 0
 	resp, err := client.Do(req)

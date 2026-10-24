@@ -347,10 +347,21 @@ void productionJourneyScenarios() {
             'msgtype': 'm.text',
           }, transactionId()),
         );
-        await until(
-          () => liveChanges.isNotEmpty,
-          'production SSE invalidation missing',
+        const requireSse = bool.fromEnvironment(
+          'RIVER_JOURNEY_REQUIRE_SSE',
+          defaultValue: true,
         );
+        if (requireSse) {
+          await until(
+            () => liveChanges.isNotEmpty,
+            'production SSE invalidation missing',
+          );
+        } else {
+          debugPrint(
+            'JOURNEY NOTE [$runtime] SSE verification deferred until fixed backend deployment; explicit refresh used for this diagnostic run',
+          );
+          await io(b.refresh);
+        }
         await until(
           () =>
               (b.groups
@@ -373,7 +384,9 @@ void productionJourneyScenarios() {
         another.dispose();
         await sub.cancel();
         passed(
-          'real SSE invalidation and durable cross-session unread acknowledgement',
+          requireSse
+              ? 'real SSE invalidation and durable cross-session unread acknowledgement'
+              : 'durable cross-session unread acknowledgement (SSE assertion deferred)',
         );
         stage = 'visual post creation and authored edit';
         await dialog(EntryEditor(app: a, room: sid));
