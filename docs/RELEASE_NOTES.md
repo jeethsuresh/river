@@ -1,13 +1,20 @@
-River 0.4.0 brings Orbit's conversations, publishing, files and calling to the shared Flutter web and Android app.
+# River 0.5.0
 
-- Create separate channels, invite contacts to spaces, and start private or friend-selected group conversations.
-- See live activity and online friends, catch up on unread posts/discussions/channels, and return to recent participating threads.
-- Format messages, replies, posts and discussions with Markdown tools, keyboard shortcuts and previews. Edit your posts and discussions.
-- Publish shareable posts and space blogs with independent member/public/disabled comment policies. Earlier member comments stay private.
-- Share files directly between connected peers, with verified local copies, progress, retry and retained-copy retrieval. Files have no cloud backup.
-- Join voice/video calls in conversations and drop-in rooms, share your screen, and use call-only chat, mute/deafen, speaker and camera controls.
-- Keep shared contacts, account consent and access decisions in Gravitas. Existing users must reconnect to approve calling/publication permissions.
+Complete the remaining gaps found against Orbit main f8abebc in the shared Flutter
+web and Android client:
 
-The matching Gravitas API migration and River web/backend must be rolled out before the new features are available. Calling additionally requires the configured SFU/TURN media service. Automatic GitHub deployments remain disabled.
+- Visual rich-text editing, Markdown and preview modes, undo/redo, safe link editing
+  and formatting shortcuts in messages, replies, posts, discussions and call chat.
+- Search conversations by name or member. Expand channel-specific recent threads,
+  collapse text/voice sections and see voice-room occupancy.
+- Separate unread posts, discussions, channel activity and conversations. Long posts
+  cannot crowd discussions out of Home, and opening entries clears their markers.
+- Keep published-post reactions and comment counts consistent between feed and
+  detail while preserving earlier member-only reactions in private event history.
+- Preserve permission errors when joining calls, with a direct Gravitas reconnect.
 
-Android 7.0 or newer is required by the updated Flutter runtime. Android uses River's existing package and permanent signing certificate. Physical-device Bluetooth, network handoff and large-call capacity have not been verified. Gravitas supplies a Matrix API subset, without federation or end-to-end encryption.
+Uses the same permanent Android signing certificate and minimum Android 7.0 (API
+24) as 0.4.0. Gravitas handles accounts; password recovery is deferred. Automatic
+GitHub deployments remain disabled. Physical-device Bluetooth/network handoff and
+large-call capacity are not claimed as verified. See docs/ORBIT_PARITY.md for the
+source audit and integration boundaries.

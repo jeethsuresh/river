@@ -7,6 +7,7 @@ import 'api.dart';
 import 'publishing_widgets.dart';
 import 'package:flutter/services.dart';
 import 'attachment_widgets.dart';
+import 'rich_composer.dart';
 
 const reactionEmojis = [
   '👍',
@@ -36,14 +37,25 @@ const reactionEmojis = [
 ];
 Json rendered(Json e) => (e['rendered_content'] ?? e['content']) as Json;
 
-Future<void> openContentLink(BuildContext context, String? value) async {
-  final uri = value == null ? null : Uri.tryParse(value);
-  if (uri == null ||
-      !['http', 'https'].contains(uri.scheme) ||
+Uri? contentLink(String? value) {
+  if (value == null || value.trim().isEmpty) return null;
+  final clean = value.trim();
+  if (clean.startsWith('//') || clean.contains('\\')) return null;
+  var uri = Uri.tryParse(clean);
+  if (uri == null) return null;
+  if (uri.scheme.isEmpty) uri = Uri.parse(RiverApi.endpoint).resolveUri(uri);
+  if (uri.scheme == 'mailto' && uri.path.isNotEmpty) return uri;
+  if (!['http', 'https'].contains(uri.scheme) ||
       uri.host.isEmpty ||
       uri.userInfo.isNotEmpty) {
-    return;
+    return null;
   }
+  return uri;
+}
+
+Future<void> openContentLink(BuildContext context, String? value) async {
+  final uri = contentLink(value);
+  if (uri == null) return;
   final opened = await launchUrl(uri, mode: LaunchMode.externalApplication);
   if (!opened && context.mounted) {
     ScaffoldMessenger.of(
@@ -238,12 +250,21 @@ class ContentCard extends StatelessWidget {
               ReactionBar(
                 summary: summary,
                 change: (emoji, active) async {
-                  await app.react(
-                    room,
-                    event['event_id'] as String,
-                    emoji,
-                    active,
-                  );
+                  if (event['type'] == 'cool.gravitas.river.post.v1') {
+                    await app.postReaction(
+                      event['event_id'] as String,
+                      emoji,
+                      active,
+                    );
+                    if (changed == null) await app.refresh();
+                  } else {
+                    await app.react(
+                      room,
+                      event['event_id'] as String,
+                      emoji,
+                      active,
+                    );
+                  }
                   await changed?.call();
                 },
               ),
@@ -330,7 +351,7 @@ class _EntryEditorState extends State<EntryEditor> {
       ? widget.kind == 'post'
       : widget.entry!['type'] == 'cool.gravitas.river.post.v1';
   String? createdEvent;
-  bool preview = false, busy = false;
+  bool busy = false;
   String? error, payload;
   String txn = transactionId();
   final form = GlobalKey<FormState>();
@@ -426,7 +447,6 @@ class _EntryEditorState extends State<EntryEditor> {
                   v?.trim().isNotEmpty == true ? null : 'Add a title.',
             ),
             const SizedBox(height: 12),
-            if (!preview) MarkdownToolbar(controller: body),
             if (isPost) ...[
               DropdownButtonFormField<String>(
                 isExpanded: true,
@@ -485,36 +505,19 @@ class _EntryEditorState extends State<EntryEditor> {
                 ),
               const SizedBox(height: 12),
             ],
-            if (preview)
-              Padding(
-                padding: const EdgeInsets.all(12),
-                child: RichBody(body.text),
-              )
-            else
-              MarkdownShortcuts(
-                controller: body,
-                onSubmit: save,
-                child: TextFormField(
-                  controller: body,
-                  minLines: 6,
-                  maxLines: 16,
-                  maxLength: 40000,
-                  decoration: const InputDecoration(
-                    labelText: 'Body',
-                    hintText:
-                        'Share an idea. Markdown formatting is supported.',
-                  ),
-                  validator: (v) => v?.trim().isNotEmpty == true
-                      ? null
-                      : 'Write something first.',
-                ),
-              ),
-            TextButton.icon(
-              onPressed: () => setState(() => preview = !preview),
-              icon: Icon(
-                preview ? Icons.edit_outlined : Icons.visibility_outlined,
-              ),
-              label: Text(preview ? 'Write' : 'Preview'),
+            RichComposer(
+              controller: body,
+              label: 'Body',
+              compact: false,
+              hint: 'Share an idea…',
+              maxLength: 40000,
+              minHeight: 140,
+              maxHeight: 320,
+              enabled: !busy,
+              onSubmit: save,
+              validator: (v) => v?.trim().isNotEmpty == true
+                  ? null
+                  : 'Write something first.',
             ),
             if (error != null)
               Semantics(
@@ -622,6 +625,14 @@ class _ThreadScreenState extends State<ThreadScreen> {
       );
       if (!mounted) return;
       final incoming = (result['events'] as List).cast<Json>();
+      if (!loaded &&
+          result['root']?['type'] == 'cool.gravitas.river.discussion.v1') {
+        unawaited(
+          widget.app
+              .readEntry(widget.room, result['root']['event_id'] as String)
+              .catchError((Object _) {}),
+        );
+      }
       final overlap = incoming.any(
         (e) => events.any((old) => old['event_id'] == e['event_id']),
       );
@@ -786,19 +797,11 @@ class _ThreadScreenState extends State<ThreadScreen> {
                     crossAxisAlignment: CrossAxisAlignment.end,
                     children: [
                       Expanded(
-                        child: MarkdownShortcuts(
+                        child: RichComposer(
                           controller: draft,
-                          onSubmit: send,
-                          child: TextField(
-                            controller: draft,
-                            minLines: 1,
-                            maxLines: 5,
-                            maxLength: 16000,
-                            decoration: const InputDecoration(
-                              hintText: 'Write a reply…',
-                              counterText: '',
-                            ),
-                          ),
+                          label: 'Reply',
+                          hint: 'Write a reply…',
+                          onSubmit: sending ? null : send,
                         ),
                       ),
                       const SizedBox(width: 10),
@@ -908,21 +911,24 @@ class _EntryFeedState extends State<EntryFeed> {
             room: widget.room,
             event: e,
             changed: load,
-            reply: () => Navigator.push<void>(
-              context,
-              MaterialPageRoute(
-                builder: (_) => widget.kind == 'post'
-                    ? PostScreen(
-                        app: widget.app,
-                        event: e['event_id'] as String,
-                      )
-                    : ThreadScreen(
-                        app: widget.app,
-                        room: widget.room,
-                        rootId: e['event_id'] as String,
-                      ),
-              ),
-            ),
+            reply: () async {
+              await Navigator.push<void>(
+                context,
+                MaterialPageRoute(
+                  builder: (_) => widget.kind == 'post'
+                      ? PostScreen(
+                          app: widget.app,
+                          event: e['event_id'] as String,
+                        )
+                      : ThreadScreen(
+                          app: widget.app,
+                          room: widget.room,
+                          rootId: e['event_id'] as String,
+                        ),
+                ),
+              );
+              if (mounted) await load();
+            },
           ),
         ),
       if (cursor != null)

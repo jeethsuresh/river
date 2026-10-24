@@ -150,6 +150,24 @@ Future<void> openRiverThread(
 class CatchUpPanel extends StatelessWidget {
   const CatchUpPanel({super.key, required this.app});
   final RiverApi app;
+  List<Json> unreadGroups(bool conversations) {
+    final items = app.groups
+        .where(
+          (g) =>
+              (g['unread_count'] as int? ?? 0) > 0 &&
+              (conversations
+                  ? ['dm', 'group'].contains(g['kind'])
+                  : g['kind'] == 'channel' && g['channel_kind'] == 'text'),
+        )
+        .toList();
+    items.sort(
+      (a, b) => (b['last_activity_at'] as int? ?? 0).compareTo(
+        a['last_activity_at'] as int? ?? 0,
+      ),
+    );
+    return items.take(20).toList();
+  }
+
   @override
   Widget build(BuildContext context) => Card(
     child: Padding(
@@ -164,28 +182,66 @@ class CatchUpPanel extends StatelessWidget {
               padding: EdgeInsets.symmetric(vertical: 16),
               child: Text('You’re all caught up.'),
             ),
-          for (final e in app.catchUp.take(12))
-            ListTile(
-              leading: Icon(
-                e['type'] == 'cool.gravitas.river.post.v1'
-                    ? Icons.article_outlined
-                    : Icons.forum_outlined,
+
+          for (final kind in ['post', 'discussion']) ...[
+            Padding(
+              padding: const EdgeInsets.only(top: 16),
+              child: Text(
+                'New ${kind == 'post' ? 'posts' : 'discussions'} from your spaces',
+                style: Theme.of(context).textTheme.titleSmall,
               ),
-              title: Text(rendered(e)['title'] as String? ?? 'Entry'),
-              subtitle: Text(e['sender'] as String),
-              onTap: () =>
-                  openRiverThread(context, app, e['group_id'] as String, e),
             ),
-          for (final g
-              in app.groups
-                  .where((g) => (g['unread_count'] as int? ?? 0) > 0)
-                  .take(12))
-            ListTile(
-              leading: const Icon(Icons.mark_chat_unread_outlined),
-              title: Text(g['name'] as String),
-              trailing: Badge(label: Text('${g['unread_count']}')),
-              onTap: () => app.open(g['id'] as String),
+            if (!app.catchUp.any(
+              (e) => e['type'] == 'cool.gravitas.river.$kind.v1',
+            ))
+              Text('No unread ${kind == 'post' ? 'posts' : 'discussions'}.'),
+            for (final e
+                in app.catchUp
+                    .where((e) => e['type'] == 'cool.gravitas.river.$kind.v1')
+                    .take(20))
+              ListTile(
+                leading: Icon(
+                  kind == 'post'
+                      ? Icons.article_outlined
+                      : Icons.forum_outlined,
+                ),
+                title: Text(rendered(e)['title'] as String? ?? 'Entry'),
+                subtitle: Text(
+                  '${e['group_name'] ?? ''} · ${e['sender']}\n${rendered(e)['body'] ?? ''}',
+                  maxLines: 3,
+                  overflow: TextOverflow.ellipsis,
+                ),
+                onTap: () =>
+                    openRiverThread(context, app, e['group_id'] as String, e),
+              ),
+          ],
+          for (final conversation in [false, true]) ...[
+            Padding(
+              padding: const EdgeInsets.only(top: 16),
+              child: Text(
+                conversation
+                    ? 'Unread conversations'
+                    : 'New activity in your channels',
+                style: Theme.of(context).textTheme.titleSmall,
+              ),
             ),
+            for (final g in unreadGroups(conversation))
+              ListTile(
+                leading: Icon(
+                  conversation ? Icons.mark_chat_unread_outlined : Icons.tag,
+                ),
+                title: Text(g['name'] as String),
+                subtitle: (g['unread_preview'] as String? ?? '').isEmpty
+                    ? null
+                    : Text(
+                        g['unread_preview'] as String,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                trailing: Badge(label: Text('${g['unread_count']}')),
+                onTap: () => app.open(g['id'] as String),
+              ),
+          ],
         ],
       ),
     ),
@@ -217,6 +273,12 @@ class AccountPanel extends StatelessWidget {
                 Uri.parse('https://gravitas.cool/settings'),
                 mode: LaunchMode.externalApplication,
               ),
+            ),
+            ListTile(
+              leading: const Icon(Icons.refresh),
+              title: const Text('Reconnect with Gravitas'),
+              subtitle: const Text('Approve new River permissions'),
+              onTap: app.login,
             ),
             ListTile(
               leading: const Icon(Icons.contacts_outlined),
@@ -299,6 +361,142 @@ class InvitationCard extends StatelessWidget {
           ],
         ),
       ),
+    );
+  }
+}
+
+bool conversationMatches(Json group, String query) =>
+    query.isEmpty ||
+    '${group['name']} ${(group['members'] as List?)?.map((p) => '${p['username']} ${p['user_id']}').join(' ') ?? ''}'
+        .toLowerCase()
+        .contains(query.toLowerCase());
+
+class SpaceChannels extends StatelessWidget {
+  const SpaceChannels({
+    super.key,
+    required this.app,
+    required this.space,
+    required this.open,
+    required this.thread,
+  });
+  final RiverApi app;
+  final String space;
+  final ValueChanged<String> open;
+  final ValueChanged<Json> thread;
+  @override
+  Widget build(BuildContext context) => Column(
+    children: [
+      for (final kind in ['text', 'drop_in'])
+        ExpansionTile(
+          key: PageStorageKey('$space:$kind'),
+          initiallyExpanded: true,
+          title: Text(
+            kind == 'text' ? 'Text channels' : 'Voice rooms',
+            style: const TextStyle(fontSize: 12),
+          ),
+          children: [
+            for (final channel
+                in app.channels(space).where((c) => c['channel_kind'] == kind))
+              _ChannelWithThreads(
+                app: app,
+                channel: channel,
+                open: open,
+                thread: thread,
+              ),
+          ],
+        ),
+    ],
+  );
+}
+
+class _ChannelWithThreads extends StatefulWidget {
+  const _ChannelWithThreads({
+    required this.app,
+    required this.channel,
+    required this.open,
+    required this.thread,
+  });
+  final RiverApi app;
+  final Json channel;
+  final ValueChanged<String> open;
+  final ValueChanged<Json> thread;
+  @override
+  State<_ChannelWithThreads> createState() => _ChannelWithThreadsState();
+}
+
+class _ChannelWithThreadsState extends State<_ChannelWithThreads> {
+  bool closed = false;
+  @override
+  Widget build(BuildContext context) {
+    final channel = widget.channel;
+    final threads = widget.app.threads
+        .where((t) => t['group_id'] == channel['id'])
+        .toList();
+    final calls = widget.app.activeCalls
+        .where((c) => c['group_id'] == channel['id'])
+        .toList();
+    final participants = calls
+        .expand((c) => (c['participants'] as List?) ?? [])
+        .length;
+    return Column(
+      children: [
+        ListTile(
+          dense: true,
+          selected: widget.app.selected == channel['id'],
+          contentPadding: const EdgeInsets.only(left: 36, right: 12),
+          leading: Icon(
+            channel['channel_kind'] == 'drop_in'
+                ? Icons.headphones_outlined
+                : Icons.tag,
+            size: 17,
+          ),
+          title: Text(
+            channel['name'] as String,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(fontSize: 13),
+          ),
+          subtitle: channel['channel_kind'] == 'drop_in'
+              ? Text(
+                  participants == 0
+                      ? 'Ready when you are'
+                      : '$participants ${participants == 1 ? 'person' : 'people'} here',
+                )
+              : null,
+          trailing: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              if ((channel['unread_count'] as int? ?? 0) > 0)
+                Badge(label: Text('${channel['unread_count']}')),
+              if (threads.isNotEmpty)
+                IconButton(
+                  tooltip:
+                      '${closed ? 'Expand' : 'Collapse'} replies in ${channel['name']}',
+                  onPressed: () => setState(() => closed = !closed),
+                  icon: Icon(
+                    closed ? Icons.chevron_right : Icons.expand_more,
+                    size: 18,
+                  ),
+                ),
+            ],
+          ),
+          onTap: () => widget.open(channel['id'] as String),
+        ),
+        if (!closed)
+          for (final event in threads)
+            ListTile(
+              dense: true,
+              contentPadding: const EdgeInsets.only(left: 55, right: 16),
+              leading: const Icon(Icons.reply, size: 15),
+              title: Text(
+                rendered(event)['body'] as String? ?? 'Thread',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(fontSize: 12),
+              ),
+              trailing: Text('${event['reply_count'] ?? 0}'),
+              onTap: () => widget.thread(event),
+            ),
+      ],
     );
   }
 }

@@ -38,10 +38,16 @@ Future<void> joinRiverCall(
         MaterialPageRoute(builder: (_) => RiverCallScreen(api: api)),
       );
     }
-  } catch (_) {
+  } catch (failure) {
     if (context.mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(api.calls.error ?? 'Unable to join the call.')),
+        SnackBar(
+          content: Text(api.calls.error ?? 'Unable to join the call.'),
+          action:
+              failure is ApiException && failure.code == 'insufficient_scope'
+              ? SnackBarAction(label: 'Reconnect', onPressed: api.login)
+              : null,
+        ),
       );
     }
   }

@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'api.dart';
 import 'content_widgets.dart';
+import 'rich_composer.dart';
 
 String postPath(String event) => '/posts/${Uri.encodeComponent(event)}';
 String postLink(String event) => '${RiverApi.endpoint}${postPath(event)}';
@@ -27,13 +28,26 @@ class _PostScreenState extends State<PostScreen> {
   @override
   void initState() {
     super.initState();
+    draft.addListener(captureAudience);
     unawaited(load());
     changes = widget.app.changes.stream.listen((_) => load());
+  }
+
+  void captureAudience() {
+    if (!mounted) return;
+    setState(() {
+      if (draft.text.isEmpty) {
+        draftAudience = null;
+      } else {
+        draftAudience ??= commentAudience;
+      }
+    });
   }
 
   @override
   void dispose() {
     changes?.cancel();
+    draft.removeListener(captureAudience);
     draft.dispose();
     super.dispose();
   }
@@ -48,6 +62,16 @@ class _PostScreenState extends State<PostScreen> {
       );
       if (!mounted) return;
       setState(() {
+        if (data == null && result['member'] == true) {
+          unawaited(
+            widget.app
+                .readEntry(
+                  (result['space'] as Json)['id'] as String,
+                  widget.event,
+                )
+                .catchError((Object _) {}),
+          );
+        }
         data = result;
         final all = {for (final c in comments) c['event_id']: c};
         for (final c in (result['comments'] as List).cast<Json>()) {
@@ -313,30 +337,14 @@ class _PostScreenState extends State<PostScreen> {
                           ),
                       ],
                     ),
-                    MarkdownToolbar(controller: draft),
                     Row(
                       crossAxisAlignment: CrossAxisAlignment.end,
                       children: [
                         Expanded(
-                          child: MarkdownShortcuts(
+                          child: RichComposer(
                             controller: draft,
-                            onSubmit: send,
-                            child: TextField(
-                              controller: draft,
-                              onChanged: (value) => setState(() {
-                                if (value.isEmpty) {
-                                  draftAudience = null;
-                                } else {
-                                  draftAudience ??= commentAudience;
-                                }
-                              }),
-                              minLines: 1,
-                              maxLines: 5,
-                              maxLength: 16000,
-                              decoration: const InputDecoration(
-                                labelText: 'Write a comment',
-                              ),
-                            ),
+                            label: 'Write a comment',
+                            onSubmit: sending ? null : send,
                           ),
                         ),
                         IconButton(

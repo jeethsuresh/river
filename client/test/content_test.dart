@@ -113,6 +113,8 @@ void main() {
         find.descendant(of: firstCard, matching: find.text('Reply')),
       );
       await tester.pumpAndSettle();
+      await tester.tap(find.text('Markdown').last);
+      await tester.pumpAndSettle();
       await tester.enterText(find.byType(TextField).last, 'Nested reply');
       await tester.tap(find.byTooltip('Send reply'));
       await tester.pumpAndSettle();
@@ -236,24 +238,29 @@ void main() {
           find.widgetWithText(TextFormField, 'Title'),
           'Changed title',
         );
+        await tester.ensureVisible(find.text('Markdown'));
+        await tester.tap(find.text('Markdown'));
+        await tester.pumpAndSettle();
         await tester.enterText(
-          find.widgetWithText(TextFormField, 'Body'),
+          find.widgetWithText(TextField, 'Body'),
           '**Formatted body**',
         );
+        await tester.ensureVisible(find.text('Preview'));
         await tester.tap(find.text('Preview'));
         await tester.pumpAndSettle();
         expect(find.byType(RichBody), findsOneWidget);
         await tester.tap(find.text('Save changes'));
         await tester.pumpAndSettle();
         expect(find.textContaining('Your draft is kept'), findsOneWidget);
-        await tester.tap(find.text('Write'));
+        await tester.ensureVisible(find.text('Markdown'));
+        await tester.tap(find.text('Markdown'));
         await tester.pumpAndSettle();
         expect(
           find.widgetWithText(TextFormField, 'Changed title'),
           findsOneWidget,
         );
         expect(
-          find.widgetWithText(TextFormField, '**Formatted body**'),
+          find.widgetWithText(TextField, '**Formatted body**'),
           findsOneWidget,
         );
         await tester.tap(find.text('Save changes'));

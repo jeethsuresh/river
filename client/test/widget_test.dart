@@ -74,7 +74,9 @@ void main() {
     api.selected = 'one';
     await tester.pumpWidget(RiverApp(api: api, boot: false));
     await tester.pumpAndSettle();
-    await tester.enterText(find.byType(TextField), 'Private unsent draft');
+    await tester.tap(find.text('Markdown'));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byType(TextField).last, 'Private unsent draft');
     api.user = {'username': 'Bob', 'sub': 'bob'};
     api.notifyListeners();
     await tester.pumpAndSettle();

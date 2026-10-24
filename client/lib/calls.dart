@@ -145,11 +145,12 @@ class RiverCalls extends ChangeNotifier {
         (_) => unawaited(beat()),
       );
       await api.refresh();
-    } catch (_) {
+    } catch (failure) {
       if (joiningEpoch != 0 && joiningEpoch != _epoch) return;
       await leave();
-      error =
-          'Could not join this call. Check microphone permission, your connection and River access, then try again.';
+      error = failure is ApiException
+          ? '$failure'
+          : 'Could not join this call. Check microphone permission, your connection and River access, then try again.';
       rethrow;
     } finally {
       busy = false;
