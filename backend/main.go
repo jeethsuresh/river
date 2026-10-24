@@ -2,9 +2,8 @@ package main
 
 import (
 	"bytes"
-	"crypto/hmac"
+	"context"
 	"crypto/rand"
-	"crypto/sha1"
 	"crypto/sha256"
 	"crypto/subtle"
 	"encoding/base64"
@@ -33,12 +32,14 @@ type server struct {
 	static string
 	mu     sync.Mutex
 	pairs  map[string]*pairing
+	files  *signalHub
 }
 
 var uuidPattern = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)
+var eventPattern = regexp.MustCompile(`^\$[a-zA-Z0-9_.:-]{1,511}$`)
 var txnPattern = regexp.MustCompile(`^[a-zA-Z0-9_-]{1,128}$`)
 
-const scopes = "profile.name chats.list chats.read chats.write groups.create groups.manage groups.join spaces.channels contacts.read contacts.manage"
+const scopes = "profile.name chats.list chats.read chats.write groups.create groups.manage groups.join spaces.channels contacts.read contacts.manage calls.read calls.join posts.publish"
 
 func env(k, def string) string {
 	if v := os.Getenv(k); v != "" {
@@ -53,6 +54,7 @@ func main() {
 	}
 	a.Scope = scopes
 	s := &server{auth: a, static: env("STATIC_DIR", "../client/build/web"), pairs: map[string]*pairing{}}
+	go s.rtcReaper(context.Background())
 	h := &http.Server{Addr: env("ADDR", ":8080"), Handler: s, ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 20 * time.Second, WriteTimeout: 30 * time.Second, IdleTimeout: 60 * time.Second, MaxHeaderBytes: 16 << 10}
 	log.Printf("River listening on %s", h.Addr)
 	log.Fatal(h.ListenAndServe())
@@ -147,6 +149,16 @@ func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		s.nativeSession(w, r)
 		return
 	}
+	if upstream, ok := publicRoute(r); ok {
+		token := ""
+		// Anonymous publication reads work independently of sign-in. A valid
+		// session additionally permits this account's private member comments.
+		if session, err := s.session(r); err == nil {
+			token = session.LocalToken
+		}
+		s.proxy(w, r, token, upstream)
+		return
+	}
 	if strings.HasPrefix(r.URL.Path, "/api/") {
 		session, err := s.session(r)
 		if err != nil {
@@ -161,7 +173,18 @@ func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			fail(w, 403, "Invalid request")
 			return
 		}
+		if room := rtcRoom(r); room != "" {
+			s.rtcUpdate(w, r, session, room)
+			return
+		}
+		if room := fileSignalRoom(r); room != "" {
+			s.fileSignal(w, r, session, room)
+			return
+		}
 		switch r.URL.Path {
+		case "/api/live":
+			s.live(w, r, session)
+			return
 		case "/api/session":
 			if r.Method != "GET" {
 				w.WriteHeader(405)
@@ -174,7 +197,7 @@ func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				w.WriteHeader(405)
 				return
 			}
-			s.rtc(w, session.Authorization.Subject)
+			s.rtc(w, r, session)
 			return
 		}
 		if upstream, ok := proxyRoute(r); ok {
@@ -198,6 +221,9 @@ func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if file == "" {
 		file = "index.html"
 	}
+	if publicPage(r.URL.Path) {
+		file = "index.html"
+	}
 	f, err := os.OpenRoot(s.static)
 	if err != nil {
 		http.NotFound(w, r)
@@ -217,8 +243,41 @@ func (s *server) session(r *http.Request) (gravitas.AppSession, error) {
 	}
 	return s.auth.AppSession(r, gravitas.SessionCookie)
 }
+func publicPage(p string) bool {
+	parts := strings.Split(strings.Trim(p, "/"), "/")
+	return len(parts) == 2 && parts[0] == "posts" && eventPattern.MatchString(parts[1]) || len(parts) == 3 && parts[0] == "spaces" && uuidPattern.MatchString(parts[1]) && parts[2] == "posts"
+}
+func publicRoute(r *http.Request) (string, bool) {
+	if r.Method != "GET" {
+		return "", false
+	}
+	p := strings.TrimPrefix(r.URL.Path, "/api/public")
+	if !strings.HasPrefix(r.URL.Path, "/api/public/") || !publicPage(p) {
+		return "", false
+	}
+	parts := strings.Split(strings.Trim(p, "/"), "/")
+	if len(parts) == 2 {
+		return "/public/v1/posts/" + url.PathEscape(parts[1]), true
+	}
+	return "/public/v1/spaces/" + parts[1] + "/posts", true
+}
 func proxyRoute(r *http.Request) (string, bool) {
 	parts := strings.Split(strings.Trim(r.URL.Path, "/"), "/")
+	if len(parts) == 4 && parts[0] == "api" && parts[1] == "posts" && eventPattern.MatchString(parts[2]) && (parts[3] == "comment" || parts[3] == "reactions") && r.Method == "POST" {
+		return "/app/v1/posts/" + url.PathEscape(parts[2]) + "/" + parts[3], true
+	}
+	if r.URL.Path == "/api/calls" && r.Method == "GET" {
+		return "/app/v1/calls", true
+	}
+	if r.URL.Path == "/api/home" && r.Method == "GET" {
+		return "/app/v1/home", true
+	}
+	if r.URL.Path == "/api/conversations" && r.Method == "POST" {
+		return "/app/v1/conversations", true
+	}
+	if r.URL.Path == "/api/presence" && r.Method == "GET" {
+		return "/app/v1/presence", true
+	}
 	if r.URL.Path == "/api/overview" && r.Method == "GET" {
 		return "/app/v1/overview", true
 	}
@@ -240,6 +299,18 @@ func proxyRoute(r *http.Request) (string, bool) {
 	if len(parts) == 3 && r.Method == "PATCH" {
 		return "/app/v1/groups/" + parts[2], true
 	}
+	if len(parts) == 4 && parts[3] == "publication" && r.Method == "POST" {
+		return "/app/v1/groups/" + parts[2] + "/publication", true
+	}
+	if len(parts) == 4 && parts[3] == "files" && r.Method == "GET" {
+		return "/app/v1/groups/" + parts[2] + "/files", true
+	}
+	if len(parts) == 4 && parts[3] == "invitations" && r.Method == "POST" {
+		return "/app/v1/groups/" + parts[2] + "/invitations", true
+	}
+	if len(parts) == 5 && parts[3] == "entry" && parts[4] == "read" && r.Method == "POST" {
+		return "/app/v1/groups/" + parts[2] + "/entry/read", true
+	}
 	if len(parts) == 4 && parts[3] == "membership" && r.Method == "POST" {
 		return "/app/v1/groups/" + parts[2] + "/membership", true
 	}
@@ -248,6 +319,9 @@ func proxyRoute(r *http.Request) (string, bool) {
 	}
 	if len(parts) == 4 && parts[3] == "read" && r.Method == "POST" {
 		return "/app/v1/groups/" + parts[2] + "/read", true
+	}
+	if len(parts) == 4 && parts[3] == "entries" && r.Method == "GET" {
+		return "/app/v1/groups/" + parts[2] + "/entries", true
 	}
 	if len(parts) == 4 && parts[3] == "thread" && r.Method == "GET" {
 		return "/app/v1/groups/" + parts[2] + "/thread", true
@@ -267,13 +341,13 @@ func proxyRoute(r *http.Request) (string, bool) {
 	return "", false
 }
 func (s *server) proxy(w http.ResponseWriter, r *http.Request, token, upstream string) {
-	raw, err := io.ReadAll(io.LimitReader(r.Body, 40001))
-	if err != nil || len(raw) > 40000 {
+	raw, err := io.ReadAll(io.LimitReader(r.Body, 300001))
+	if err != nil || len(raw) > 300000 {
 		fail(w, 413, "Request is too large")
 		return
 	}
 	q := url.Values{}
-	for _, key := range []string{"limit", "before", "event_id"} {
+	for _, key := range []string{"limit", "before", "event_id", "file_id", "kind"} {
 		if value := r.URL.Query().Get(key); value != "" {
 			q.Set(key, value)
 		}
@@ -283,7 +357,9 @@ func (s *server) proxy(w http.ResponseWriter, r *http.Request, token, upstream s
 		fail(w, 400, "Invalid request")
 		return
 	}
-	req.Header.Set("Authorization", "Bearer "+token)
+	if token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
+	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "application/json")
 	resp, err := s.auth.HTTP.Do(req)
@@ -413,16 +489,4 @@ func (s *server) nativeSession(w http.ResponseWriter, r *http.Request) {
 	value := p.Session
 	delete(s.pairs, input.ID)
 	respond(w, 200, map[string]string{"session": value})
-}
-func (s *server) rtc(w http.ResponseWriter, subject string) {
-	uris := strings.Fields(os.Getenv("TURN_URIS"))
-	secret := os.Getenv("TURN_SHARED_SECRET")
-	servers := []map[string]any{}
-	if len(uris) > 0 && secret != "" {
-		username := fmt.Sprintf("%d:%s", time.Now().Add(5*time.Minute).Unix(), challenge(subject)[:16])
-		m := hmac.New(sha1.New, []byte(secret))
-		_, _ = m.Write([]byte(username))
-		servers = append(servers, map[string]any{"urls": uris, "username": username, "credential": base64.StdEncoding.EncodeToString(m.Sum(nil))})
-	}
-	respond(w, 200, map[string]any{"enabled": false, "matrixrtc": false, "iceServers": servers, "ttl": 300, "reason": "Calls are not enabled in this initial release. TURN and MatrixRTC media infrastructure still require deployment and device testing."})
 }

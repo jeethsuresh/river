@@ -36,6 +36,8 @@ func fixture(t *testing.T) (*server, string, *bool, *int) {
 				return
 			}
 			respond(w, 200, map[string]any{"active": true, "iss": iam.URL, "sub": "alice", "app_origin": "https://chat.gravitas.cool", "session_id": "11111111-1111-4111-8111-111111111111", "exp": time.Now().Add(time.Hour).Unix()})
+		case "/app/v1/rtc":
+			respond(w, 200, map[string]bool{"allow_ice": true, "allow_calls": true})
 		case "/app/v1/groups":
 			if r.Header.Get("Authorization") != "Bearer upstream-only" {
 				t.Error("wrong upstream credential")

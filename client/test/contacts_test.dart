@@ -68,15 +68,16 @@ void main() {
     (tester) async {
       for (final width in [320.0, 768.0, 1440.0]) {
         await tester.binding.setSurfaceSize(Size(width, 1200));
-        final api =
-            RiverApi()
-              ..user = {'sub': 'alice'}
-              ..loading = false
-              ..friends = [bob]
-              ..otherContacts = [carol];
+        final api = RiverApi()
+          ..user = {'sub': 'alice'}
+          ..loading = false
+          ..friends = [bob]
+          ..otherContacts = [carol];
         await tester.pumpWidget(
           MaterialApp(
-            home: Scaffold(body: FriendsView(app: api, onConversation: () {})),
+            home: Scaffold(
+              body: FriendsView(app: api, onConversation: () {}),
+            ),
           ),
         );
         expect(
@@ -102,13 +103,12 @@ void main() {
   testWidgets(
     'expired contact consent keeps shared lists private and offers reconnect',
     (tester) async {
-      final api =
-          RiverApi()
-            ..user = {'sub': 'alice'}
-            ..loading = false
-            ..friendsStatus = 403
-            ..friendsError =
-                'Reconnect with Gravitas to approve the new permissions.';
+      final api = RiverApi()
+        ..user = {'sub': 'alice'}
+        ..loading = false
+        ..friendsStatus = 403
+        ..friendsError =
+            'Reconnect with Gravitas to approve the new permissions.';
       await tester.binding.setSurfaceSize(const Size(390, 900));
       await tester.pumpWidget(RiverApp(api: api, boot: false));
       expect(

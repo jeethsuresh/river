@@ -11,7 +11,30 @@ concurrency:
   group: river-${{ github.ref }}
   cancel-in-progress: false
 jobs:
+  android:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - name: Install pinned Flutter SDK
+        run: |
+          git init "$RUNNER_TEMP/river-flutter"
+          git -C "$RUNNER_TEMP/river-flutter" remote add origin https://github.com/flutter/flutter.git
+          git -C "$RUNNER_TEMP/river-flutter" fetch --depth 1 origin refs/tags/3.47.7:refs/tags/3.47.7
+          git -C "$RUNNER_TEMP/river-flutter" checkout --detach abaf9c523780a608bd46686fd5e53740a07077f8
+          test "$(git -C "$RUNNER_TEMP/river-flutter" rev-parse HEAD)" = abaf9c523780a608bd46686fd5e53740a07077f8
+      - name: Build shared Android client
+        working-directory: client
+        env:
+          FLUTTER_SUPPRESS_ANALYTICS: 'true'
+        run: |
+          export JAVA_HOME="$JAVA_HOME_17_X64"
+          export PATH="$JAVA_HOME/bin:$RUNNER_TEMP/river-flutter/bin:$PATH"
+          flutter config --no-analytics
+          flutter pub get --enforce-lockfile
+          flutter build apk --debug --no-pub
   image:
+    needs: android
     runs-on: ubuntu-24.04
     timeout-minutes: 35
     permissions:

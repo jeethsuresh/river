@@ -1,11 +1,13 @@
-River 0.2.0 brings your Gravitas people and conversations together on Android and the web.
+River 0.4.0 brings Orbit's conversations, publishing, files and calling to the shared Flutter web and Android app.
 
-- Create spaces with separate text and drop-in chat channels. Membership follows the space, with private unread positions and earlier-message history.
-- Send and accept friend requests, start private conversations, and remove or block people.
-- Follow reply threads, quote earlier replies, and add or remove 24 emoji reactions.
-- Write posts and discussions with Markdown preview and edit your own entries. Failed requests keep your drafts.
-- The shared blue Flutter interface adapts to phones, tablets and desktops. Existing accounts may need to reconnect to approve the new permissions.
+- Create separate channels, invite contacts to spaces, and start private or friend-selected group conversations.
+- See live activity and online friends, catch up on unread posts/discussions/channels, and return to recent participating threads.
+- Format messages, replies, posts and discussions with Markdown tools, keyboard shortcuts and previews. Edit your posts and discussions.
+- Publish shareable posts and space blogs with independent member/public/disabled comment policies. Earlier member comments stay private.
+- Share files directly between connected peers, with verified local copies, progress, retry and retained-copy retrieval. Files have no cloud backup.
+- Join voice/video calls in conversations and drop-in rooms, share your screen, and use call-only chat, mute/deafen, speaker and camera controls.
+- Keep shared contacts, account consent and access decisions in Gravitas. Existing users must reconnect to approve calling/publication permissions.
 
-Sign in with Gravitas in your browser and link the Android app. Central Gravitas sign-out revokes River sessions. History and new messages require a connection. Voice, video, screen sharing, file attachments, public publishing and online presence are not enabled in this version.
+The matching Gravitas API migration and River web/backend must be rolled out before the new features are available. Calling additionally requires the configured SFU/TURN media service. Automatic GitHub deployments remain disabled.
 
-The Android release uses River's permanent package and signing certificate. Development APKs use a different certificate and must be removed before installing the store release. River history remains in Gravitas.
+Android 7.0 or newer is required by the updated Flutter runtime. Android uses River's existing package and permanent signing certificate. Physical-device Bluetooth, network handoff and large-call capacity have not been verified. Gravitas supplies a Matrix API subset, without federation or end-to-end encryption.
