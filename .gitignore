@@ -16,3 +16,5 @@ work/
 .signing/
 .release/
 __pycache__/
+
+flutter_*.log

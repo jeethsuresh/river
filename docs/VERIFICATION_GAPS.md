@@ -41,7 +41,10 @@ admission beyond 32, **not a supported media-call capacity of 64**. Reproduce wi
 LiveKit's zero setting has no finite application-imposed participant maximum.
 The uint32 configuration field is not a promise that billions of participants
 can connect. CPU, memory, bandwidth, subscriptions, browser/device decode limits,
-leases, and relay allocations determine actual capacity. Production currently
+leases, and relay allocations determine actual capacity. Gravitas retains four
+active device leases per user and a 512-lease bound on the call directory read
+across visible rooms; the directory bound can truncate occupancy/name metadata
+and is not a room admission limit. Production currently
 reserves 300m/512Mi for one SFU and 50m/128Mi for one TURN relay. TURN retains its
 8-per-user/128-total allocation quotas and bandwidth safeguards; allocation count
 is not a fixed participant count. No production stress test or failover guarantee
@@ -107,9 +110,9 @@ subsequent fix passes. Never commit credentials or disposable session envelopes.
 
 ### Automated reproduction
 
-The shared scenario is `client/test/production_journey_scenarios.dart`, with
-Chrome and Android entry points at `client/test/browser/production_journey_test.dart`
-and `client/integration_test/production_journey_test.dart`. Production execution
+The shared scenario is `client/integration_test/production_journey_scenarios.dart`, with
+the Android/app entry point at `client/integration_test/production_journey_test.dart`
+and the web host driver at `client/test_driver/production_journey.dart`. Production execution
 is opt-in; normal CI does not create accounts or contact production.
 
 `backend/production_harness_test.go` supplies a loopback-only bridge using three
@@ -122,9 +125,10 @@ through actual Gravitas password/PKCE/consent and explicit native handoff; do no
 substitute personal accounts, fake JWTs or database-created authorization.
 
 Run `go test -run '^TestProductionJourneyBridge$' -v -timeout 47m` with
-`RIVER_PRODUCTION_JOURNEY_CONFIG=/absolute/protected/config.json`. Run the Chrome
-entry point with `flutter test --platform chrome`, or the Android entry point
-with `flutter test -d <test-emulator>`, adding
+`RIVER_PRODUCTION_JOURNEY_CONFIG=/absolute/protected/config.json`. Use the supported Chrome integration runner: start a matching loopback ChromeDriver,
+then run `flutter drive -d chrome --driver test_driver/production_journey.dart
+--target integration_test/production_journey_test.dart`. For Android use
+`flutter test -d <test-emulator> integration_test/production_journey_test.dart`, adding
 `--dart-define=RIVER_JOURNEY_BRIDGE=http://127.0.0.1:57910`. Android needs a task-only
 `adb reverse tcp:57910 tcp:57910`. Test code uses a live integration clock for
 real SSE/network concurrency and no credentials in Dart defines. Only the local
@@ -146,3 +150,9 @@ A diagnostic journey can explicitly disable only the SSE assertion with
 `RIVER_JOURNEY_REQUIRE_SSE=false` while the backend fix awaits rollout; it prints
 that deferral and uses explicit refresh. Such a run is not an SSE pass. Final
 verification must use the default true setting against the fixed deployment.
+
+- Private-to-public publication: the editor saved an initial private policy, but
+  updating that existing row to public failed to persist its newly created comment
+  room and anchor. Public comments then failed. Gravitas now tracks both IDs in
+  the Ecto changeset and tests a saved private draft through outsider comments,
+  reactions and preservation of earlier private history.
