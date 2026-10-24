@@ -1,20 +1,7 @@
-# River 0.5.0
+River 0.5.1 adds username sign-in with the 🔥 submit button in the shared web and Android client.
 
-Complete the remaining gaps found against Orbit main f8abebc in the shared Flutter
-web and Android client:
+Bare usernames use the configured registration domain. Enter user@domain to sign in through another Gravitas provider. Login, file transfers, calls, group consent and account caches remain bound to the selected provider and account.
 
-- Visual rich-text editing, Markdown and preview modes, undo/redo, safe link editing
-  and formatting shortcuts in messages, replies, posts, discussions and call chat.
-- Search conversations by name or member. Expand channel-specific recent threads,
-  collapse text/voice sections and see voice-room occupancy.
-- Separate unread posts, discussions, channel activity and conversations. Long posts
-  cannot crowd discussions out of Home, and opening entries clears their markers.
-- Keep published-post reactions and comment counts consistent between feed and
-  detail while preserving earlier member-only reactions in private event history.
-- Preserve permission errors when joining calls, with a direct Gravitas reconnect.
+The package and permanent Android signing certificate are unchanged. This release builds on River 0.5.0, preserving its visual editor, workspace navigation and unread flows.
 
-Uses the same permanent Android signing certificate and minimum Android 7.0 (API
-24) as 0.4.0. Gravitas handles accounts; password recovery is deferred. Automatic
-GitHub deployments remain disabled. Physical-device Bluetooth/network handoff and
-large-call capacity are not claimed as verified. See docs/ORBIT_PARITY.md for the
-source audit and integration boundaries.
+GitHub builds and verifies the signed Android release automatically after tests pass.
