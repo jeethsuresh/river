@@ -14,8 +14,7 @@
     "--no-version-check",
     "build",
     "apk",
-    "--release",
-    "--no-pub"
+    "--release"
   ],
   "release_notes": "docs/RELEASE_NOTES.md"
 }
