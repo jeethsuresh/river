@@ -155,10 +155,7 @@ directory or certificate pin. Back up the private key and passwords securely.
 Signing material is excluded from Git and container builds and is never uploaded
 as a release asset. Release builds fail when signing configuration is absent.
 
-After tests pass and source merges to `main`, `scripts/release.py` creates a draft
-stable GitHub release with only `River-vVERSION-android.apk` and `SHA256SUMS`.
-`--publish` publishes that verified release for Private Store ingestion. Existing
-versions/tags are never overwritten. The store pins the same package/certificate.
+After increasing the version name and Android build number, push or merge to `main`. GitHub's **Signed Android release** workflow automatically tests, signs with the original River key, verifies the APK and publishes it for Private Store ingestion. Existing versions and tags are never overwritten. See [signed Android releases](ANDROID_RELEASES.md) for verification-only builds and secret maintenance.
 
 Configure the Go process with `GRAVITAS_SESSION_KEY` (32 random bytes, base64url),
 `GRAVITAS_ISSUER=https://gravitas.cool`, `APP_URL=https://chat.gravitas.cool`,
