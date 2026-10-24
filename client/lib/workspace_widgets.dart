@@ -210,7 +210,7 @@ class AccountPanel extends StatelessWidget {
           children: [
             ListTile(
               leading: const Icon(Icons.manage_accounts_outlined),
-              title: const Text('Email, password and app permissions'),
+              title: const Text('Password and app permissions'),
               subtitle: const Text('Manage your shared account in Gravitas'),
               trailing: const Icon(Icons.open_in_new),
               onTap: () => launchUrl(

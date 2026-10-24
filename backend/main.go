@@ -197,7 +197,7 @@ func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				w.WriteHeader(405)
 				return
 			}
-			s.rtc(w, session.Authorization.Subject)
+			s.rtc(w, r, session)
 			return
 		}
 		if upstream, ok := proxyRoute(r); ok {

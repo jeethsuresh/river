@@ -225,6 +225,9 @@ class _FileScopeClient {
         scope: scope.kind,
         token: owner.api.token ?? '',
         iceServers: (credentials['iceServers'] as List?) ?? [],
+        iceTransportPolicy:
+            credentials['iceTransportPolicy'] as String? ?? 'all',
+        iceConfiguration: () => owner.api.request('/api/rtc'),
         error: (message) {
           peerFailed = true;
           if (missing || message.startsWith('River signaling')) {

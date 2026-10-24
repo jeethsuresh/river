@@ -44,13 +44,43 @@ func iceServers(subject string) []map[string]any {
 	}
 	return servers
 }
-func (s *server) rtc(w http.ResponseWriter, subject string) {
-	_, enabled := configuredRTC()
+func icePolicy() string {
+	if os.Getenv("TURN_FORCE_RELAY") == "true" && len(strings.Fields(os.Getenv("TURN_URIS"))) > 0 && os.Getenv("TURN_SHARED_SECRET") != "" {
+		return "relay"
+	}
+	return "all"
+}
+func (s *server) rtc(w http.ResponseWriter, r *http.Request, session gravitas.AppSession) {
+	req, _ := http.NewRequestWithContext(r.Context(), "GET", s.auth.Issuer+"/app/v1/rtc", nil)
+	req.Header.Set("Authorization", "Bearer "+session.LocalToken)
+	response, err := s.auth.HTTP.Do(req)
+	if err != nil {
+		fail(w, 503, "Gravitas permissions are temporarily unavailable")
+		return
+	}
+	defer response.Body.Close()
+	var capabilities struct {
+		ICE   bool `json:"allow_ice"`
+		Calls bool `json:"allow_calls"`
+	}
+	if response.StatusCode != 200 || json.NewDecoder(io.LimitReader(response.Body, 4096)).Decode(&capabilities) != nil {
+		fail(w, 403, "insufficient_scope")
+		return
+	}
+	subject := session.Authorization.Subject
+	_, configured := configuredRTC()
+	enabled := configured && capabilities.Calls
+	servers := iceServers(subject)
+	policy := icePolicy()
+	if !capabilities.ICE {
+		servers = []map[string]any{}
+		policy = "all"
+	}
 	reason := ""
 	if !enabled {
 		reason = "Calling requires the configured River media service. Peer file exchange is available with the advertised ICE servers."
 	}
-	respond(w, 200, map[string]any{"enabled": enabled, "matrixrtc": enabled, "iceServers": iceServers(subject), "ttl": 300, "reason": reason})
+	respond(w, 200, map[string]any{"enabled": enabled, "matrixrtc": enabled, "iceServers": servers, "ttl": 300, "iceTransportPolicy": policy, "reason": reason})
 }
 func signRTC(c rtcConfig, subject string, video map[string]any, extra map[string]any) string {
 	enc := func(v any) string { b, _ := json.Marshal(v); return base64.RawURLEncoding.EncodeToString(b) }
@@ -132,7 +162,11 @@ func (s *server) rtcUpdate(w http.ResponseWriter, r *http.Request, session gravi
 			fail(w, 503, "The media service could not start this call. Please retry.")
 			return
 		}
+	}
+	if input.Action == "join" || input.Action == "renew" {
 		metadata, _ := json.Marshal(map[string]string{"lease": input.Member})
+		data["iceTransportPolicy"] = icePolicy()
+		data["iceServers"] = iceServers(session.Authorization.Subject)
 		data["jwt"] = signRTC(c, identity, map[string]any{"roomJoin": true, "room": name, "canPublish": true, "canSubscribe": true, "canPublishData": true, "canUpdateOwnMetadata": false}, map[string]any{"metadata": string(metadata), "name": "River participant"})
 	}
 	respond(w, 200, data)

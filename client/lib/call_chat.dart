@@ -223,13 +223,17 @@ class _CallChatScreenState extends State<CallChatScreen> {
                             icon: const Icon(Icons.attach_file),
                           ),
                           Expanded(
-                            child: TextField(
+                            child: MarkdownShortcuts(
                               controller: draft,
-                              minLines: 1,
-                              maxLines: 4,
-                              maxLength: 16000,
-                              decoration: const InputDecoration(
-                                labelText: 'Message callers',
+                              onSubmit: send,
+                              child: TextField(
+                                controller: draft,
+                                minLines: 1,
+                                maxLines: 4,
+                                maxLength: 16000,
+                                decoration: const InputDecoration(
+                                  labelText: 'Message callers',
+                                ),
                               ),
                             ),
                           ),

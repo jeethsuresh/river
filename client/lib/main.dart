@@ -380,7 +380,7 @@ class _RiverShellState extends State<RiverShell> {
                 ),
               const SizedBox(height: 24),
               const Text(
-                'Early access · Messages, posts and discussions. Calls are coming later.',
+                'Messages, ideas and calls, connected through Gravitas.',
                 style: TextStyle(color: muted, fontSize: 12),
               ),
             ],
@@ -692,7 +692,9 @@ class _RiverShellState extends State<RiverShell> {
               'Bring your people together. Create your first space or conversation.',
             ),
           for (final g
-              in app.groups.where((g) => g['kind'] != 'channel').take(12))
+              in app.groups
+                  .where((g) => ['space', 'dm', 'group'].contains(g['kind']))
+                  .take(12))
             ListTile(
               contentPadding: EdgeInsets.zero,
               leading: Icon(
@@ -711,9 +713,39 @@ class _RiverShellState extends State<RiverShell> {
         ]),
         const SizedBox(height: 18),
         panel('Drop-in calls', Icons.graphic_eq, [
-          empty(
-            'Voice, video, screen sharing and MatrixRTC rooms are planned. They are not enabled in this release.',
-          ),
+          if (app.activeCalls.isEmpty)
+            empty(
+              'No one is in a call yet. Join a voice channel or start a call in a conversation.',
+            ),
+          for (final call in app.activeCalls)
+            ListTile(
+              leading: const Icon(Icons.graphic_eq, color: blue),
+              title: Text(call['name'] as String),
+              subtitle: Text(
+                ((call['participants'] as List).cast<Json>())
+                    .map((p) => p['user_id'])
+                    .join(', '),
+              ),
+              trailing: const Icon(Icons.call_outlined),
+              onTap: () {
+                final target = app.groups
+                    .where((g) => g['id'] == call['group_id'])
+                    .firstOrNull;
+                if (target != null) joinRiverCall(context, app, target);
+              },
+            ),
+          for (final channel in app.groups.where(
+            (g) =>
+                g['channel_kind'] == 'drop_in' &&
+                g['membership'] == 'join' &&
+                !app.activeCalls.any((c) => c['group_id'] == g['id']),
+          ))
+            ListTile(
+              leading: const Icon(Icons.headphones_outlined),
+              title: Text(channel['name'] as String),
+              subtitle: const Text('Join a voice room'),
+              onTap: () => joinRiverCall(context, app, channel),
+            ),
         ]),
       ],
     ),
@@ -1200,16 +1232,20 @@ class _RiverShellState extends State<RiverShell> {
                         icon: const Icon(Icons.attach_file),
                       ),
                       Expanded(
-                        child: TextField(
+                        child: MarkdownShortcuts(
                           controller: draft,
-                          minLines: 1,
-                          maxLines: 5,
-                          maxLength: 16000,
-                          decoration: InputDecoration(
-                            hintText: viewFilter == 'Chat'
-                                ? 'Message ${g['name']}…'
-                                : 'Write ${viewFilter == 'Posts' ? 'a post' : 'a discussion'}…',
-                            counterText: '',
+                          onSubmit: () => send(g),
+                          child: TextField(
+                            controller: draft,
+                            minLines: 1,
+                            maxLines: 5,
+                            maxLength: 16000,
+                            decoration: InputDecoration(
+                              hintText: viewFilter == 'Chat'
+                                  ? 'Message ${g['name']}…'
+                                  : 'Write ${viewFilter == 'Posts' ? 'a post' : 'a discussion'}…',
+                              counterText: '',
+                            ),
                           ),
                         ),
                       ),

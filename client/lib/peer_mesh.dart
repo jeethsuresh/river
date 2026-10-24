@@ -16,6 +16,8 @@ class PeerMesh {
     required this.token,
     this.stream,
     this.iceServers = const [],
+    this.iceTransportPolicy = 'all',
+    this.iceConfiguration,
     this.scope,
     required this.error,
     this.onStream,
@@ -30,6 +32,10 @@ class PeerMesh {
   final String? scope;
   MediaStream? stream;
   final List<dynamic> iceServers;
+  final String iceTransportPolicy;
+  final Future<Json> Function()? iceConfiguration;
+  Timer? _iceRefresh;
+  bool _renewingIce = false;
   final void Function(String) error;
   final void Function(String, MediaStream?)? onStream;
   final void Function(String, bool)? onPeer;
@@ -40,6 +46,7 @@ class PeerMesh {
   @visibleForTesting
   final void Function(Json)? signalWriter;
   final Map<String, RTCPeerConnection> peers = {};
+  final Map<String, Future<RTCPeerConnection>> _creating = {};
   final Map<String, RTCDataChannel> channels = {};
   final Map<String, List<RTCIceCandidate>> _ice = {};
   final Map<String, Future<void>> _queues = {};
@@ -66,6 +73,12 @@ class PeerMesh {
       return;
     }
     _socket = socket;
+    if (iceConfiguration != null) {
+      _iceRefresh = Timer.periodic(
+        const Duration(minutes: 4),
+        (_) => unawaited(renewIce()),
+      );
+    }
     socket.stream.listen(
       (raw) {
         if (raw is! String || raw.length > 100000) return;
@@ -104,14 +117,52 @@ class PeerMesh {
     }
   }
 
+  Future<Json> currentIce() async {
+    final fresh = await iceConfiguration?.call();
+    return <String, dynamic>{
+      'iceServers': fresh?['iceServers'] ?? iceServers,
+      'iceTransportPolicy': fresh?['iceTransportPolicy'] ?? iceTransportPolicy,
+      'sdpSemantics': 'unified-plan',
+    };
+  }
+
+  Future<void> renewIce() async {
+    if (_closed || _renewingIce || peers.isEmpty) return;
+    _renewingIce = true;
+    try {
+      final configuration = await currentIce();
+      for (final entry in peers.entries.toList()) {
+        if (_closed || peers[entry.key] != entry.value) continue;
+        await entry.value.setConfiguration(configuration);
+        await entry.value.restartIce();
+        await _offer(entry.key, entry.value);
+      }
+    } catch (_) {
+      if (!_closed) error('River signaling needs to reconnect.');
+    } finally {
+      _renewingIce = false;
+    }
+  }
+
   Future<RTCPeerConnection> _create(String id, {bool initiator = false}) async {
     final existing = peers[id];
     if (existing != null) return existing;
-    final configuration = <String, dynamic>{
-      'iceServers': iceServers,
-      'iceTransportPolicy': 'all',
-      'sdpSemantics': 'unified-plan',
-    };
+    final pending = _creating[id];
+    if (pending != null) return pending;
+    final creation = _createPeer(id, initiator: initiator);
+    _creating[id] = creation;
+    try {
+      return await creation;
+    } finally {
+      if (_creating[id] == creation) _creating.remove(id);
+    }
+  }
+
+  Future<RTCPeerConnection> _createPeer(
+    String id, {
+    required bool initiator,
+  }) async {
+    final configuration = await currentIce();
     final peer =
         await (peerFactory?.call(configuration) ??
             createPeerConnection(configuration));
@@ -374,6 +425,8 @@ class PeerMesh {
 
   Future<void> close() async {
     _closed = true;
+    _iceRefresh?.cancel();
+    _iceRefresh = null;
     await _socket?.sink.close();
     _socket = null;
     for (final id in peers.keys.toList()) {

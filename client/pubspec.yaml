@@ -26,5 +26,9 @@ dev_dependencies:
   flutter_test:
     sdk: flutter
   flutter_lints: ^5.0.0
+  flutter_web_plugins:
+    sdk: flutter
+  connectivity_plus: 7.3.1
+  device_info_plus: 12.4.0
 flutter:
   uses-material-design: true

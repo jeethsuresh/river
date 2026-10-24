@@ -4,11 +4,14 @@ import 'package:flutter/services.dart';
 import 'package:flutter_webrtc/flutter_webrtc.dart' as rtc;
 import 'package:livekit_client/livekit_client.dart';
 import 'api.dart';
+import 'call_transport.dart';
 
 class RiverCalls extends ChangeNotifier {
   RiverCalls(this.api);
   final RiverApi api;
   static const native = MethodChannel('cool.gravitas.river/call');
+  @visibleForTesting
+  bool? adaptiveStreamForTesting;
   Room? room;
   Json? target;
   String? member, identity, chat, error;
@@ -20,6 +23,7 @@ class RiverCalls extends ChangeNotifier {
       _beating = false,
       _disposed = false;
   int _epoch = 0;
+  DateTime? _iceRenewedAt;
   Future<void>? _leaving;
   bool get android =>
       !kIsWeb && defaultTargetPlatform == TargetPlatform.android;
@@ -60,6 +64,17 @@ class RiverCalls extends ChangeNotifier {
     try {
       await leave();
       final epoch = joiningEpoch = ++_epoch;
+      if (android) {
+        final permission = await rtc.navigator.mediaDevices.getUserMedia({
+          'audio': true,
+          'video': false,
+        });
+        for (final track in permission.getTracks()) {
+          await track.stop();
+        }
+        await permission.dispose();
+        if (epoch != _epoch) return;
+      }
       final id =
           transactionId().substring(0, 32) + transactionId().substring(0, 11);
       member = id;
@@ -79,19 +94,9 @@ class RiverCalls extends ChangeNotifier {
       }
       identity = result['identity'] as String;
       chat = result['call_chat_id'] as String?;
-      if (android) {
-        final permission = await rtc.navigator.mediaDevices.getUserMedia({
-          'audio': true,
-          'video': false,
-        });
-        for (final track in permission.getTracks()) {
-          await track.stop();
-        }
-        await permission.dispose();
-        await service();
-      }
+      if (android) await service();
       final media = Room(
-        roomOptions: const RoomOptions(adaptiveStream: true, dynacast: true),
+        roomOptions: RoomOptions(adaptiveStream: adaptiveStreamForTesting ?? true, dynacast: true),
       );
       room = media;
       media.addListener(changed);
@@ -120,12 +125,16 @@ class RiverCalls extends ChangeNotifier {
       await media.connect(
         result['transport_url'] as String,
         result['jwt'] as String,
+        connectOptions: ConnectOptions(
+          rtcConfiguration: callConfiguration(result),
+        ),
       );
       if (epoch != _epoch) return;
       await media.localParticipant?.setMicrophoneEnabled(true);
       if (android) {
         await AudioManager.instance.setSpeakerOutputPreferred(speaker);
       }
+      _iceRenewedAt = DateTime.now();
       heartbeat = Timer.periodic(
         const Duration(seconds: 20),
         (_) => unawaited(beat()),
@@ -147,12 +156,25 @@ class RiverCalls extends ChangeNotifier {
     if (target == null || member == null || _beating) return;
     _beating = true;
     try {
-      await api.request(
+      final media = room;
+      final epoch = _epoch;
+      final result = await api.request(
         '/api/groups/${target!['id']}/rtc',
         method: 'POST',
         body: {'action': 'renew', 'member_id': member},
       );
-    } catch (_) {
+      if (media == null || media != room || epoch != _epoch) return;
+      if (result['jwt'] is String) {
+        updateCallToken(media, result['jwt'] as String);
+      }
+      if (_iceRenewedAt != null &&
+          DateTime.now().difference(_iceRenewedAt!) >=
+              const Duration(minutes: 4)) {
+        await renewCallTransport(media, result);
+        _iceRenewedAt = DateTime.now();
+      }
+    } catch (failure) {
+      controlFailure = failure;
       error = 'Call access could not be renewed. Please rejoin.';
       await leave();
     } finally {
@@ -161,10 +183,18 @@ class RiverCalls extends ChangeNotifier {
     }
   }
 
+  @visibleForTesting
+  Future<void> renewTransport() async {
+    _iceRenewedAt = DateTime.fromMillisecondsSinceEpoch(0);
+    await beat();
+  }
+
   void changed() {
     if (!_disposed) notifyListeners();
   }
 
+  @visibleForTesting
+  Object? controlFailure;
   Future<void> control(Future<void> Function() action) async {
     if (busy || room == null) return;
     busy = true;
@@ -172,7 +202,8 @@ class RiverCalls extends ChangeNotifier {
     notifyListeners();
     try {
       await action();
-    } catch (_) {
+    } catch (failure) {
+      controlFailure = failure;
       error = 'That media change failed. Check permission and try again.';
     } finally {
       busy = false;

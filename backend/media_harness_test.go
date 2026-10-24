@@ -24,6 +24,11 @@ func TestLocalMediaHarness(t *testing.T) {
 	t.Setenv("LIVEKIT_API_KEY", "river-local-media-test")
 	t.Setenv("LIVEKIT_API_SECRET", "river-local-isolated-test-secret-0123456789")
 	t.Setenv("RIVER_RTC_DEV", "true")
+	if os.Getenv("RIVER_TEST_TURN") == "true" {
+		t.Setenv("TURN_URIS", "turn:127.0.0.1:57883?transport=tcp")
+		t.Setenv("TURN_SHARED_SECRET", "river-local-isolated-turn-secret-0123456789")
+		t.Setenv("TURN_FORCE_RELAY", "true")
+	}
 	s, cookie, _, _ := fixture(t)
 	decoded, err := s.auth.DecodeAppSession(cookie)
 	if err != nil {
@@ -42,7 +47,9 @@ func TestLocalMediaHarness(t *testing.T) {
 		if strings.Contains(r.URL.Path, "/rtc") || strings.HasPrefix(r.URL.Path, "/rtc/leases/") || strings.HasSuffix(r.URL.Path, "/files") {
 			body := map[string]any{}
 			mu.Lock()
-			if strings.HasPrefix(r.URL.Path, "/rtc/leases/") {
+			if r.URL.Path == "/app/v1/rtc" {
+				body = map[string]any{"allow_ice": true, "allow_calls": true}
+			} else if strings.HasPrefix(r.URL.Path, "/rtc/leases/") {
 				body["active"] = leases[strings.TrimPrefix(r.URL.Path, "/rtc/leases/")]
 			} else if strings.HasSuffix(r.URL.Path, "/files") {
 				if id := r.URL.Query().Get("file_id"); id != "" {
@@ -132,7 +139,7 @@ func TestLocalMediaHarness(t *testing.T) {
 	t.Log("Loopback River transport fixture ready on 57890")
 	select {
 	case <-done:
-	case <-time.After(30 * time.Minute):
+	case <-time.After(45 * time.Minute):
 		t.Fatal("local fixture deadline reached")
 	}
 }

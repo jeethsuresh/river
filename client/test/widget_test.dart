@@ -47,7 +47,12 @@ void main() {
       await tester.pumpWidget(RiverApp(api: api, boot: false));
       await tester.pumpAndSettle();
       expect(find.text('Continue with Gravitas'), findsOneWidget);
-      expect(find.textContaining('Calls are coming later'), findsOneWidget);
+      expect(
+        find.textContaining(
+          'Messages, ideas and calls, connected through Gravitas.',
+        ),
+        findsOneWidget,
+      );
     },
   );
   testWidgets('account changes discard the previous account composer', (

@@ -243,6 +243,12 @@ class RiverApi extends ChangeNotifier {
         final home = await request('/api/home');
         catchUp = ((home['catch_up'] as List?) ?? []).cast<Json>();
         threads = ((home['threads'] as List?) ?? []).cast<Json>();
+        final entries = ((home['recent_entries'] as List?) ?? []).cast<Json>();
+        final entryIds = entries.map((e) => e['event_id']).toSet();
+        recent = [
+          ...entries,
+          ...recent.where((e) => !entryIds.contains(e['event_id'])),
+        ];
         try {
           activeCalls = ((await request('/api/calls'))['calls'] as List)
               .cast<Json>();
@@ -662,12 +668,14 @@ class RiverApi extends ChangeNotifier {
     String body,
     String txn, {
     String? parent,
+    required String audience,
   }) async {
     await request(
       '/api/posts/${Uri.encodeComponent(event)}/comment',
       method: 'POST',
       body: {
         'body': body,
+        'audience': audience,
         'txn_id': txn,
         if (parent != null) 'parent_id': parent,
       },

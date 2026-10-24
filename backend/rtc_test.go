@@ -99,3 +99,47 @@ func TestMediaReaperSurvivesRestartAndRestrictsItsNamespace(t *testing.T) {
 		t.Fatal("revoked participant not removed", removed)
 	}
 }
+
+func TestICECredentialsRequireCurrentChatConsent(t *testing.T) {
+	rtcEnv(t)
+	t.Setenv("TURN_URIS", "turns:turn.example:443?transport=tcp")
+	t.Setenv("TURN_SHARED_SECRET", strings.Repeat("t", 32))
+	t.Setenv("TURN_FORCE_RELAY", "true")
+	allowed, revoked := false, false
+	s := &server{auth: &gravitas.Client{Issuer: "https://iam.test", HTTP: &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		if r.URL.Path != "/app/v1/rtc" || r.Header.Get("Authorization") != "Bearer delegated" {
+			t.Error("missing current consent check")
+		}
+		code := 200
+		body := `{"allow_ice":false,"allow_calls":false}`
+		if allowed {
+			body = `{"allow_ice":true,"allow_calls":true}`
+		}
+		if revoked {
+			code = 403
+		}
+		return &http.Response{StatusCode: code, Header: http.Header{}, Body: io.NopCloser(strings.NewReader(body))}, nil
+	})}}}
+	session := gravitas.AppSession{LocalToken: "delegated", Authorization: gravitas.Authorization{Identity: gravitas.Identity{Subject: "alice"}}}
+	check := func() (*httptest.ResponseRecorder, map[string]any) {
+		w := httptest.NewRecorder()
+		s.rtc(w, httptest.NewRequest("GET", "/api/rtc", nil), session)
+		var result map[string]any
+		_ = json.Unmarshal(w.Body.Bytes(), &result)
+		return w, result
+	}
+	w, result := check()
+	if w.Code != 200 || len(result["iceServers"].([]any)) != 0 || result["enabled"] != false {
+		t.Fatal("profile-only consent minted credentials", w.Body.String())
+	}
+	allowed = true
+	w, result = check()
+	if w.Code != 200 || result["enabled"] != true || result["iceTransportPolicy"] != "relay" || !strings.Contains(w.Body.String(), "credential") {
+		t.Fatal("consented ICE unavailable", w.Body.String())
+	}
+	revoked = true
+	w, _ = check()
+	if w.Code != 403 || strings.Contains(w.Body.String(), "credential") {
+		t.Fatal("revoked consent minted credentials")
+	}
+}

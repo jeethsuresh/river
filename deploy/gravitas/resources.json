@@ -138,6 +138,12 @@
                     "secretRef": {
                       "name": "river-runtime"
                     }
+                  },
+                  {
+                    "secretRef": {
+                      "name": "river-media-runtime",
+                      "optional": true
+                    }
                   }
                 ]
               }

@@ -31,8 +31,12 @@ The backend has **no independent message database**. It relays a fixed allowlist
 routes to the configured HTTPS IAM origin, using a confidential delegated token.
 No admin, IAM signing key or Matrix password is deployed to River.
 
-This is an initial slice. It is not the full Orbit feature set or a fully conformant
-Matrix homeserver. The existing Gravitas server implements a Matrix API subset.
+The shared client also includes live updates/presence, friend-selected group
+conversations, catch-up and participating threads, public posts/blogs with independent
+comment policies, peer file attachments and calling. The Go process brokers
+centrally authorized MatrixRTC memberships with a LiveKit SFU and Coturn relay.
+See [the parity contract](docs/ORBIT_PARITY.md) and [media setup](deploy/media/README.md).
+Gravitas remains a Matrix API subset, without federation or end-to-end encryption.
 
 ## Exact current mapping and event contract
 
@@ -42,7 +46,7 @@ second group table. River preserves that single source of access decisions.
 - A River space maps 1:1 to that group and `!<uuid>:gravitas.cool`, with
   `m.room.create.content.type = m.space`.
 - A River DM/group conversation maps 1:1 to a normal Matrix room and group. Its
-  `cool.gravitas.river.group.v1` state identifies `kind=dm`. Invitations use
+  `cool.gravitas.river.group.v1` state identifies `kind=dm` or `kind=group`. Invitations use
   `m.room.member` with `is_direct=true`. Private Matrix `m.direct` account data is
   not yet implemented, so automatic DM recognition by other clients is incomplete.
 - Each channel is a separate room/group linked by `m.space.child` and canonical
@@ -79,8 +83,12 @@ second group table. River preserves that single source of access decisions.
   retain their normal group ACL. Creating a canonical DM additionally checks the
   contact's current app consent. Reopening an already-joined DM still requires
   that room in the app's approved selection.
-- A future RTC channel also needs its own room/group. MatrixRTC membership/signaling
-  and media authorization must bind to that room and the current membership.
+- Drop-in channels and DM/group calls use their existing room/group for MatrixRTC
+  `m.rtc.slot` and sticky `m.rtc.member` events. Each overlapping call session also
+  has a separate call-chat room/group, readable only with a current valid lease.
+  Leases are bound to the delegated token, user, app, room and individual device.
+  Public comments use a separate related room/group and a standard thread anchor;
+  prior member-only comments never become public after a policy change.
 - Standard chat messages and replies are separate `m.room.message` events, with
   `m.in_reply_to` and `cool.gravitas.river={version:1,kind:message|reply}`.
 - Posts and discussions are separate `cool.gravitas.river.post.v1` and
@@ -117,8 +125,8 @@ client. Event pagination uses a same-room event ID cursor with a stable database
 
 ## Build and test
 
-The Dockerfile pins the same Flutter SDK revision used by the existing Spacetime
-service: `d3abd00e69a89a615e13969c02832ef1e0119639` (3.32.0-0.2.pre).
+The Dockerfile and Android CI pin Flutter 3.47.7 at
+`abaf9c523780a608bd46686fd5e53740a07077f8`.
 Go is pinned to 1.25.2 for the image. Dependencies are locked in `client/pubspec.lock`.
 
 ```
@@ -179,23 +187,23 @@ namespaced resources. CI tests and publishes branch images. Main-branch deployme
 is opt-in through `GRAVITAS_DEPLOY_ENABLED=true` and an environment-scoped,
 namespace-limited `GRAVITAS_KUBECONFIG`, following RSS/Office/Spacetime patterns.
 
-## Next implementation tasks
+## Release verification and limits
 
-1. Extend the implemented threaded replies, reversible reactions, authored edits
-   and Markdown previews with public posts/comment policies, shareable links and discovery.
-2. Event-driven updates and private presence. The current frontend refreshes every
-   five seconds while foregrounded; timelines paginate beyond the latest 100 events,
-   and home uses a single batched feed across all accessible groups (latest 200).
-3. Friend-selected multi-person conversations and attachments/file exchange.
-4. Deploy TURN (UDP/TCP/TLS, ephemeral credentials, quotas) and a MatrixRTC-compatible
-   SFU/focus, then implement MatrixRTC membership, signaling, voice/video/screen
-   sharing and cleanup. STUN discovers addresses; **TURN relays media**.
-   `/api/rtc` currently reports `enabled=false`, even when credential config exists.
-5. Standard-client interoperability tests, complete Matrix discovery/capabilities,
-   account data, event relations/pagination, moderation, encryption and federation
-   where required. Standard replies/reactions alone do not imply full compatibility.
-6. App token refresh and durable single-use native handoffs;
-   browser-to-phone media/network tests, accessibility and background/lifecycle work.
+See [the parity contract](docs/ORBIT_PARITY.md) for the source baseline and feature
+coverage. Run the Go race/vet checks, Flutter analysis/widget tests, web release
+build and signed Android build before publishing. CI also builds Android from
+the pinned SDK; PRs never receive release signing material. The opt-in local media
+fixture and shared browser/Android scenarios check real SFU media, TURN relay and
+peer-file bytes without production accounts or real microphone/camera data.
+
+Production media needs the separate manual [media setup](deploy/media/README.md).
+Keep `GRAVITAS_DEPLOY_ENABLED=false` unless a deployment is expressly requested.
+An APK upload alone does not install its API migration, web image or media pods.
+Physical-device Bluetooth, mobile-network handoff and large-call capacity require
+separate device/load verification. Password recovery remains outside this River
+release at the user's request; registration/password/settings/logout use Gravitas.
+Standard Matrix account data, full RTC focus discovery/client interoperability,
+federation and E2EE are not implemented by this Matrix API subset.
 
 Protocol references: [Matrix events and spaces](https://spec.matrix.org/v1.16/client-server-api/),
 [MatrixRTC](https://github.com/matrix-org/matrix-spec-proposals/pull/4143).

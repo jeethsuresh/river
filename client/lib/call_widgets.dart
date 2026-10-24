@@ -118,7 +118,7 @@ class RiverCallScreen extends StatelessWidget {
             calls.room!.localParticipant!,
           ...?calls.room?.remoteParticipants.values,
         ];
-        final tiles = <Widget>[];
+        final tiles = <Widget>[], screens = <Widget>[];
         for (final person in people) {
           final videos = person.videoTrackPublications
               .where((p) => p.track is VideoTrack && !p.muted)
@@ -132,14 +132,17 @@ class RiverCallScreen extends StatelessWidget {
             );
           }
           for (final publication in videos) {
-            tiles.add(
-              _VideoTile(
-                label:
-                    '${name(person, calls)}${publication.source == TrackSource.screenShareVideo ? ' · Screen' : ''}',
-                track: publication.track as VideoTrack,
-                speaking: person.isSpeaking,
-              ),
-            );
+            (publication.source == TrackSource.screenShareVideo
+                    ? screens
+                    : tiles)
+                .add(
+                  _VideoTile(
+                    label:
+                        '${name(person, calls)}${publication.source == TrackSource.screenShareVideo ? ' · Screen' : ''}',
+                    track: publication.track as VideoTrack,
+                    speaking: person.isSpeaking,
+                  ),
+                );
           }
         }
         return Scaffold(
@@ -183,7 +186,7 @@ class RiverCallScreen extends StatelessWidget {
                           childAspectRatio: 1.5,
                           mainAxisSpacing: 12,
                           crossAxisSpacing: 12,
-                          children: tiles,
+                          children: [...screens, ...tiles],
                         ),
                       ),
                     ),

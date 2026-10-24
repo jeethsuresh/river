@@ -491,18 +491,23 @@ class _EntryEditorState extends State<EntryEditor> {
                 child: RichBody(body.text),
               )
             else
-              TextFormField(
+              MarkdownShortcuts(
                 controller: body,
-                minLines: 6,
-                maxLines: 16,
-                maxLength: 40000,
-                decoration: const InputDecoration(
-                  labelText: 'Body',
-                  hintText: 'Share an idea. Markdown formatting is supported.',
+                onSubmit: save,
+                child: TextFormField(
+                  controller: body,
+                  minLines: 6,
+                  maxLines: 16,
+                  maxLength: 40000,
+                  decoration: const InputDecoration(
+                    labelText: 'Body',
+                    hintText:
+                        'Share an idea. Markdown formatting is supported.',
+                  ),
+                  validator: (v) => v?.trim().isNotEmpty == true
+                      ? null
+                      : 'Write something first.',
                 ),
-                validator: (v) => v?.trim().isNotEmpty == true
-                    ? null
-                    : 'Write something first.',
               ),
             TextButton.icon(
               onPressed: () => setState(() => preview = !preview),
@@ -781,14 +786,18 @@ class _ThreadScreenState extends State<ThreadScreen> {
                     crossAxisAlignment: CrossAxisAlignment.end,
                     children: [
                       Expanded(
-                        child: TextField(
+                        child: MarkdownShortcuts(
                           controller: draft,
-                          minLines: 1,
-                          maxLines: 5,
-                          maxLength: 16000,
-                          decoration: const InputDecoration(
-                            hintText: 'Write a reply…',
-                            counterText: '',
+                          onSubmit: send,
+                          child: TextField(
+                            controller: draft,
+                            minLines: 1,
+                            maxLines: 5,
+                            maxLength: 16000,
+                            decoration: const InputDecoration(
+                              hintText: 'Write a reply…',
+                              counterText: '',
+                            ),
                           ),
                         ),
                       ),

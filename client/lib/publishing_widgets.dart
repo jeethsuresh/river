@@ -21,6 +21,7 @@ class _PostScreenState extends State<PostScreen> {
   final draft = TextEditingController();
   String? cursor, error, payload;
   String txn = transactionId();
+  String? draftAudience;
   bool loading = false, sending = false;
   StreamSubscription<void>? changes;
   @override
@@ -90,7 +91,8 @@ class _PostScreenState extends State<PostScreen> {
   Future<void> send() async {
     final body = draft.text.trim();
     if (body.isEmpty || sending) return;
-    final nextPayload = '$body:${parent?['event_id']}';
+    final audience = draftAudience ?? commentAudience;
+    final nextPayload = '$body:${parent?['event_id']}:$audience';
     if (payload != nextPayload) {
       payload = nextPayload;
       txn = transactionId();
@@ -102,9 +104,13 @@ class _PostScreenState extends State<PostScreen> {
         body,
         txn,
         parent: parent?['event_id'] as String?,
+        audience: audience,
       );
       if (!mounted) return;
-      if (draft.text.trim() == body) draft.clear();
+      if (draft.text.trim() == body) {
+        draft.clear();
+        draftAudience = null;
+      }
       setState(() => parent = null);
       await load();
     } catch (e) {
@@ -249,7 +255,7 @@ class _PostScreenState extends State<PostScreen> {
                               if (replyParent(c) != policy?['anchor_id'] &&
                                   replyParent(c) != widget.event)
                                 Text(
-                                  'Reply to ${replyParent(c)}',
+                                  replyLabel(c),
                                   maxLines: 1,
                                   overflow: TextOverflow.ellipsis,
                                   style: Theme.of(context).textTheme.labelSmall,
@@ -259,7 +265,12 @@ class _PostScreenState extends State<PostScreen> {
                                 room: c['comment_room'] as String,
                                 event: c,
                                 changed: load,
-                                reply: () => setState(() => parent = c),
+                                reply: () => setState(() {
+                                  parent = c;
+                                  if (c['audience'] == 'members') {
+                                    draftAudience = 'members';
+                                  }
+                                }),
                               ),
                             ],
                           ),
@@ -290,8 +301,7 @@ class _PostScreenState extends State<PostScreen> {
                       children: [
                         Expanded(
                           child: Text(
-                            parent?['audience'] == 'members' ||
-                                    policy?['comments_policy'] != 'public'
+                            (draftAudience ?? commentAudience) == 'members'
                                 ? 'Your reply is visible to space members.'
                                 : 'Your reply is public.',
                           ),
@@ -308,13 +318,24 @@ class _PostScreenState extends State<PostScreen> {
                       crossAxisAlignment: CrossAxisAlignment.end,
                       children: [
                         Expanded(
-                          child: TextField(
+                          child: MarkdownShortcuts(
                             controller: draft,
-                            minLines: 1,
-                            maxLines: 5,
-                            maxLength: 16000,
-                            decoration: const InputDecoration(
-                              labelText: 'Write a comment',
+                            onSubmit: send,
+                            child: TextField(
+                              controller: draft,
+                              onChanged: (value) => setState(() {
+                                if (value.isEmpty) {
+                                  draftAudience = null;
+                                } else {
+                                  draftAudience ??= commentAudience;
+                                }
+                              }),
+                              minLines: 1,
+                              maxLines: 5,
+                              maxLength: 16000,
+                              decoration: const InputDecoration(
+                                labelText: 'Write a comment',
+                              ),
                             ),
                           ),
                         ),
@@ -334,7 +355,25 @@ class _PostScreenState extends State<PostScreen> {
     );
   }
 
+  String get commentAudience =>
+      parent?['audience'] == 'members' ||
+          (data?['publication'] as Json?)?['comments_policy'] != 'public'
+      ? 'members'
+      : 'public';
+
+  String replyLabel(Json e) {
+    final parent = comments
+        .where((c) => c['event_id'] == replyParent(e))
+        .firstOrNull;
+    return parent == null
+        ? 'Reply to an earlier comment'
+        : 'Reply to ${parent['sender']}: ${rendered(parent)['body']}';
+  }
+
   String? replyParent(Json e) =>
+      ((e['content'] as Json)['cool.gravitas.river.reply']
+              as Json?)?['event_id']
+          as String? ??
       ((e['content'] as Json)['m.relates_to']
               as Json?)?['m.in_reply_to']?['event_id']
           as String?;
@@ -441,6 +480,54 @@ class _BlogScreenState extends State<BlogScreen> {
   );
 }
 
+class MarkdownShortcuts extends StatelessWidget {
+  const MarkdownShortcuts({
+    super.key,
+    required this.controller,
+    required this.child,
+    this.onSubmit,
+  });
+  final TextEditingController controller;
+  final Widget child;
+  final VoidCallback? onSubmit;
+  @override
+  Widget build(BuildContext context) {
+    final tools = MarkdownToolbar(controller: controller);
+    return CallbackShortcuts(
+      bindings: {
+        for (final meta in [false, true]) ...{
+          SingleActivator(
+            LogicalKeyboardKey.keyB,
+            control: !meta,
+            meta: meta,
+          ): () =>
+              tools.insert('**', '**'),
+          SingleActivator(
+            LogicalKeyboardKey.keyI,
+            control: !meta,
+            meta: meta,
+          ): () =>
+              tools.insert('_', '_'),
+          SingleActivator(
+            LogicalKeyboardKey.keyX,
+            control: !meta,
+            meta: meta,
+            shift: true,
+          ): () =>
+              tools.insert('~~', '~~'),
+          if (onSubmit != null)
+            SingleActivator(
+              LogicalKeyboardKey.enter,
+              control: !meta,
+              meta: meta,
+            ): onSubmit!,
+        },
+      },
+      child: child,
+    );
+  }
+}
+
 class MarkdownToolbar extends StatelessWidget {
   const MarkdownToolbar({super.key, required this.controller});
   final TextEditingController controller;
@@ -463,9 +550,28 @@ class MarkdownToolbar extends StatelessWidget {
     scrollDirection: Axis.horizontal,
     child: Row(
       children: [
+        IconButton(
+          tooltip: 'Preview formatting',
+          icon: const Icon(Icons.visibility_outlined, size: 19),
+          onPressed: () => showDialog<void>(
+            context: context,
+            builder: (context) => AlertDialog(
+              title: const Text('Preview'),
+              scrollable: true,
+              content: SizedBox(width: 600, child: RichBody(controller.text)),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(context),
+                  child: const Text('Close'),
+                ),
+              ],
+            ),
+          ),
+        ),
         for (final item in <(String, IconData, String, String)>[
           ('Bold', Icons.format_bold, '**', '**'),
           ('Italic', Icons.format_italic, '_', '_'),
+          ('Strikethrough', Icons.format_strikethrough, '~~', '~~'),
           ('Heading', Icons.title, '\n## ', ''),
           ('Link', Icons.link, '[', '](https://)'),
           ('Quote', Icons.format_quote, '\n> ', ''),
