@@ -126,7 +126,7 @@ substitute personal accounts, fake JWTs or database-created authorization.
 
 Run `go test -run '^TestProductionJourneyBridge$' -v -timeout 47m` with
 `RIVER_PRODUCTION_JOURNEY_CONFIG=/absolute/protected/config.json`. Use the supported Chrome integration runner: start a matching loopback ChromeDriver,
-then run `flutter drive -d chrome --driver test_driver/production_journey.dart
+then run `flutter drive --release -d web-server --driver test_driver/production_journey.dart
 --target integration_test/production_journey_test.dart`. For Android use
 `flutter test -d <test-emulator> integration_test/production_journey_test.dart`, adding
 `--dart-define=RIVER_JOURNEY_BRIDGE=http://127.0.0.1:57910`. Android needs a task-only

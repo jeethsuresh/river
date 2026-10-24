@@ -2,7 +2,7 @@
 
 This is a separate, manual platform addition. The app workflow does not apply it.
 Use the private Gravitas deployment knowledge and check current cluster capacity
-before rollout. Both app deployment holds must remain false for a manual release.
+before rollout. Coordinate media maintenance with the current tested application deployment workflows; media resources remain separately applied.
 
 The pinned LiveKit SFU and Coturn relay use one private pod each, reserving 350m
 CPU and 640Mi memory together. These are initial bounded reservations, not a
