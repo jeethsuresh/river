@@ -155,23 +155,25 @@ void productionJourneyScenarios() {
         expect(a.friends.length, 2);
         passed('real account profiles and central contact projection');
         stage = 'friend requests';
-        await io(() => a.friendAction(b.user!['user_id'] as String, 'remove'));
-        await io(() => a.friendAction(b.user!['user_id'] as String, 'request'));
-        await io(() => a.friendAction(b.user!['user_id'] as String, 'cancel'));
-        expect(a.requests, isEmpty);
-        await io(() => a.friendAction(b.user!['user_id'] as String, 'request'));
-        await io(b.refresh);
+        // The counterpart initiates this cycle; initial setup exercised Alice's
+        // requests. Keep production rate limits intact during repeated tests.
+        await io(() => b.friendAction(a.user!['user_id'] as String, 'remove'));
+        await io(() => b.friendAction(a.user!['user_id'] as String, 'request'));
+        await io(() => b.friendAction(a.user!['user_id'] as String, 'cancel'));
+        expect(b.requests, isEmpty);
+        await io(() => b.friendAction(a.user!['user_id'] as String, 'request'));
+        await io(a.refresh);
         await show(
           Scaffold(
-            body: FriendsView(app: b, onConversation: () {}),
+            body: FriendsView(app: a, onConversation: () {}),
           ),
         );
         await tap(find.text('Accept'));
         await until(
-          () => b.friends.any((p) => p['user_id'] == a.user!['user_id']),
+          () => a.friends.any((p) => p['user_id'] == b.user!['user_id']),
           'accepted contact missing',
         );
-        await io(a.refresh);
+        await io(b.refresh);
         passed('request, cancel, UI accept and central friendship');
         stage = 'space and channel creation';
         final spaceName = 'Automated $runtime journey';
