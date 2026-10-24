@@ -141,7 +141,7 @@ flutter build web --release --no-web-resources-cdn
 flutter build apk --debug --target-platform android-arm64,android-x64
 ```
 
-The Android identifier is `cool.gravitas.river`. The permanent public certificate
+The Android identifier is `cool.gravitas.river`; the pinned Flutter runtime requires Android 7.0/API 24 or newer. The permanent public certificate
 is pinned in `client/android/release-certificate.sha256`; preserve the original
 private key for updates. Never reuse Orbit's identity or signing key. Debug APKs
 use a different certificate and are development artifacts.

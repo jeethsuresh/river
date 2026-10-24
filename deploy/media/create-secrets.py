@@ -53,7 +53,7 @@ max-bps=2000000
 bps-capacity=10000000
 log-file=stdout
 simple-log
-no-stdout-log
+userdb=/tmp/turndb
 pidfile=/tmp/turnserver.pid
 ''')
 print('Protected configuration created. Apply the three secrets using the commands in deploy/media/README.md.')

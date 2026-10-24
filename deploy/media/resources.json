@@ -240,6 +240,9 @@
                   "capabilities": {
                     "drop": [
                       "ALL"
+                    ],
+                    "add": [
+                      "NET_BIND_SERVICE"
                     ]
                   }
                 },
@@ -273,7 +276,10 @@
                   },
                   "periodSeconds": 20,
                   "failureThreshold": 4
-                }
+                },
+                "command": [
+                  "/usr/bin/turnserver"
+                ]
               }
             ],
             "volumes": [

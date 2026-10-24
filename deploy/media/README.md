@@ -9,7 +9,9 @@ CPU and 640Mi memory together. These are initial bounded reservations, not a
 verified 32-person capacity guarantee. There is no new load balancer, public UDP
 port, host networking, database, or copied TLS key. Existing Traefik terminates
 HTTPS/WSS for rtc.gravitas.cool and TURN/TLS on turn.gravitas.cool:443. The TURN
-TCP route forwards PROXY v2 to a single Coturn proxy listener. Both names use the
+TCP route forwards PROXY v2 to a single Coturn proxy listener. The official
+Coturn binary carries a file capability, so its non-root container retains only
+NET_BIND_SERVICE in the bounding set; other capabilities are dropped. Both names use the
 existing wildcard DNS and certificate.
 
 All clients force relay. SFU and peer-file candidates remain private pod IPs.

@@ -96,7 +96,10 @@ class RiverCalls extends ChangeNotifier {
       chat = result['call_chat_id'] as String?;
       if (android) await service();
       final media = Room(
-        roomOptions: RoomOptions(adaptiveStream: adaptiveStreamForTesting ?? true, dynacast: true),
+        roomOptions: RoomOptions(
+          adaptiveStream: adaptiveStreamForTesting ?? true,
+          dynacast: true,
+        ),
       );
       room = media;
       media.addListener(changed);
@@ -108,6 +111,8 @@ class RiverCalls extends ChangeNotifier {
         ..on<LocalTrackUnpublishedEvent>((event) {
           if (android &&
               !busy &&
+              !_beating &&
+              media.connectionState == ConnectionState.connected &&
               event.publication.source == TrackSource.screenShareVideo) {
             unawaited(
               service(projection: false).catchError((Object _) {

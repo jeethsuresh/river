@@ -10,4 +10,4 @@ River 0.4.0 brings Orbit's conversations, publishing, files and calling to the s
 
 The matching Gravitas API migration and River web/backend must be rolled out before the new features are available. Calling additionally requires the configured SFU/TURN media service. Automatic GitHub deployments remain disabled.
 
-Android uses River's existing package and permanent signing certificate. Physical-device Bluetooth, network handoff and large-call capacity have not been verified. Gravitas supplies a Matrix API subset, without federation or end-to-end encryption.
+Android 7.0 or newer is required by the updated Flutter runtime. Android uses River's existing package and permanent signing certificate. Physical-device Bluetooth, network handoff and large-call capacity have not been verified. Gravitas supplies a Matrix API subset, without federation or end-to-end encryption.

@@ -21,7 +21,7 @@ source = re.search(r'^version:\s*(\d+\.\d+\.\d+)\+(\d+)\s*$', (root / 'client/pu
 if not identity or not source or tuple(identity.groups()) != ('cool.gravitas.river', source[2], source[1]):
     raise SystemExit('APK identity/version does not match River source.')
 minimum = re.search(r"(?:minSdkVersion|sdkVersion):'(\d+)'", metadata)
-if not minimum or minimum[1] != '23':
+if not minimum or minimum[1] != '24':
     raise SystemExit('Unexpected minimum Android version.')
 if re.search(r"application-debuggable", metadata):
     raise SystemExit('Store APK must not be debuggable.')

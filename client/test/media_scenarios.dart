@@ -121,7 +121,17 @@ void mediaScenarios(
           expect(a.calls.error, isNull, reason: '${a.calls.controlFailure}');
           expect(b.calls.error, isNull, reason: '${b.calls.controlFailure}');
           await until(() => subscribed(b));
-          final resumed = b.calls.room!.remoteParticipants.values.first.videoTrackPublications.first.track as RemoteVideoTrack;
+          final resumed =
+              b
+                      .calls
+                      .room!
+                      .remoteParticipants
+                      .values
+                      .first
+                      .videoTrackPublications
+                      .first
+                      .track
+                  as RemoteVideoTrack;
           final before = (await resumed.getReceiverStats())?.framesDecoded ?? 0;
           for (var i = 0; i < 60; i++) {
             await Future<void>.delayed(const Duration(milliseconds: 200));
@@ -178,6 +188,40 @@ void mediaScenarios(
                 (await screen.getReceiverStats())?.framesDecoded ?? 0;
           }
           expect(screenFrames, greaterThan(0));
+          if (const bool.fromEnvironment('RIVER_TEST_TURN')) {
+            await a.calls.renewTransport();
+            expect(a.calls.error, isNull, reason: '${a.calls.controlFailure}');
+            expect(a.calls.sharing, isTrue);
+            await until(
+              () => b.calls.room!.remoteParticipants.values.any(
+                (p) => p.videoTrackPublications.any(
+                  (t) =>
+                      t.source == TrackSource.screenShareVideo &&
+                      t.track is RemoteVideoTrack,
+                ),
+              ),
+            );
+            final resumedScreen =
+                b
+                        .calls
+                        .room!
+                        .remoteParticipants
+                        .values
+                        .first
+                        .videoTrackPublications
+                        .firstWhere(
+                          (t) => t.source == TrackSource.screenShareVideo,
+                        )
+                        .track
+                    as RemoteVideoTrack;
+            num decoded = 0;
+            for (var i = 0; i < 60 && decoded == 0; i++) {
+              await Future<void>.delayed(const Duration(milliseconds: 200));
+              decoded =
+                  (await resumedScreen.getReceiverStats())?.framesDecoded ?? 0;
+            }
+            expect(decoded, greaterThan(0));
+          }
           await a.calls.toggleSharing();
           expect(a.calls.sharing, isFalse);
         }

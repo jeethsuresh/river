@@ -1,10 +1,7 @@
-// ignore_for_file: implementation_imports, invalid_use_of_internal_member
-// The SDK adapter is version-pinned and covered by real browser/Android media tests.
+// ignore_for_file: invalid_use_of_internal_member
+// LiveKit 2.13.1 has no public credential-update API. Keep its pinned transport
+// access confined to this adapter, covered by browser/Android media tests.
 import 'package:livekit_client/livekit_client.dart';
-// LiveKit 2.13.1 has no public credential-update API. Keep the pinned SDK
-// reconnect reason confined to this adapter and exercise it in real media tests.
-import 'package:livekit_client/src/types/internal.dart'
-    show ClientDisconnectReason;
 import 'api.dart';
 
 RTCConfiguration callConfiguration(Json result) => RTCConfiguration(
@@ -24,25 +21,21 @@ RTCConfiguration callConfiguration(Json result) => RTCConfiguration(
 Future<void> renewCallTransport(Room room, Json result) async {
   if (result['jwt'] is String) room.engine.token = result['jwt'] as String;
   final previous = room.connectOptions;
+  final configuration = callConfiguration(result);
   room.engine.connectOptions = ConnectOptions(
     autoSubscribe: previous.autoSubscribe,
     protocolVersion: previous.protocolVersion,
     clientProtocolVersion: previous.clientProtocolVersion,
     timeouts: previous.timeouts,
-    rtcConfiguration: callConfiguration(result),
+    rtcConfiguration: configuration,
   );
-  // The SDK applies both ICE configurations and renegotiates the existing
-  // publisher/subscriber transports, preserving tracks and the call membership.
-  // Clean up the old signaling socket before resuming; otherwise its close
-  // callback can race the replacement connection and mark it disconnected.
-  await room.engine.signalClient.cleanUp();
-  room.engine.fullReconnectOnNext = true;
-  await room.engine.handleReconnect(ClientDisconnectReason.reconnect);
-  for (var i = 0; i < 150; i++) {
-    await Future<void>.delayed(const Duration(milliseconds: 100));
-    if (!room.engine.isPendingReconnect && room.connectionState == ConnectionState.connected) return;
+  // Active Coturn allocations retain their authenticated session key. Install
+  // fresh credentials for subsequent allocations and SDK network reconnects,
+  // without replacing capture streams or interrupting Android MediaProjection.
+  if (room.connectionState == ConnectionState.connected) {
+    await room.engine.publisher?.pc.setConfiguration(configuration.toMap());
+    await room.engine.subscriber?.pc.setConfiguration(configuration.toMap());
   }
-  throw StateError('The call could not reconnect with fresh credentials.');
 }
 
 void updateCallToken(Room room, String token) {
