@@ -180,9 +180,7 @@ The deploy script pins the existing cluster, requires a digest, and checks rollo
 and public trusted HTTPS. Provision namespace `river` and Secret `river-runtime`
 with `GRAVITAS_SESSION_KEY` before initial deployment. The tracked Namespace document
 is applied during initial provisioning; ongoing namespace-scoped CI uses only
-namespaced resources. CI tests and publishes branch images. Main-branch deployment
-is opt-in through `GRAVITAS_DEPLOY_ENABLED=true` and an environment-scoped,
-namespace-limited `GRAVITAS_KUBECONFIG`, following RSS/Office/Spacetime patterns.
+namespaced resources. CI tests and publishes branch images. Successful pushes to `main` deploy automatically after the checks pass, using an environment-scoped, namespace-limited `GRAVITAS_KUBECONFIG`, following RSS/Office/Spacetime patterns.
 
 ## Release verification and limits
 
@@ -194,7 +192,7 @@ fixture and shared browser/Android scenarios check real SFU media, TURN relay an
 peer-file bytes without production accounts or real microphone/camera data.
 
 Production media needs the separate manual [media setup](deploy/media/README.md).
-Keep `GRAVITAS_DEPLOY_ENABLED=false` unless a deployment is expressly requested.
+Backend and web changes merged to `main` deploy automatically after CI passes; complete the relevant tests before merging.
 An APK upload alone does not install its API migration, web image or media pods.
 Physical-device Bluetooth, mobile-network handoff and large-call capacity require
 separate device/load verification. Password recovery remains outside this River
