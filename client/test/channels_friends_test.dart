@@ -227,7 +227,9 @@ void main() {
       expect(api.selected, childId);
       expect(find.text('Back to space'), findsOneWidget);
       expect(find.byType(Drawer), findsNothing);
-      await tester.enterText(find.byType(TextField), 'Meet tomorrow');
+      await tester.tap(find.text('Markdown'));
+      await tester.pumpAndSettle();
+      await tester.enterText(find.byType(TextField).last, 'Meet tomorrow');
       await tester.tap(find.byTooltip('Send'));
       await tester.pumpAndSettle();
       expect(sentTo, contains('/groups/$childId/events/m.room.message/'));

@@ -143,6 +143,8 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
+    await tester.tap(find.text('Markdown'));
+    await tester.pumpAndSettle();
     await tester.enterText(find.byType(TextField), 'Private draft');
     policy = 'public';
     await tester.tap(find.byTooltip('Refresh post'));

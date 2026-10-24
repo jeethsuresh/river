@@ -9,6 +9,9 @@ import 'workspace_widgets.dart';
 import 'attachment_widgets.dart';
 import 'call_widgets.dart';
 import 'file_models.dart' show FileScope;
+import 'rich_composer.dart';
+import 'package:flutter_quill/flutter_quill.dart'
+    show FlutterQuillLocalizations;
 
 void main() {
   runApp(const RiverApp());
@@ -54,6 +57,7 @@ class _RiverAppState extends State<RiverApp> with WidgetsBindingObserver {
     builder: (_, _) => MaterialApp(
       key: ValueKey(app.user?['sub']),
       title: 'River',
+      localizationsDelegates: FlutterQuillLocalizations.localizationsDelegates,
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
         useMaterial3: true,
@@ -104,12 +108,12 @@ class RiverShell extends StatefulWidget {
 
 class _RiverShellState extends State<RiverShell> {
   RiverApi get app => widget.app;
-  String section = 'Home', filter = 'Chat';
+  String section = 'Home', filter = 'Chat', conversationQuery = '';
   final draft = TextEditingController();
   final attachments = <Json>[];
   final timeline = ScrollController();
   String? renderedList, renderedLast;
-  bool newMessages = false, chatPreview = false;
+  bool newMessages = false;
   final collapsed = <String>{};
   @override
   void initState() {
@@ -452,14 +456,33 @@ class _RiverShellState extends State<RiverShell> {
                     onPressed: () => create(kind),
                   ),
                 ),
+                if (kind == 'dm')
+                  Padding(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 16,
+                      vertical: 4,
+                    ),
+                    child: TextField(
+                      key: const ValueKey('conversation-search'),
+                      decoration: const InputDecoration(
+                        labelText: 'Find a conversation',
+                        prefixIcon: Icon(Icons.search),
+                      ),
+                      onChanged: (value) => setState(
+                        () => conversationQuery = value.trim().toLowerCase(),
+                      ),
+                    ),
+                  ),
                 for (final g in app.groups.where(
                   (g) => kind == 'dm'
-                      ? ['dm', 'group'].contains(g['kind'])
+                      ? ['dm', 'group'].contains(g['kind']) &&
+                            conversationMatches(g, conversationQuery)
                       : ![
                           'dm',
                           'group',
                           'channel',
                           'post_comments',
+                          'call_chat',
                         ].contains(g['kind']),
                 ))
                   navigationGroup(g, kind),
@@ -534,27 +557,17 @@ class _RiverShellState extends State<RiverShell> {
       if (kind == 'space' &&
           !collapsed.contains(g['id']) &&
           g['membership'] == 'join')
-        for (final channel in app.channels(g['id'] as String))
-          ListTile(
-            dense: true,
-            contentPadding: const EdgeInsets.only(left: 42, right: 20),
-            selected: app.selected == channel['id'],
-            leading: Icon(
-              channel['channel_kind'] == 'drop_in'
-                  ? Icons.headphones_outlined
-                  : Icons.tag,
-              size: 17,
-            ),
-            title: Text(
-              channel['name'] as String,
-              overflow: TextOverflow.ellipsis,
-              style: const TextStyle(fontSize: 13),
-            ),
-            trailing: (channel['unread_count'] as int? ?? 0) > 0
-                ? Badge(label: Text('${channel['unread_count']}'))
-                : null,
-            onTap: () => open(channel['id'] as String),
-          ),
+        SpaceChannels(
+          app: app,
+          space: g['id'] as String,
+          open: open,
+          thread: (event) {
+            scaffold.currentState?.closeDrawer();
+            unawaited(
+              openRiverThread(context, app, event['group_id'] as String, event),
+            );
+          },
+        ),
     ],
   );
 
@@ -1174,29 +1187,6 @@ class _RiverShellState extends State<RiverShell> {
                     files: attachments,
                     remove: (f) => setState(() => attachments.remove(f)),
                   ),
-                if (viewFilter == 'Chat')
-                  Row(
-                    children: [
-                      Expanded(child: MarkdownToolbar(controller: draft)),
-                      IconButton(
-                        tooltip: chatPreview
-                            ? 'Write message'
-                            : 'Preview message',
-                        onPressed: () =>
-                            setState(() => chatPreview = !chatPreview),
-                        icon: Icon(
-                          chatPreview
-                              ? Icons.edit_outlined
-                              : Icons.visibility_outlined,
-                        ),
-                      ),
-                    ],
-                  ),
-                if (viewFilter == 'Chat' && chatPreview)
-                  ConstrainedBox(
-                    constraints: const BoxConstraints(maxHeight: 150),
-                    child: SingleChildScrollView(child: RichBody(draft.text)),
-                  ),
                 if (viewFilter != 'Chat')
                   FilledButton.icon(
                     onPressed: () => showDialog<bool>(
@@ -1232,21 +1222,11 @@ class _RiverShellState extends State<RiverShell> {
                         icon: const Icon(Icons.attach_file),
                       ),
                       Expanded(
-                        child: MarkdownShortcuts(
+                        child: RichComposer(
                           controller: draft,
-                          onSubmit: () => send(g),
-                          child: TextField(
-                            controller: draft,
-                            minLines: 1,
-                            maxLines: 5,
-                            maxLength: 16000,
-                            decoration: InputDecoration(
-                              hintText: viewFilter == 'Chat'
-                                  ? 'Message ${g['name']}…'
-                                  : 'Write ${viewFilter == 'Posts' ? 'a post' : 'a discussion'}…',
-                              counterText: '',
-                            ),
-                          ),
+                          label: 'Message',
+                          hint: 'Message ${g['name']}…',
+                          onSubmit: sending ? null : () => send(g),
                         ),
                       ),
                       const SizedBox(width: 10),

@@ -1,9 +1,9 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'api.dart';
+import 'rich_composer.dart';
 import 'content_widgets.dart';
 import 'file_models.dart';
-import 'publishing_widgets.dart';
 
 class CallChatScreen extends StatefulWidget {
   const CallChatScreen({super.key, required this.api, required this.room});
@@ -212,7 +212,6 @@ class _CallChatScreenState extends State<CallChatScreen> {
                             icon: const Icon(Icons.close),
                           ),
                         ),
-                      MarkdownToolbar(controller: draft),
                       Row(
                         children: [
                           IconButton(
@@ -223,18 +222,10 @@ class _CallChatScreenState extends State<CallChatScreen> {
                             icon: const Icon(Icons.attach_file),
                           ),
                           Expanded(
-                            child: MarkdownShortcuts(
+                            child: RichComposer(
                               controller: draft,
-                              onSubmit: send,
-                              child: TextField(
-                                controller: draft,
-                                minLines: 1,
-                                maxLines: 4,
-                                maxLength: 16000,
-                                decoration: const InputDecoration(
-                                  labelText: 'Message callers',
-                                ),
-                              ),
+                              label: 'Message callers',
+                              onSubmit: sending ? null : send,
                             ),
                           ),
                           IconButton(
