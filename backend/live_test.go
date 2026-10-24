@@ -15,6 +15,11 @@ func TestLiveRelayOnlyForwardsInvalidationProtocol(t *testing.T) {
 		if r.URL.Path != "/app/v1/live" || r.Header.Get("Authorization") != "Bearer private" {
 			t.Fatal("not pinned")
 		}
+		// Gravitas's API pipeline negotiates JSON before the live controller
+		// explicitly writes text/event-stream. An SSE-only Accept is rejected.
+		if !strings.Contains(r.Header.Get("Accept"), "application/json") {
+			return &http.Response{StatusCode: 500, Header: http.Header{}, Body: io.NopCloser(strings.NewReader(`{"error":"not_acceptable"}`))}, nil
+		}
 		return &http.Response{StatusCode: 200, Header: http.Header{"Content-Type": []string{"text/event-stream"}}, Body: io.NopCloser(strings.NewReader("event: ready\ndata: {}\n\nevent: invalidate\ndata: {\"private\":true}\n\nevent: revoked\ndata: {}\n\n"))}, nil
 	})}}}
 	w := httptest.NewRecorder()

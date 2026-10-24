@@ -104,3 +104,11 @@ Verification evidence is recorded with the release. Functional coverage of the
 reference is distinct from exhaustive device/network/load assurance: physical
 Bluetooth, network handoff and high-participant call capacity remain unverified.
 No claim of flawless operation, full Matrix conformance, federation or E2EE is made.
+
+## Verification ledger
+
+[VERIFICATION_GAPS.md](VERIFICATION_GAPS.md) records the remaining physical-device,
+network, capacity, storage, accessibility and complete production journey checks.
+The configured call participant ceiling has been removed from both the broker
+and media configuration; a bounded 64-participant signaling admission check is
+not a media capacity guarantee.

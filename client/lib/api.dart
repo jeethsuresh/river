@@ -131,6 +131,7 @@ class RiverApi extends ChangeNotifier {
 
   String? selected, error, pairingLabel;
   bool loading = true, busy = false, _active = true, again = false;
+  Completer<void>? _queuedRefresh;
   bool get active => _active;
   set active(bool value) {
     _active = value;
@@ -236,7 +237,9 @@ class RiverApi extends ChangeNotifier {
   Future<void> refresh() async {
     if (busy) {
       again = true;
-      return;
+      // A mutation can finish while an older read is still in flight. Its
+      // caller must wait for the queued fresh read, rather than use old state.
+      return (_queuedRefresh ??= Completer<void>()).future;
     }
     busy = true;
     final account = accountKey;
@@ -322,12 +325,20 @@ class RiverApi extends ChangeNotifier {
     } catch (e) {
       error = '$e';
     } finally {
+      final queued = _queuedRefresh;
+      _queuedRefresh = null;
       busy = false;
-      notifyListeners();
       if (again && user != null) {
         again = false;
-        unawaited(refresh());
+        // Start before notifying listeners so another request cannot overtake
+        // this queued pass. Each waiter finishes after its pass, even if more
+        // invalidations arrive while that pass runs.
+        unawaited(refresh().whenComplete(() => queued?.complete()));
+      } else {
+        again = false;
+        queued?.complete();
       }
+      notifyListeners();
     }
   }
 
