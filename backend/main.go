@@ -24,8 +24,9 @@ import (
 )
 
 type pairing struct {
-	Challenge, Label, Session string
-	Expires                   time.Time
+	Challenge, Label, Session, Username string
+	Register                            bool
+	Expires                             time.Time
 }
 type server struct {
 	auth   *gravitas.Client
@@ -99,12 +100,19 @@ func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case "/healthz":
 		respond(w, 200, map[string]string{"status": "ok", "app": "River"})
 		return
-	case "/auth/gravitas/start":
+	case "/auth/gravitas/config":
+		respond(w, 200, map[string]string{"defaultDomain": s.auth.DefaultDomain()})
+		return
+	case "/auth/gravitas/start", "/auth/gravitas/register":
 		if r.Method != "GET" {
 			w.WriteHeader(405)
 			return
 		}
-		if err := s.auth.Start(w, r, false); err != nil {
+		if err := s.auth.Start(w, r, r.URL.Path == "/auth/gravitas/register"); err != nil {
+			if errors.Is(err, gravitas.ErrInvalidUsername) {
+				fail(w, 400, err.Error())
+				return
+			}
 			fail(w, 503, "Gravitas sign-in is temporarily unavailable")
 		}
 		return
@@ -155,6 +163,7 @@ func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		// session additionally permits this account's private member comments.
 		if session, err := s.session(r); err == nil {
 			token = session.LocalToken
+			r = s.withIssuer(r, session.Authorization.Issuer)
 		}
 		s.proxy(w, r, token, upstream)
 		return
@@ -169,6 +178,7 @@ func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			fail(w, status, err.Error())
 			return
 		}
+		r = s.withIssuer(r, session.Authorization.Issuer)
 		if r.Method != "GET" && !s.auth.ValidMutation(r) {
 			fail(w, 403, "Invalid request")
 			return
@@ -352,7 +362,7 @@ func (s *server) proxy(w http.ResponseWriter, r *http.Request, token, upstream s
 			q.Set(key, value)
 		}
 	}
-	req, err := http.NewRequestWithContext(r.Context(), r.Method, s.auth.Issuer+upstream+"?"+q.Encode(), bytes.NewReader(raw))
+	req, err := http.NewRequestWithContext(r.Context(), r.Method, s.upstream(r.Context()).Issuer+upstream+"?"+q.Encode(), bytes.NewReader(raw))
 	if err != nil {
 		fail(w, 400, "Invalid request")
 		return
@@ -362,7 +372,7 @@ func (s *server) proxy(w http.ResponseWriter, r *http.Request, token, upstream s
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "application/json")
-	resp, err := s.auth.HTTP.Do(req)
+	resp, err := s.upstream(r.Context()).HTTP.Do(req)
 	if err != nil {
 		fail(w, 503, "Gravitas is temporarily unavailable")
 		return
@@ -384,9 +394,16 @@ func (s *server) nativeNew(w http.ResponseWriter, r *http.Request) {
 	}
 	var input struct {
 		Challenge string `json:"challenge"`
+		Username  string `json:"username"`
+		Register  bool   `json:"register"`
 	}
 	if decode(r, &input) != nil {
 		fail(w, 400, "Invalid request")
+		return
+	}
+	_, username, resolveErr := s.auth.ResolveLogin(input.Username, input.Register)
+	if resolveErr != nil {
+		fail(w, 400, "Use a username or user@domain")
 		return
 	}
 	b, err := base64.RawURLEncoding.DecodeString(input.Challenge)
@@ -407,7 +424,7 @@ func (s *server) nativeNew(w http.ResponseWriter, r *http.Request) {
 	}
 	id := random()
 	label := strings.ToUpper(id[:6])
-	s.pairs[id] = &pairing{Challenge: input.Challenge, Label: label, Expires: time.Now().Add(5 * time.Minute)}
+	s.pairs[id] = &pairing{Username: username, Register: input.Register, Challenge: input.Challenge, Label: label, Expires: time.Now().Add(5 * time.Minute)}
 	respond(w, 200, map[string]string{"id": id, "label": label, "url": s.auth.AppURL + "/auth/native/start?id=" + id})
 }
 func (s *server) nativeStart(w http.ResponseWriter, r *http.Request) {
@@ -427,8 +444,8 @@ func (s *server) nativeStart(w http.ResponseWriter, r *http.Request) {
 	clone := r.Clone(r.Context())
 	u := *r.URL
 	clone.URL = &u
-	clone.URL.RawQuery = url.Values{"next": {"/device/link?id=" + id}}.Encode()
-	if err := s.auth.Start(w, clone, false); err != nil {
+	clone.URL.RawQuery = url.Values{"next": {"/device/link?id=" + id}, "username": {p.Username}}.Encode()
+	if err := s.auth.Start(w, clone, p.Register); err != nil {
 		fail(w, 503, "Sign-in is temporarily unavailable")
 	}
 }
@@ -489,4 +506,21 @@ func (s *server) nativeSession(w http.ResponseWriter, r *http.Request) {
 	value := p.Session
 	delete(s.pairs, input.ID)
 	respond(w, 200, map[string]string{"session": value})
+}
+
+// The selected issuer comes only from a verified app session.
+type upstreamIssuerKey struct{}
+
+func (s *server) withIssuer(r *http.Request, issuer string) *http.Request {
+	selected, err := s.auth.ForIssuer(issuer)
+	if err != nil {
+		return r
+	}
+	return r.WithContext(context.WithValue(r.Context(), upstreamIssuerKey{}, selected))
+}
+func (s *server) upstream(ctx context.Context) *gravitas.Client {
+	if selected, ok := ctx.Value(upstreamIssuerKey{}).(*gravitas.Client); ok {
+		return selected
+	}
+	return s.auth
 }

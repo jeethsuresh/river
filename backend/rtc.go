@@ -51,9 +51,9 @@ func icePolicy() string {
 	return "all"
 }
 func (s *server) rtc(w http.ResponseWriter, r *http.Request, session gravitas.AppSession) {
-	req, _ := http.NewRequestWithContext(r.Context(), "GET", s.auth.Issuer+"/app/v1/rtc", nil)
+	req, _ := http.NewRequestWithContext(r.Context(), "GET", s.upstream(r.Context()).Issuer+"/app/v1/rtc", nil)
 	req.Header.Set("Authorization", "Bearer "+session.LocalToken)
-	response, err := s.auth.HTTP.Do(req)
+	response, err := s.upstream(r.Context()).HTTP.Do(req)
 	if err != nil {
 		fail(w, 503, "Gravitas permissions are temporarily unavailable")
 		return
@@ -96,10 +96,10 @@ func signRTC(c rtcConfig, subject string, video map[string]any, extra map[string
 }
 func (s *server) iamRequest(ctx context.Context, token, path string, body any) (map[string]any, int, error) {
 	raw, _ := json.Marshal(body)
-	req, _ := http.NewRequestWithContext(ctx, "POST", s.auth.Issuer+path, bytes.NewReader(raw))
+	req, _ := http.NewRequestWithContext(ctx, "POST", s.upstream(ctx).Issuer+path, bytes.NewReader(raw))
 	req.Header.Set("Authorization", "Bearer "+token)
 	req.Header.Set("Content-Type", "application/json")
-	resp, err := s.auth.HTTP.Do(req)
+	resp, err := s.upstream(ctx).HTTP.Do(req)
 	if err != nil {
 		return nil, 503, err
 	}
@@ -150,6 +150,11 @@ func (s *server) rtcUpdate(w http.ResponseWriter, r *http.Request, session gravi
 	}
 	get := func(k string) string { v, _ := data[k].(string); return v }
 	name, identity := get("livekit_room"), get("identity")
+	if issuer := session.Authorization.Issuer; issuer != s.auth.Issuer {
+		name = "river_" + challenge(issuer+"|"+name)
+		identity = challenge(issuer + "|" + identity)
+		data["livekit_room"], data["identity"] = name, identity
+	}
 	if get("transport_url") != c.URL || !strings.HasPrefix(name, "river_") || identity == "" {
 		fail(w, 502, "Media service configuration does not match Gravitas")
 		return
@@ -164,7 +169,7 @@ func (s *server) rtcUpdate(w http.ResponseWriter, r *http.Request, session gravi
 		}
 	}
 	if input.Action == "join" || input.Action == "renew" {
-		metadata, _ := json.Marshal(map[string]string{"lease": input.Member})
+		metadata, _ := json.Marshal(map[string]string{"lease": input.Member, "issuer": session.Authorization.Issuer})
 		data["iceTransportPolicy"] = icePolicy()
 		data["iceServers"] = iceServers(session.Authorization.Subject)
 		data["jwt"] = signRTC(c, identity, map[string]any{"roomJoin": true, "room": name, "canPublish": true, "canSubscribe": true, "canPublishData": true, "canUpdateOwnMetadata": false}, map[string]any{"metadata": string(metadata), "name": "River participant"})
@@ -240,13 +245,19 @@ func (s *server) reapRTC(ctx context.Context) {
 		}
 		for _, peer := range peers.Participants {
 			var metadata struct {
-				Lease string `json:"lease"`
+				Lease  string `json:"lease"`
+				Issuer string `json:"issuer"`
 			}
 			_ = json.Unmarshal([]byte(peer.Metadata), &metadata)
 			active := false
 			if len(metadata.Lease) == 43 && txnPattern.MatchString(metadata.Lease) {
-				req, _ := http.NewRequestWithContext(ctx, "GET", s.auth.Issuer+"/rtc/leases/"+metadata.Lease, nil)
-				if response, err := s.auth.HTTP.Do(req); err == nil {
+				selected, err := s.auth.ForIssuer(metadata.Issuer)
+				if err != nil {
+					_ = s.rtcAdmin(ctx, c, "RemoveParticipant", map[string]any{"room": room.Name, "identity": peer.Identity}, map[string]any{"roomAdmin": true, "room": room.Name}, nil)
+					continue
+				}
+				req, _ := http.NewRequestWithContext(ctx, "GET", selected.Issuer+"/rtc/leases/"+metadata.Lease, nil)
+				if response, err := selected.HTTP.Do(req); err == nil {
 					var result struct {
 						Active bool `json:"active"`
 					}
