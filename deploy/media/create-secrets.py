@@ -27,7 +27,7 @@ rtc:
       secret_file: /run/river/turn-secret
       ttl: 300
 room:
-  max_participants: 32
+  max_participants: 0
 logging:
   level: warn
 ''')

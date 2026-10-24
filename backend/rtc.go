@@ -162,7 +162,9 @@ func (s *server) rtcUpdate(w http.ResponseWriter, r *http.Request, session gravi
 	if input.Action == "leave" {
 		_ = s.rtcAdmin(r.Context(), c, "RemoveParticipant", map[string]any{"room": name, "identity": identity}, map[string]any{"roomAdmin": true, "room": name}, nil)
 	} else if input.Action == "join" {
-		if err := s.rtcAdmin(r.Context(), c, "CreateRoom", map[string]any{"name": name, "empty_timeout": 60, "departure_timeout": 10, "max_participants": 32}, map[string]any{"roomCreate": true}, nil); err != nil {
+		// Omit max_participants: LiveKit's zero default has no room-size cap.
+		// The SFU configuration must use the same default (deploy/media).
+		if err := s.rtcAdmin(r.Context(), c, "CreateRoom", map[string]any{"name": name, "empty_timeout": 60, "departure_timeout": 10}, map[string]any{"roomCreate": true}, nil); err != nil {
 			_, _, _ = s.iamRequest(r.Context(), session.LocalToken, "/app/v1/groups/"+room+"/rtc", map[string]string{"action": "leave", "member_id": input.Member})
 			fail(w, 503, "The media service could not start this call. Please retry.")
 			return
