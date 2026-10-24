@@ -9,3 +9,7 @@ Uses River’s existing permanent Android signing certificate and minimum Androi
 7.0 (API 24). Gravitas handles accounts; password recovery remains deferred.
 Automatic GitHub deployments remain disabled. See docs/VERIFICATION_GAPS.md for
 the bounded admission check and the precise verification limits.
+
+Preserves 0.5.1's username/domain sign-in and the current verified signed Android
+release workflow. GitHub publishes the signed APK after its release tests pass;
+application deployment remains manual with GRAVITAS_DEPLOY_ENABLED=false.

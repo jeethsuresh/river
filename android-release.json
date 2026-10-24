@@ -1,0 +1,20 @@
+{
+  "name": "River",
+  "kind": "flutter",
+  "project_dir": "client",
+  "version_file": "client/pubspec.yaml",
+  "package": "cool.gravitas.river",
+  "min_sdk": 24,
+  "key_alias": "river-release",
+  "certificate_sha256": "6559956b5cf6b2f796824995b31da7fa2c176ba652e8fcb40741686d850bb6b0",
+  "apk": "client/build/app/outputs/flutter-apk/app-release.apk",
+  "asset": "River-v{version}-android.apk",
+  "build": [
+    "flutter",
+    "--no-version-check",
+    "build",
+    "apk",
+    "--release"
+  ],
+  "release_notes": "docs/RELEASE_NOTES.md"
+}
