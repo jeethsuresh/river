@@ -1,0 +1,9 @@
+{
+  "schemaVersion": 1,
+  "version": "0.5.1",
+  "versionCode": 6,
+  "changes": [
+    "Sign in with your username and the 🔥 submit button.",
+    "Use user@domain to sign in through another Gravitas provider, with calls, files and account data bound to the selected account."
+  ]
+}
