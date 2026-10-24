@@ -104,3 +104,30 @@ is out of this run's scope by the user's instruction.
 
 Pending the current run. Keep failed steps and reproduction details even when a
 subsequent fix passes. Never commit credentials or disposable session envelopes.
+
+### Automated reproduction
+
+The shared scenario is `client/test/production_journey_scenarios.dart`, with
+Chrome and Android entry points at `client/test/browser/production_journey_test.dart`
+and `client/integration_test/production_journey_test.dart`. Production execution
+is opt-in; normal CI does not create accounts or contact production.
+
+`backend/production_harness_test.go` supplies a loopback-only bridge using three
+fresh disposable users (the third is needed to select a group conversation).
+Its protected JSON configuration is outside Git: `actors` maps `alice`, `bob`,
+`carol` to `username`, `token` (a normal native envelope), and `iam_cookie` (the
+same fixture's Gravitas browser session for consent-revocation testing). Only
+fixture usernames matching `rq[abc][a-f0-9]{8}` are accepted. Obtain those sessions
+through actual Gravitas password/PKCE/consent and explicit native handoff; do not
+substitute personal accounts, fake JWTs or database-created authorization.
+
+Run `go test -run '^TestProductionJourneyBridge$' -v -timeout 47m` with
+`RIVER_PRODUCTION_JOURNEY_CONFIG=/absolute/protected/config.json`. Run the Chrome
+entry point with `flutter test --platform chrome`, or the Android entry point
+with `flutter test -d <test-emulator>`, adding
+`--dart-define=RIVER_JOURNEY_BRIDGE=http://127.0.0.1:57910`. Android needs a task-only
+`adb reverse tcp:57910 tcp:57910`. Test code uses a live integration clock for
+real SSE/network concurrency and no credentials in Dart defines. Only the local
+bridge injects the real native envelopes; API/SSE/media responses come from
+production. Peer-file discovery is excluded from this journey and retains its
+separate transport coverage. This does not verify a physical signed-app login UI.

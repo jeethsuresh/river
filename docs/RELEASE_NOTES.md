@@ -1,20 +1,10 @@
-# River 0.5.0
+# River 0.5.2
 
-Complete the remaining gaps found against Orbit main f8abebc in the shared Flutter
-web and Android client:
+- Remove the configured 32-participant call ceiling from the Go broker and SFU configuration. Usable call capacity still depends on media, devices and server resources.
+- Wait for queued refreshes after membership, channel and content actions so an in-flight older read cannot leave the shared web/Android client using stale state.
+- Add repeatable, opt-in production-account journey tests and a tracked verification ledger for the remaining physical-device, network, load, storage and accessibility checks.
 
-- Visual rich-text editing, Markdown and preview modes, undo/redo, safe link editing
-  and formatting shortcuts in messages, replies, posts, discussions and call chat.
-- Search conversations by name or member. Expand channel-specific recent threads,
-  collapse text/voice sections and see voice-room occupancy.
-- Separate unread posts, discussions, channel activity and conversations. Long posts
-  cannot crowd discussions out of Home, and opening entries clears their markers.
-- Keep published-post reactions and comment counts consistent between feed and
-  detail while preserving earlier member-only reactions in private event history.
-- Preserve permission errors when joining calls, with a direct Gravitas reconnect.
-
-Uses the same permanent Android signing certificate and minimum Android 7.0 (API
-24) as 0.4.0. Gravitas handles accounts; password recovery is deferred. Automatic
-GitHub deployments remain disabled. Physical-device Bluetooth/network handoff and
-large-call capacity are not claimed as verified. See docs/ORBIT_PARITY.md for the
-source audit and integration boundaries.
+Uses River’s existing permanent Android signing certificate and minimum Android
+7.0 (API 24). Gravitas handles accounts; password recovery remains deferred.
+Automatic GitHub deployments remain disabled. See docs/VERIFICATION_GAPS.md for
+the bounded admission check and the precise verification limits.
