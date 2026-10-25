@@ -212,3 +212,25 @@ verification must use the default true setting against the fixed deployment.
   content/policy writes and then waits for one final refresh. Regressions verify
   policy persistence despite a blocked read and no duplicate post after a policy
   failure/retry.
+
+### Isolated Linux browser execution
+
+The opt-in `production-journey.yml` workflow uses checksum-pinned official Chrome
+and ChromeDriver 141.0.7390.122, the pinned Flutter SDK, and the same shared
+scenario. It needs `RIVER_PRODUCTION_JOURNEY_ENABLED=true` plus an encrypted
+`RIVER_PRODUCTION_JOURNEY_CONFIG` containing only the three recorded disposable
+actors. `RIVER_PRODUCTION_JOURNEY_MEDIA_ONLY=true` is a focused diagnostic with
+only two checkpoints; it is not a full-journey pass. The wrapper requires eight
+checkpoints for a complete run and uploads credential-free result artifacts.
+Remove the temporary secret and disable the opt-in after verification.
+
+Focused Linux assertions passed actual production audio/video and both revocation
+paths. The first workflow's final wrapper check failed because `rg` was absent;
+its assertion artifact remains evidence for the focused media case, not a green
+workflow. The portable wrapper now verifies the result with Python.
+
+macOS headless attempts passed account/content stages but did not establish
+reliable two-participant call setup: temporary leases expired while setup waited.
+System sleep interrupted earlier attempts; keeping the host awake did not by
+itself close the headless-media gap. Linux coverage does not establish physical
+Mac browser/background behavior. The broader browser/device matrix remains open.

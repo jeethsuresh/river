@@ -53,4 +53,10 @@ result=0
 flutter drive "${args[@]}" > "$RUNNER_TEMP/journey.log" 2>&1 || result=$?
 tail -n 100 "$RUNNER_TEMP/journey.log"
 [[ "$result" == 0 ]] || exit "$result"
-rg -q 'All tests passed\.' "$RUNNER_TEMP/journey.log"
+python3 - "$RUNNER_TEMP/journey.log" "${MEDIA_ONLY:-false}" <<'PY_CHECK'
+import json,pathlib,sys
+assert 'All tests passed.' in pathlib.Path(sys.argv[1]).read_text()
+result=json.loads(pathlib.Path('build/integration_response_data.json').read_text())
+assert 'failureStage' not in result
+assert len(result['passed']) == (2 if sys.argv[2]=='true' else 8)
+PY_CHECK
