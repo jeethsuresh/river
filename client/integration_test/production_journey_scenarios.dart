@@ -2,6 +2,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_quill/flutter_quill.dart' as q;
 import 'package:flutter_test/flutter_test.dart';
+import 'package:integration_test/integration_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:livekit_client/livekit_client.dart';
 import 'package:river/api.dart';
@@ -21,7 +22,36 @@ class JourneyApi extends RiverApi {
   JourneyApi(this.actor) : super(live: true);
   final String actor;
   @override
-  Uri uri(String path) => Uri.parse('$journeyBridge/$actor$path');
+  Uri uri(String path) {
+    var base = Uri.parse(journeyBridge);
+    if (kIsWeb) {
+      final offset = {'alice': 0, 'bob': 1, 'carol': 2}[actor] ?? 0;
+      base = base.replace(port: base.port + offset);
+    }
+    return base.resolve('/$actor$path');
+  }
+
+  @override
+  Future<Json> request(String path, {String method = 'GET', Json? body}) async {
+    final timer = Stopwatch()..start();
+    try {
+      return await super.request(path, method: method, body: body);
+    } on ApiException catch (e) {
+      debugPrint(
+        'JOURNEY HTTP [$actor] $method ${path.split('?').first} '
+        'status=${e.status} code=${e.code}',
+      );
+      rethrow;
+    } finally {
+      if (timer.elapsed > const Duration(seconds: 3)) {
+        debugPrint(
+          'JOURNEY SLOW [$actor] $method ${path.split('?').first} '
+          '${timer.elapsedMilliseconds}ms',
+        );
+      }
+    }
+  }
+
   @override
   Future<void> boot() async {
     // Peer-file discovery has its own transport suite. This journey covers
@@ -79,17 +109,20 @@ void productionJourneyScenarios() {
       Future<void> visible(Finder f) async =>
           until(() => f.evaluate().isNotEmpty, 'missing $f');
       Future<void> tap(Finder f) async {
+        debugPrint('JOURNEY UI locate $f');
         await visible(f);
         await tester.ensureVisible(f);
         await tester.pump();
         await tester.tap(f);
         await tester.pump(const Duration(milliseconds: 300));
+        debugPrint('JOURNEY UI tapped $f');
       }
 
       Future<void> show(Widget child) async {
+        final rootKey = UniqueKey();
         await tester.pumpWidget(
           MaterialApp(
-            key: UniqueKey(),
+            key: rootKey,
             localizationsDelegates:
                 q.FlutterQuillLocalizations.localizationsDelegates,
             theme: ThemeData(useMaterial3: true),
@@ -100,6 +133,7 @@ void productionJourneyScenarios() {
             ),
           ),
         );
+        await visible(find.byKey(rootKey));
         await tester.pump(const Duration(milliseconds: 300));
       }
 
@@ -116,6 +150,7 @@ void productionJourneyScenarios() {
           ),
         );
         await tap(find.text('Open journey dialog'));
+        await visible(find.byWidget(child));
       }
 
       Future<void> source(String text) async {
@@ -139,7 +174,11 @@ void productionJourneyScenarios() {
         }
       }
 
+      final checkpoints = <String>[];
+      final binding = IntegrationTestWidgetsFlutterBinding.instance;
       void passed(String stage) {
+        checkpoints.add(stage);
+        binding.reportData = {'runtime': runtime, 'passed': checkpoints};
         debugPrint('JOURNEY PASS [$runtime] $stage');
       }
 
@@ -173,6 +212,7 @@ void productionJourneyScenarios() {
           of: find.text('Accept'),
           matching: find.byType(FilledButton),
         );
+        await visible(accept);
         expect(tester.widget<FilledButton>(accept).onPressed, isNotNull);
         await tap(accept);
         await until(
@@ -650,6 +690,12 @@ void productionJourneyScenarios() {
         if (e is ApiException) {
           debugPrint('JOURNEY HTTP failure: ${e.status} ${e.code}');
         }
+        binding.reportData = {
+          'runtime': runtime,
+          'passed': checkpoints,
+          'failureStage': stage,
+          'error': '$e',
+        };
         debugPrint('JOURNEY FAILED [$runtime] stage=$stage: $e');
         rethrow;
       } finally {
@@ -666,6 +712,6 @@ void productionJourneyScenarios() {
       }
     },
     skip: journeyBridge.isEmpty,
-    timeout: const Timeout(Duration(minutes: 12)),
+    timeout: const Timeout(Duration(minutes: 20)),
   );
 }

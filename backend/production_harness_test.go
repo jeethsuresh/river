@@ -68,7 +68,13 @@ func TestProductionJourneyBridge(t *testing.T) {
 		r.Header.Set("Origin", target.String())
 		r.Header.Set("X-Gravitas-CSRF", "1")
 	}
-	proxy.ModifyResponse = func(r *http.Response) error { r.Header.Del("Set-Cookie"); return nil }
+	proxy.ModifyResponse = func(r *http.Response) error {
+		r.Header.Del("Set-Cookie")
+		if r.StatusCode >= 400 {
+			t.Logf("fixture upstream %s %s: %d content-type=%s", r.Request.Method, r.Request.URL.Path, r.StatusCode, r.Header.Get("Content-Type"))
+		}
+		return nil
+	}
 	proxy.ErrorHandler = func(w http.ResponseWriter, r *http.Request, e error) {
 		http.Error(w, "Production bridge upstream unavailable", 502)
 	}
@@ -143,20 +149,25 @@ func TestProductionJourneyBridge(t *testing.T) {
 		}
 		proxy.ServeHTTP(w, r)
 	})
-	listener, err := net.Listen("tcp", "127.0.0.1:57910")
-	if err != nil {
-		t.Fatal(err)
+	// Each browser actor gets a separate connection pool, as separate signed-in
+	// browser sessions would. Sharing three long-lived SSE streams on one HTTP/1
+	// origin otherwise makes the harness itself contend with API preflights.
+	for _, port := range []int{57910, 57911, 57912} {
+		listener, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", port))
+		if err != nil {
+			t.Fatal(err)
+		}
+		h := &http.Server{Handler: handler, ReadHeaderTimeout: 5 * time.Second}
+		go h.Serve(listener)
+		t.Cleanup(func() {
+			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+			defer cancel()
+			_ = h.Shutdown(ctx)
+			_ = h.Close()
+		})
 	}
-	h := &http.Server{Handler: handler, ReadHeaderTimeout: 5 * time.Second}
-	go h.Serve(listener)
-	t.Cleanup(func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-		defer cancel()
-		_ = h.Shutdown(ctx)
-		_ = h.Close()
-		transport.CloseIdleConnections()
-	})
-	t.Log("Real-account loopback production bridge ready on 57910; no personal browser session used")
+	t.Cleanup(transport.CloseIdleConnections)
+	t.Log("Real-account loopback production bridge ready on 57910-57912; no personal browser session used")
 	select {
 	case <-done:
 	case <-time.After(45 * time.Minute):

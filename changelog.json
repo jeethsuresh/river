@@ -5,6 +5,7 @@
   "changes": [
     "Removed the configured 32-person call ceiling. Usable media capacity still depends on devices, relay capacity and server resources.",
     "Fixed queued refreshes so membership, channel and content actions wait for current data.",
+    "Post saves now persist content and visibility policy before waiting for one final refresh, keeping retries tied to the created post.",
     "Restored live updates by fixing event-stream negotiation with Gravitas.",
     "Fixed public comments and reactions when a previously saved private post is published.",
     "Added production-account integration coverage and documented the remaining device, network, load and accessibility checks."

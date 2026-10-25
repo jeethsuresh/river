@@ -389,6 +389,7 @@ class _EntryEditorState extends State<EntryEditor> {
           existing,
           visibility,
           commentsPolicy,
+          refreshAfter: false,
         );
       }
       if (existing != null) {
@@ -397,6 +398,7 @@ class _EntryEditorState extends State<EntryEditor> {
           existing,
           content['title'] as String,
           content['body'] as String,
+          refreshAfter: false,
         );
       } else {
         final result = await widget.app.send(
@@ -404,6 +406,7 @@ class _EntryEditorState extends State<EntryEditor> {
           'cool.gravitas.river.${widget.kind}.v1',
           content,
           txn,
+          refreshAfter: false,
         );
         createdEvent = result['event_id'] as String;
       }
@@ -413,8 +416,12 @@ class _EntryEditorState extends State<EntryEditor> {
           existing ?? createdEvent!,
           visibility,
           commentsPolicy,
+          refreshAfter: false,
         );
       }
+      // Persist the complete ordered mutation before waiting for its read model.
+      // A slow snapshot must not strand a new post without its visibility policy.
+      await widget.app.refresh();
       if (mounted) Navigator.pop(context, true);
     } catch (e) {
       if (mounted) setState(() => error = '$e · Your draft is kept.');

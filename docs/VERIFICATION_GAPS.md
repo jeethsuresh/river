@@ -83,7 +83,7 @@ the requested fresh run will be appended below; pending steps are not passes.
 
 ## 7. Browser, device, input and accessibility matrix
 
-Chrome and an API 36.1 Android emulator plus 360/768/1440-width layout tests are
+Chrome and an Android API 36 emulator (36.1 system image) plus 360/768/1440-width layout tests are
 not comprehensive Firefox/Safari/mobile-browser coverage. Physical older Android
 (minimum API 24), OEM variants, IMEs, TalkBack, keyboard navigation and large text
 need explicit coverage. A physical device is needed to close physical-only gaps.
@@ -105,8 +105,34 @@ is out of this run's scope by the user's instruction.
 
 ## Production journey results
 
-Pending the current run. Keep failed steps and reproduction details even when a
-subsequent fix passes. Never commit credentials or disposable session envelopes.
+Fresh disposable accounts completed real Gravitas password/PKCE/consent and
+one-time native pairing; replay was denied. No personal browser session was used.
+The full default Android baseline scenario passed on 2026-10-24 in 8m47s using Flutter
+3.47.7 instrumentation on an isolated Android API 36 emulator (36.1 system image).
+It exercised the shared widgets and real deployed APIs/SSE/SFU, including decoded
+remote video, audio subscription, mute/unmute, call-chat ACLs, membership removal,
+rejoin, and live consent revocation.
+
+Final web and Android results for the additional post-save sequencing fix are
+recorded in [River PR #11](https://github.com/jeethsuresh/river/pull/11), including
+the exact tested client commit and any remaining failures. Earlier failed
+attempts are diagnostic evidence, not passes. Creation widgets were exercised on initial attempts; successful retries
+reuse only their recorded disposable spaces/channels/conversations. The tests
+combine shared-widget interactions with direct API assertions for persistence,
+relations, authorization and privacy. They do not establish physical sound
+quality or a physical signed-APK login/Store-install journey.
+
+The successful Android run used River source `b839d79` (0.5.2+7), image
+`sha256:66bce6b6387672238ee1cd6cbbc9df74af5a1d9b1faeca55d42c26af19aedf89`,
+and Gravitas source `9f9b789`, image
+`sha256:b82a9a3f85d5dc3eea718cf29480a18ab8453c906356a01c6cacecfb3bed2006`.
+The combined Gravitas CI passed 75 + 27 + 207 tests with no failures.
+Go race checks, Flutter analysis and 42 shared unit/widget tests also passed.
+
+Concurrent fixture reads sometimes took 3–11 seconds on the current reserved
+resources. This is functional coverage, not a latency SLO or load qualification.
+Keep failed steps and reproduction details even when a subsequent fix passes.
+Never commit credentials or disposable session envelopes.
 
 ### Automated reproduction
 
@@ -124,17 +150,41 @@ fixture usernames matching `rq[abc][a-f0-9]{8}` are accepted. Obtain those sessi
 through actual Gravitas password/PKCE/consent and explicit native handoff; do not
 substitute personal accounts, fake JWTs or database-created authorization.
 
+The bridge binds three loopback ports (57910–57912), giving the three browser
+actors independent HTTP connection pools instead of multiplexing their SSE
+streams and API/preflight traffic on one HTTP/1 origin. Only the test harness
+uses these origins; the shipped clients continue to use the normal River URL.
+
 Run `go test -run '^TestProductionJourneyBridge$' -v -timeout 47m` with
-`RIVER_PRODUCTION_JOURNEY_CONFIG=/absolute/protected/config.json`. Use the supported Chrome integration runner: start a matching loopback ChromeDriver,
-then run `flutter drive --release -d web-server --driver test_driver/production_journey.dart
---target integration_test/production_journey_test.dart`. For Android use
-`flutter test -d <test-emulator> integration_test/production_journey_test.dart`, adding
-`--dart-define=RIVER_JOURNEY_BRIDGE=http://127.0.0.1:57910`. Android needs a task-only
-`adb reverse tcp:57910 tcp:57910`. Test code uses a live integration clock for
-real SSE/network concurrency and no credentials in Dart defines. Only the local
-bridge injects the real native envelopes; API/SSE/media responses come from
-production. Peer-file discovery is excluded from this journey and retains its
-separate transport coverage. This does not verify a physical signed-app login UI.
+`RIVER_PRODUCTION_JOURNEY_CONFIG=/absolute/protected/config.json`. Start a
+loopback ChromeDriver matching the installed browser, then run from `client/`:
+
+```sh
+flutter drive --debug --no-pub -d web-server \
+  --web-hostname=127.0.0.1 --web-port=57920 \
+  --driver test_driver/production_journey.dart \
+  --target integration_test/production_journey_test.dart \
+  --web-browser-flag=--use-fake-device-for-media-stream \
+  --web-browser-flag=--use-fake-ui-for-media-stream \
+  --web-browser-flag=--autoplay-policy=no-user-gesture-required \
+  --no-web-resources-cdn \
+  --dart-define=RIVER_JOURNEY_BRIDGE=http://127.0.0.1:57910
+```
+
+For Android use `flutter test -d <test-emulator>
+integration_test/production_journey_test.dart`, adding the same bridge Dart define.
+Use a task-only `adb reverse tcp:57910 tcp:57910` and grant microphone/camera/
+Bluetooth-connect permissions to the test package on that disposable emulator.
+Keep the host awake for the bounded run (for example, macOS `caffeinate -is`
+scoped to the runner). macOS sleep logs confirmed interruptions during failed
+web attempts; those interrupted attempts are not verification passes.
+
+Test code uses a live integration clock for real SSE/network concurrency and
+waits for actual headless widget/dialog mounts. No credentials are Dart defines.
+Only the local bridge injects the real native envelopes; API/SSE/media responses
+come from production. Peer-file discovery is excluded from this journey and
+retains its separate transport coverage. This does not verify a physical
+signed-app login UI.
 
 ### Bugs reproduced during the fresh run
 
@@ -156,3 +206,9 @@ verification must use the default true setting against the fixed deployment.
   room and anchor. Public comments then failed. Gravitas now tracks both IDs in
   the Ecto changeset and tests a saved private draft through outsider comments,
   reactions and preservation of earlier private history.
+
+- Post-save sequencing: an intermediate snapshot delayed the visibility-policy
+  write after the post itself had persisted. The editor now completes the ordered
+  content/policy writes and then waits for one final refresh. Regressions verify
+  policy persistence despite a blocked read and no duplicate post after a policy
+  failure/retry.

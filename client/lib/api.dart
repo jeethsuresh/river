@@ -636,8 +636,9 @@ class RiverApi extends ChangeNotifier {
     String room,
     String event,
     String title,
-    String body,
-  ) async {
+    String body, {
+    bool refreshAfter = true,
+  }) async {
     final key = 'edit:$room:$event:$title:$body';
     await request(
       '/api/groups/$room/entry',
@@ -650,7 +651,7 @@ class RiverApi extends ChangeNotifier {
       },
     );
     _transactions.remove(key);
-    await refresh();
+    if (refreshAfter) await refresh();
   }
 
   Future<void> membership(String id, String action, [String? person]) async {
@@ -662,13 +663,19 @@ class RiverApi extends ChangeNotifier {
     await refresh();
   }
 
-  Future<Json> send(String id, String type, Json content, String txn) async {
+  Future<Json> send(
+    String id,
+    String type,
+    Json content,
+    String txn, {
+    bool refreshAfter = true,
+  }) async {
     final result = await request(
       '/api/groups/$id/events/$type/$txn',
       method: 'PUT',
       body: {'content': content},
     );
-    await refresh();
+    if (refreshAfter) await refresh();
     return result;
   }
 
@@ -682,8 +689,9 @@ class RiverApi extends ChangeNotifier {
     String room,
     String event,
     String visibility,
-    String comments,
-  ) async {
+    String comments, {
+    bool refreshAfter = true,
+  }) async {
     final key = 'publish:$room:$event:$visibility:$comments';
     await request(
       '/api/groups/$room/publication',
@@ -696,7 +704,7 @@ class RiverApi extends ChangeNotifier {
       },
     );
     _transactions.remove(key);
-    await refresh();
+    if (refreshAfter) await refresh();
   }
 
   Future<void> postComment(
