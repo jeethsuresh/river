@@ -35,7 +35,15 @@ class JourneyApi extends RiverApi {
   Future<Json> request(String path, {String method = 'GET', Json? body}) async {
     final timer = Stopwatch()..start();
     try {
-      return await super.request(path, method: method, body: body);
+      final result = await super.request(path, method: method, body: body);
+      if (path.endsWith('/rtc')) {
+        debugPrint(
+          'JOURNEY RTC [$actor] ${body?['action']} '
+          'at=${DateTime.now().toUtc().toIso8601String()} '
+          'elapsed=${timer.elapsedMilliseconds}ms expires=${result['expires_at']}',
+        );
+      }
+      return result;
     } on ApiException catch (e) {
       debugPrint(
         'JOURNEY HTTP [$actor] $method ${path.split('?').first} '
@@ -183,6 +191,116 @@ void productionJourneyScenarios() {
       }
 
       var stage = 'boot';
+      final mediaLog = logger.onRecord.listen((record) {
+        if (record.message.startsWith('connection setup took')) {
+          debugPrint('JOURNEY MEDIA ${record.message}');
+        }
+      });
+      Future<void> runMedia(Json voice, String sid) async {
+        stage = 'real production media';
+        await show(const Scaffold(body: Text('Production media journey')));
+        a.calls.adaptiveStreamForTesting = false;
+        b.calls.adaptiveStreamForTesting = false;
+        final joining = Stopwatch()..start();
+        await io(() => a.calls.join(voice));
+        debugPrint(
+          'JOURNEY MEDIA alice joined in ${joining.elapsedMilliseconds}ms '
+          'state=${a.calls.room?.connectionState}',
+        );
+        joining.reset();
+        await io(() => b.calls.join(voice));
+        debugPrint(
+          'JOURNEY MEDIA bob joined in ${joining.elapsedMilliseconds}ms '
+          'state=${b.calls.room?.connectionState}',
+        );
+        await until(
+          () =>
+              a.calls.room?.remoteParticipants.length == 1 &&
+              b.calls.room?.remoteParticipants.length == 1,
+          'real room peers missing',
+        );
+        await show(RiverCallScreen(api: b));
+        await io(a.calls.toggleCamera);
+        await until(
+          () => b.calls.room!.remoteParticipants.values.any(
+            (p) => p.videoTrackPublications.any(
+              (v) => v.track is RemoteVideoTrack,
+            ),
+          ),
+          'remote camera not subscribed',
+        );
+        final video =
+            b
+                    .calls
+                    .room!
+                    .remoteParticipants
+                    .values
+                    .first
+                    .videoTrackPublications
+                    .first
+                    .track
+                as RemoteVideoTrack;
+        num frames = 0;
+        for (var i = 0; i < 100 && frames == 0; i++) {
+          await tick();
+          frames = (await io(video.getReceiverStats))?.framesDecoded ?? 0;
+        }
+        expect(frames, greaterThan(0));
+        expect(
+          b.calls.room!.remoteParticipants.values.first.audioTrackPublications
+              .any((p) => p.track is RemoteAudioTrack),
+          isTrue,
+        );
+        await tap(find.text('Mute'));
+        await until(() => b.calls.muted, 'mute failed');
+        await tap(find.text('Unmute'));
+        await until(() => !b.calls.muted, 'unmute failed');
+        final chat = b.calls.chat!;
+        await io(
+          () => b.send(chat, 'm.room.message', {
+            'body': '$runtime current call chat',
+            'msgtype': 'm.text',
+          }, transactionId()),
+        );
+        await denied(() => c.request('/api/groups/$chat/events'), 403);
+        await io(
+          () => a.membership(sid, 'remove', b.user!['user_id'] as String),
+        );
+        await until(
+          () => !b.calls.active,
+          'membership revocation did not disconnect media',
+          attempts: 400,
+        );
+        await denied(() => b.request('/api/groups/$chat/events'), 403);
+        await io(
+          () => a.membership(sid, 'invite', b.user!['user_id'] as String),
+        );
+        await io(() => b.membership(sid, 'accept'));
+        await io(() => b.calls.join(voice));
+        await until(
+          () => a.calls.room!.remoteParticipants.length == 1,
+          'rejoined participant missing',
+        );
+        final revoke = await io(
+          () => http.post(Uri.parse('$journeyBridge/bob/control/revoke')),
+        );
+        expect(revoke.statusCode, 200, reason: revoke.body);
+        await until(
+          () => !b.calls.active && b.user == null,
+          'consent revocation did not expire client and media',
+          attempts: 400,
+        );
+        await until(
+          () => a.calls.room!.remoteParticipants.isEmpty,
+          'revoked participant remains on SFU',
+          attempts: 400,
+        );
+        passed(
+          'real audio/video decoding, mute/unmute, call-chat ACL, membership removal and live consent revocation',
+        );
+        expect(tester.takeException(), isNull);
+      }
+
       try {
         await io(() async {
           await a.boot();
@@ -194,6 +312,20 @@ void productionJourneyScenarios() {
         expect(c.error, isNull);
         expect(a.friends.length, 2);
         passed('real account profiles and central contact projection');
+        if (const bool.fromEnvironment('RIVER_JOURNEY_MEDIA_ONLY')) {
+          debugPrint(
+            'JOURNEY NOTE [$runtime] media-only diagnostic; not a full journey',
+          );
+          final space = a.groups.firstWhere(
+            (g) => g['name'] == 'Automated $runtime journey',
+          );
+          final sid = space['id'] as String;
+          final voice = a
+              .channels(sid)
+              .firstWhere((g) => g['channel_kind'] == 'drop_in');
+          await runMedia(voice, sid);
+          return;
+        }
         stage = 'friend requests';
         // The counterpart initiates this cycle; initial setup exercised Alice's
         // requests. Keep production rate limits intact during repeated tests.
@@ -593,98 +725,7 @@ void productionJourneyScenarios() {
         passed(
           'discussion create/edit, UI canonical threaded reply and reaction removal',
         );
-        stage = 'real production media';
-        await show(const Scaffold(body: Text('Production media journey')));
-        a.calls.adaptiveStreamForTesting = false;
-        b.calls.adaptiveStreamForTesting = false;
-        await io(() => a.calls.join(voice));
-        await io(() => b.calls.join(voice));
-        await until(
-          () =>
-              a.calls.room?.remoteParticipants.length == 1 &&
-              b.calls.room?.remoteParticipants.length == 1,
-          'real room peers missing',
-        );
-        await show(RiverCallScreen(api: b));
-        await io(a.calls.toggleCamera);
-        await until(
-          () => b.calls.room!.remoteParticipants.values.any(
-            (p) => p.videoTrackPublications.any(
-              (v) => v.track is RemoteVideoTrack,
-            ),
-          ),
-          'remote camera not subscribed',
-        );
-        final video =
-            b
-                    .calls
-                    .room!
-                    .remoteParticipants
-                    .values
-                    .first
-                    .videoTrackPublications
-                    .first
-                    .track
-                as RemoteVideoTrack;
-        num frames = 0;
-        for (var i = 0; i < 100 && frames == 0; i++) {
-          await tick();
-          frames = (await io(video.getReceiverStats))?.framesDecoded ?? 0;
-        }
-        expect(frames, greaterThan(0));
-        expect(
-          b.calls.room!.remoteParticipants.values.first.audioTrackPublications
-              .any((p) => p.track is RemoteAudioTrack),
-          isTrue,
-        );
-        await tap(find.text('Mute'));
-        await until(() => b.calls.muted, 'mute failed');
-        await tap(find.text('Unmute'));
-        await until(() => !b.calls.muted, 'unmute failed');
-        final chat = b.calls.chat!;
-        await io(
-          () => b.send(chat, 'm.room.message', {
-            'body': '$runtime current call chat',
-            'msgtype': 'm.text',
-          }, transactionId()),
-        );
-        await denied(() => c.request('/api/groups/$chat/events'), 403);
-        await io(
-          () => a.membership(sid, 'remove', b.user!['user_id'] as String),
-        );
-        await until(
-          () => !b.calls.active,
-          'membership revocation did not disconnect media',
-          attempts: 400,
-        );
-        await denied(() => b.request('/api/groups/$chat/events'), 403);
-        await io(
-          () => a.membership(sid, 'invite', b.user!['user_id'] as String),
-        );
-        await io(() => b.membership(sid, 'accept'));
-        await io(() => b.calls.join(voice));
-        await until(
-          () => a.calls.room!.remoteParticipants.length == 1,
-          'rejoined participant missing',
-        );
-        final revoke = await io(
-          () => http.post(Uri.parse('$journeyBridge/bob/control/revoke')),
-        );
-        expect(revoke.statusCode, 200, reason: revoke.body);
-        await until(
-          () => !b.calls.active && b.user == null,
-          'consent revocation did not expire client and media',
-          attempts: 400,
-        );
-        await until(
-          () => a.calls.room!.remoteParticipants.isEmpty,
-          'revoked participant remains on SFU',
-          attempts: 400,
-        );
-        passed(
-          'real audio/video decoding, mute/unmute, call-chat ACL, membership removal and live consent revocation',
-        );
-        expect(tester.takeException(), isNull);
+        await runMedia(voice, sid);
       } catch (e, stack) {
         debugPrintStack(stackTrace: stack);
         if (e is ApiException) {
@@ -706,6 +747,7 @@ void productionJourneyScenarios() {
         });
         await tester.pumpWidget(const SizedBox());
         await tester.pump(const Duration(milliseconds: 600));
+        await mediaLog.cancel();
         a.dispose();
         b.dispose();
         c.dispose();

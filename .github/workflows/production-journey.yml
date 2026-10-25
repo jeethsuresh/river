@@ -1,0 +1,68 @@
+name: Opt-in River production journey
+on:
+  workflow_dispatch:
+    inputs:
+      media_only:
+        description: Run only the media diagnostic, not the complete journey
+        type: boolean
+        default: false
+  push:
+    branches: [codex/river-call-cap-verification]
+permissions:
+  contents: read
+concurrency:
+  group: river-production-journey
+  cancel-in-progress: false
+jobs:
+  journey:
+    if: vars.RIVER_PRODUCTION_JOURNEY_ENABLED == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    env:
+      FLUTTER_SUPPRESS_ANALYTICS: 'true'
+      GOTOOLCHAIN: go1.25.2
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - name: Install the pinned Flutter SDK
+        run: |
+          git init "$RUNNER_TEMP/flutter"
+          git -C "$RUNNER_TEMP/flutter" remote add origin https://github.com/flutter/flutter.git
+          git -C "$RUNNER_TEMP/flutter" fetch --depth 1 origin refs/tags/3.47.7:refs/tags/3.47.7
+          git -C "$RUNNER_TEMP/flutter" checkout --detach abaf9c523780a608bd46686fd5e53740a07077f8
+          test "$(git -C "$RUNNER_TEMP/flutter" rev-parse HEAD)" = abaf9c523780a608bd46686fd5e53740a07077f8
+          echo "$RUNNER_TEMP/flutter/bin" >> "$GITHUB_PATH"
+      - name: Install checksum-pinned official browser and driver
+        run: |
+          python3 - <<'PY'
+          import hashlib,os,pathlib,urllib.request,zipfile
+          root=pathlib.Path(os.environ['RUNNER_TEMP'])/'browser'
+          root.mkdir()
+          pins={'chrome-linux64':'c7c9611f91f960f43cf36af1282acef5c5706bf7b026b68a400c55da24f81073','chromedriver-linux64':'38337a39540faa6171b51578414ced223b6b39d66badd571280a5c6f932596ce'}
+          for name,digest in pins.items():
+              archive=root/(name+'.zip')
+              urllib.request.urlretrieve('https://storage.googleapis.com/chrome-for-testing-public/141.0.7390.122/linux64/'+name+'.zip',archive)
+              assert hashlib.sha256(archive.read_bytes()).hexdigest()==digest
+              with zipfile.ZipFile(archive) as z:z.extractall(root)
+          PY
+          chmod +x "$RUNNER_TEMP/browser/chrome-linux64/chrome" "$RUNNER_TEMP/browser/chromedriver-linux64/chromedriver" "$RUNNER_TEMP/browser/chrome-linux64/chrome_crashpad_handler"
+      - name: Resolve the locked shared client
+        working-directory: client
+        run: flutter pub get --enforce-lockfile
+      - name: Run real production API, SSE and media assertions
+        env:
+          JOURNEY_CONFIG: ${{ secrets.RIVER_PRODUCTION_JOURNEY_CONFIG }}
+          MEDIA_ONLY: ${{ inputs.media_only || vars.RIVER_PRODUCTION_JOURNEY_MEDIA_ONLY }}
+        run: bash scripts/production-journey.sh
+      - name: Preserve credential-free results
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: river-production-journey-${{ github.run_id }}
+          path: |
+            client/build/integration_response_data.json
+            ${{ runner.temp }}/journey.log
+            ${{ runner.temp }}/journey-bridge.log
+          if-no-files-found: ignore
+          retention-days: 3
