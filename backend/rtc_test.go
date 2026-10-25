@@ -77,6 +77,39 @@ func TestRTCJoinDoesNotMintForDeniedMembershipAndCompensatesMediaFailure(t *test
 		t.Fatal("no compensating leave", calls)
 	}
 }
+
+func TestRTCJoinUsesUncappedSFURoom(t *testing.T) {
+	rtcEnv(t)
+	created := false
+	s := &server{auth: &gravitas.Client{Issuer: "https://gravitas.example", HTTP: &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		body := `{"livekit_room":"river_hash","identity":"hash","transport_url":"wss://rtc.example"}`
+		if r.URL.Host == "rtc.example" {
+			if r.URL.Path != "/twirp/livekit.RoomService/CreateRoom" {
+				t.Errorf("unexpected media operation: %s", r.URL.Path)
+			}
+			var input map[string]any
+			if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+				t.Fatal(err)
+			}
+			if cap, exists := input["max_participants"]; exists && cap != float64(0) {
+				t.Errorf("call participant cap restored: %v", cap)
+			}
+			if input["name"] != "river_hash" || input["departure_timeout"] != float64(10) {
+				t.Errorf("room lifecycle changed: %v", input)
+			}
+			created = true
+			body = `{}`
+		}
+		return &http.Response{StatusCode: 200, Header: http.Header{}, Body: io.NopCloser(strings.NewReader(body))}, nil
+	})}}}
+	session := gravitas.AppSession{LocalToken: "delegated", Authorization: gravitas.Authorization{Identity: gravitas.Identity{Issuer: s.auth.Issuer}}}
+	w := httptest.NewRecorder()
+	room := "00000000-0000-0000-0000-000000000001"
+	s.rtcUpdate(w, httptest.NewRequest("POST", "/api/groups/"+room+"/rtc", strings.NewReader(`{"action":"join","member_id":"`+strings.Repeat("a", 43)+`"}`)), session, room)
+	if w.Code != 200 || !created || !strings.Contains(w.Body.String(), `"jwt"`) {
+		t.Fatalf("join failed: %d %s", w.Code, w.Body.String())
+	}
+}
 func TestMediaReaperSurvivesRestartAndRestrictsItsNamespace(t *testing.T) {
 	rtcEnv(t)
 	removed := 0

@@ -2,11 +2,15 @@
 
 This is a separate, manual platform addition. The app workflow does not apply it.
 Use the private Gravitas deployment knowledge and check current cluster capacity
-before rollout. Both app deployment holds must remain false for a manual release.
+before rollout. Coordinate media maintenance with the current tested application deployment workflows; media resources remain separately applied.
 
 The pinned LiveKit SFU and Coturn relay use one private pod each, reserving 350m
 CPU and 640Mi memory together. These are initial bounded reservations, not a
-verified 32-person capacity guarantee. There is no new load balancer, public UDP
+verified participant-capacity guarantee.
+The broker and SFU use LiveKit’s zero default (no configured room participant
+ceiling). TURN allocation quotas, bandwidth safeguards and resource limits stay
+bounded. See [the verification ledger](../../docs/VERIFICATION_GAPS.md) for the
+64-participant signaling-only check and the remaining media load tests. There is no new load balancer, public UDP
 port, host networking, database, or copied TLS key. Existing Traefik terminates
 HTTPS/WSS for rtc.gravitas.cool and TURN/TLS on turn.gravitas.cool:443. The TURN
 TCP route forwards PROXY v2 to a single Coturn proxy listener. The official

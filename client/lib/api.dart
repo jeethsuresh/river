@@ -131,6 +131,7 @@ class RiverApi extends ChangeNotifier {
 
   String? selected, error, pairingLabel;
   bool loading = true, busy = false, _active = true, again = false;
+  Completer<void>? _queuedRefresh;
   bool get active => _active;
   set active(bool value) {
     _active = value;
@@ -236,7 +237,9 @@ class RiverApi extends ChangeNotifier {
   Future<void> refresh() async {
     if (busy) {
       again = true;
-      return;
+      // A mutation can finish while an older read is still in flight. Its
+      // caller must wait for the queued fresh read, rather than use old state.
+      return (_queuedRefresh ??= Completer<void>()).future;
     }
     busy = true;
     final account = accountKey;
@@ -322,12 +325,20 @@ class RiverApi extends ChangeNotifier {
     } catch (e) {
       error = '$e';
     } finally {
+      final queued = _queuedRefresh;
+      _queuedRefresh = null;
       busy = false;
-      notifyListeners();
       if (again && user != null) {
         again = false;
-        unawaited(refresh());
+        // Start before notifying listeners so another request cannot overtake
+        // this queued pass. Each waiter finishes after its pass, even if more
+        // invalidations arrive while that pass runs.
+        unawaited(refresh().whenComplete(() => queued?.complete()));
+      } else {
+        again = false;
+        queued?.complete();
       }
+      notifyListeners();
     }
   }
 
@@ -625,8 +636,9 @@ class RiverApi extends ChangeNotifier {
     String room,
     String event,
     String title,
-    String body,
-  ) async {
+    String body, {
+    bool refreshAfter = true,
+  }) async {
     final key = 'edit:$room:$event:$title:$body';
     await request(
       '/api/groups/$room/entry',
@@ -639,7 +651,7 @@ class RiverApi extends ChangeNotifier {
       },
     );
     _transactions.remove(key);
-    await refresh();
+    if (refreshAfter) await refresh();
   }
 
   Future<void> membership(String id, String action, [String? person]) async {
@@ -651,13 +663,19 @@ class RiverApi extends ChangeNotifier {
     await refresh();
   }
 
-  Future<Json> send(String id, String type, Json content, String txn) async {
+  Future<Json> send(
+    String id,
+    String type,
+    Json content,
+    String txn, {
+    bool refreshAfter = true,
+  }) async {
     final result = await request(
       '/api/groups/$id/events/$type/$txn',
       method: 'PUT',
       body: {'content': content},
     );
-    await refresh();
+    if (refreshAfter) await refresh();
     return result;
   }
 
@@ -671,8 +689,9 @@ class RiverApi extends ChangeNotifier {
     String room,
     String event,
     String visibility,
-    String comments,
-  ) async {
+    String comments, {
+    bool refreshAfter = true,
+  }) async {
     final key = 'publish:$room:$event:$visibility:$comments';
     await request(
       '/api/groups/$room/publication',
@@ -685,7 +704,7 @@ class RiverApi extends ChangeNotifier {
       },
     );
     _transactions.remove(key);
-    await refresh();
+    if (refreshAfter) await refresh();
   }
 
   Future<void> postComment(

@@ -1,9 +1,13 @@
 {
   "schemaVersion": 1,
-  "version": "0.5.1",
-  "versionCode": 6,
+  "version": "0.5.2",
+  "versionCode": 7,
   "changes": [
-    "Sign in with your username and the 🔥 submit button.",
-    "Use user@domain to sign in through another Gravitas provider, with calls, files and account data bound to the selected account."
+    "Removed the configured 32-person call ceiling. Usable media capacity still depends on devices, relay capacity and server resources.",
+    "Fixed queued refreshes so membership, channel and content actions wait for current data.",
+    "Post saves now persist content and visibility policy before waiting for one final refresh, keeping retries tied to the created post.",
+    "Restored live updates by fixing event-stream negotiation with Gravitas.",
+    "Fixed public comments and reactions when a previously saved private post is published.",
+    "Added production-account integration coverage and documented the remaining device, network, load and accessibility checks."
   ]
 }
