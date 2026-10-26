@@ -66,7 +66,10 @@ class RiverApi extends ChangeNotifier {
     storage: _matrixStorage,
     syncEnabled: liveEnabled,
     changed: () {
-      if (user != null && active) unawaited(refresh());
+      if (!_disposed && user != null && active) {
+        changes.add(null);
+        unawaited(refresh());
+      }
     },
   )..addListener(notifyListeners));
   bool get matrixConnected => _matrix?.connected ?? false;

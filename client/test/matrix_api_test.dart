@@ -125,6 +125,32 @@ Future<RiverApi> connected(
 
 void main() {
   test(
+    'Matrix-only sync invalidates open views while active and pauses in background',
+    () async {
+      final api = await connected(RoomTransport(), []);
+      final observed = <void>[];
+      final subscription = api.changes.stream.listen(observed.add);
+      try {
+        await api.matrix.syncNow();
+        await Future<void>.delayed(Duration.zero);
+        expect(
+          observed,
+          hasLength(1),
+          reason:
+              'Open thread views must receive Matrix updates without a delegated live event.',
+        );
+        api.active = false;
+        await api.matrix.syncNow();
+        await Future<void>.delayed(Duration.zero);
+        expect(observed, hasLength(1));
+      } finally {
+        await subscription.cancel();
+        api.dispose();
+      }
+    },
+  );
+
+  test(
     'encrypted send failure cannot fall back to a plaintext delegated request',
     () async {
       final engine = RoomTransport()..failSend = true,
