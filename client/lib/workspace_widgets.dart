@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'api.dart';
+import 'matrix_security_widgets.dart';
 import 'content_widgets.dart';
 import 'publishing_widgets.dart';
 
@@ -63,6 +64,35 @@ class _ConversationPickerState extends State<ConversationPicker> {
               prefixIcon: Icon(Icons.search),
             ),
           ),
+          if (widget.app.matrixConnected)
+            TextButton.icon(
+              icon: const Icon(Icons.public),
+              label: const Text('Message a Matrix user'),
+              onPressed: busy
+                  ? null
+                  : () async {
+                      final person = query.text.trim();
+                      if (!person.startsWith('@') || !person.contains(':')) {
+                        setState(
+                          () => error =
+                              'Enter a full Matrix ID, such as @Alice:example.org, in the search field.',
+                        );
+                        return;
+                      }
+                      setState(() {
+                        busy = true;
+                        error = null;
+                      });
+                      try {
+                        await widget.app.messageFriend(person);
+                        if (context.mounted) Navigator.pop(context, true);
+                      } catch (e) {
+                        if (mounted) setState(() => error = '$e');
+                      } finally {
+                        if (mounted) setState(() => busy = false);
+                      }
+                    },
+            ),
           Expanded(
             child: widget.app.friends.isEmpty
                 ? const Center(
@@ -293,6 +323,8 @@ class AccountPanel extends StatelessWidget {
           ],
         ),
       ),
+      const SizedBox(height: 24),
+      if (app.matrixEnabled) MatrixSecurityPanel(messaging: app.matrix),
       const SizedBox(height: 24),
       OutlinedButton.icon(
         onPressed: app.logout,

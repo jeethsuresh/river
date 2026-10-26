@@ -1,0 +1,585 @@
+import 'dart:async';
+import 'dart:convert';
+import 'dart:math';
+
+import 'package:crypto/crypto.dart';
+import 'package:flutter/foundation.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+import 'package:river_matrix/river_matrix.dart';
+import 'package:url_launcher/url_launcher.dart';
+
+import 'matrix_store_location.dart';
+
+typedef MatrixJson = Map<String, dynamic>;
+typedef MatrixRequest =
+    Future<MatrixJson> Function(String path, {String method, MatrixJson? body});
+
+String _randomSecret() => base64UrlEncode(
+  List.generate(32, (_) => Random.secure().nextInt(256)),
+).replaceAll('=', '');
+
+abstract interface class MatrixTransport {
+  Future<MatrixJson> login(String token);
+  Future<String> credentials();
+  Future<MatrixJson> sync();
+  Future<MatrixJson> rooms();
+  Future<MatrixJson> history(String room, String? cursor);
+  Future<MatrixJson> thread(String room, String event, String? cursor);
+  Future<MatrixJson> members(String room);
+  Future<MatrixJson> send(
+    String room,
+    String type,
+    MatrixJson content,
+    String txn,
+  );
+  Future<MatrixJson> sendAttachment(
+    String room,
+    String name,
+    String mime,
+    Uint8List bytes,
+    String txn,
+  );
+  Future<Uint8List> downloadAttachment(MatrixJson content);
+  Future<MatrixJson> action(MatrixJson payload);
+  Future<MatrixJson> security();
+  Future<MatrixJson> setupRecovery(MatrixJson? authentication);
+  Future<MatrixJson> recover(String key);
+  Future<MatrixJson> requestVerification(String device);
+  Future<MatrixJson> verificationAction(String flow, String action);
+  Future<MatrixJson> verificationQr(String flow);
+  Future<MatrixJson> scanVerificationImage(String flow, Uint8List bytes);
+  Future<void> close(bool logout);
+}
+
+typedef MatrixFactory =
+    Future<MatrixTransport> Function(MatrixJson configuration);
+
+class RustMatrixTransport implements MatrixTransport {
+  RustMatrixTransport(this.engine);
+  final MatrixConnection engine;
+  static Future<void>? _initialization;
+  static Future<MatrixTransport> open(MatrixJson config) async {
+    try {
+      await (_initialization ??= RustLib.init());
+    } catch (_) {
+      _initialization = null;
+      rethrow;
+    }
+    return RustMatrixTransport(
+      await MatrixConnection.open(
+        homeserver: config['homeserver'] as String,
+        expectedUser: config['user_id'] as String,
+        store: config['store'] as String,
+        storeKey: config['store_key'] as String,
+        session: config['session'] as String?,
+      ),
+    );
+  }
+
+  Future<MatrixJson> _json(Future<String> value) async =>
+      (jsonDecode(await value) as Map).cast<String, dynamic>();
+  @override
+  Future<MatrixJson> login(String token) =>
+      _json(engine.login(loginToken: token));
+  @override
+  Future<String> credentials() => engine.credentials();
+  @override
+  Future<MatrixJson> sync() => _json(engine.sync_());
+  @override
+  Future<MatrixJson> rooms() => _json(engine.rooms());
+  @override
+  Future<MatrixJson> history(String room, String? cursor) =>
+      _json(engine.history(room: room, cursor: cursor));
+  @override
+  Future<MatrixJson> thread(String room, String event, String? cursor) =>
+      _json(engine.thread(room: room, event: event, cursor: cursor));
+  @override
+  Future<MatrixJson> members(String room) => _json(engine.members(room: room));
+  @override
+  Future<MatrixJson> send(
+    String room,
+    String type,
+    MatrixJson content,
+    String txn,
+  ) => _json(
+    engine.send(
+      room: room,
+      eventType: type,
+      content: jsonEncode(content),
+      transaction: txn,
+    ),
+  );
+  @override
+  Future<MatrixJson> sendAttachment(
+    String room,
+    String name,
+    String mime,
+    Uint8List bytes,
+    String txn,
+  ) => _json(
+    engine.sendAttachment(
+      room: room,
+      name: name,
+      contentType: mime,
+      bytes: bytes,
+      transaction: txn,
+    ),
+  );
+  @override
+  Future<Uint8List> downloadAttachment(MatrixJson content) =>
+      engine.downloadAttachment(content: jsonEncode(content));
+  @override
+  Future<MatrixJson> action(MatrixJson payload) =>
+      _json(engine.action(payload: jsonEncode(payload)));
+  @override
+  Future<MatrixJson> security() => _json(engine.security());
+  @override
+  Future<MatrixJson> setupRecovery(MatrixJson? authentication) => _json(
+    engine.setupRecovery(
+      authentication: authentication == null
+          ? null
+          : jsonEncode(authentication),
+    ),
+  );
+  @override
+  Future<MatrixJson> recover(String key) =>
+      _json(engine.recover(recoveryKey: key));
+  @override
+  Future<MatrixJson> requestVerification(String device) =>
+      _json(engine.requestVerification(device: device));
+  @override
+  Future<MatrixJson> verificationAction(String flow, String action) =>
+      _json(engine.verificationAction(flow: flow, action: action));
+  @override
+  Future<MatrixJson> verificationQr(String flow) =>
+      _json(engine.verificationQr(flow: flow));
+  @override
+  Future<MatrixJson> scanVerificationImage(String flow, Uint8List bytes) =>
+      _json(engine.scanVerificationImage(flow: flow, bytes: bytes));
+  @override
+  Future<void> close(bool logout) async {
+    try {
+      await engine.close(logout: logout);
+    } finally {
+      engine.dispose();
+    }
+  }
+}
+
+abstract interface class MatrixStorage {
+  Future<String?> read(String key);
+  Future<void> write(String key, String value);
+  Future<void> delete(String key);
+}
+
+class SecureMatrixStorage implements MatrixStorage {
+  const SecureMatrixStorage();
+  static const _storage = FlutterSecureStorage();
+  @override
+  Future<String?> read(String key) => _storage.read(key: key);
+  @override
+  Future<void> write(String key, String value) =>
+      _storage.write(key: key, value: value);
+  @override
+  Future<void> delete(String key) => _storage.delete(key: key);
+}
+
+/// Owns one authenticated River profile's local Matrix device. All delayed work
+/// checks the profile generation before publishing results or saving a session.
+class MatrixMessaging extends ChangeNotifier {
+  MatrixMessaging({
+    required this.request,
+    required this.changed,
+    MatrixFactory? factory,
+    MatrixStorage? storage,
+    Future<String> Function(String)? storeLocation,
+    Future<void> Function(Uri)? launch,
+    this.syncEnabled = true,
+  }) : factory = factory ?? RustMatrixTransport.open,
+       storage = storage ?? const SecureMatrixStorage(),
+       storeLocation = storeLocation ?? matrixStoreLocation,
+       launch =
+           launch ??
+           ((url) async {
+             if (!await launchUrl(
+               url,
+               webOnlyWindowName: '_self',
+               mode: kIsWeb
+                   ? LaunchMode.platformDefault
+                   : LaunchMode.externalApplication,
+             )) {
+               throw StateError('Unable to open Matrix sign-in');
+             }
+           });
+
+  final MatrixRequest request;
+  final VoidCallback changed;
+  final MatrixFactory factory;
+  final MatrixStorage storage;
+  final Future<String> Function(String) storeLocation;
+  final Future<void> Function(Uri) launch;
+  final bool syncEnabled;
+  MatrixTransport? _transport;
+  MatrixJson? _profile, _configuration;
+  List<MatrixJson> roomList = [];
+  String? error;
+  bool connecting = false, _active = true, _disposed = false;
+  bool get connected => _transport != null;
+  int _generation = 0, _revokeBefore = -1;
+  bool _syncing = false;
+  Future<void> _storageQueue = Future.value();
+
+  String? get accountKey =>
+      _profile == null ? null : '${_profile!['issuer']}|${_profile!['sub']}';
+  String get _namespace => sha256.convert(utf8.encode(accountKey!)).toString();
+  String get _sessionKey => 'river_matrix.session.$_namespace';
+  String get _pendingKey => 'river_matrix.pending.$_namespace';
+  String? get userId => _profile?['user_id'] as String?;
+
+  void _guard(int generation) {
+    if (_disposed || generation != _generation || _profile == null) {
+      throw StateError('Matrix account changed');
+    }
+  }
+
+  Future<T> _serializeStorage<T>(Future<T> Function() operation) {
+    final result = _storageQueue.then((_) => operation());
+    _storageQueue = result.then<void>(
+      (_) {},
+      onError: (Object _, StackTrace _) {},
+    );
+    return result;
+  }
+
+  @override
+  void notifyListeners() {
+    if (!_disposed) super.notifyListeners();
+  }
+
+  Future<void> bind(MatrixJson profile) async {
+    final account = '${profile['issuer']}|${profile['sub']}';
+    if (accountKey == account) return;
+    await disconnect();
+    _profile = Map.of(profile);
+    final generation = _generation;
+    if (profile['user_id'] is! String || profile['issuer'] is! String) return;
+    final sessionKey = _sessionKey;
+    try {
+      final saved = await storage.read(sessionKey);
+      _guard(generation);
+      if (saved != null) {
+        final config = (jsonDecode(saved) as Map).cast<String, dynamic>();
+        if (config['user_id'] != userId ||
+            config['homeserver'] != profile['issuer']) {
+          throw StateError('Stored Matrix session belongs to another account');
+        }
+        final engine = await factory(config);
+        if (generation != _generation || _disposed) {
+          await engine.close(false);
+          return;
+        }
+        try {
+          final snapshot = await engine.sync();
+          _guard(generation);
+          _transport = engine;
+          _configuration = config;
+          roomList = (snapshot['rooms'] as List).cast<MatrixJson>();
+          notifyListeners();
+          changed();
+          _startSync();
+        } catch (_) {
+          await engine.close(false);
+          rethrow;
+        }
+      } else {
+        final pending = await storage.read(_pendingKey);
+        _guard(generation);
+        if (pending != null) {
+          final data = (jsonDecode(pending) as Map).cast<String, dynamic>();
+          if (!kIsWeb || Uri.base.queryParameters['matrixLink'] == data['id']) {
+            unawaited(_finishLink(data, generation));
+          }
+        }
+      }
+    } catch (_) {
+      if (generation == _generation) {
+        error =
+            'Matrix messaging could not reconnect. Connect again to continue.';
+        notifyListeners();
+      }
+    }
+  }
+
+  Future<void> connect() async {
+    if (_profile == null || connecting) return;
+    final generation = _generation;
+    connecting = true;
+    error = null;
+    notifyListeners();
+    try {
+      final verifier = _randomSecret();
+      final challenge = base64UrlEncode(
+        sha256.convert(utf8.encode(verifier)).bytes,
+      ).replaceAll('=', '');
+      final link = await request(
+        '/api/matrix/link',
+        method: 'POST',
+        body: {'challenge': challenge, 'platform': kIsWeb ? 'web' : 'native'},
+      );
+      _guard(generation);
+      if (link['homeserver'] != _profile!['issuer'] ||
+          link['user_id'] != userId) {
+        throw StateError('Matrix sign-in belongs to another account');
+      }
+      final storeName = '$_namespace-${_randomSecret()}';
+      final data = <String, dynamic>{
+        ...link,
+        'verifier': verifier,
+        'store': await storeLocation(storeName),
+        'store_key': _randomSecret(),
+      };
+      _guard(generation);
+      final pendingKey = _pendingKey;
+      await _serializeStorage(() async {
+        _guard(generation);
+        await storage.write(pendingKey, jsonEncode(data));
+      });
+      _guard(generation);
+      await launch(Uri.parse(link['url'] as String));
+      if (!kIsWeb) await _finishLink(data, generation);
+    } catch (_) {
+      if (generation == _generation) {
+        error = 'Matrix sign-in failed. Please try again.';
+      }
+    } finally {
+      if (generation == _generation) {
+        connecting = false;
+        notifyListeners();
+      }
+    }
+  }
+
+  Future<void> _finishLink(MatrixJson data, int generation) async {
+    connecting = true;
+    notifyListeners();
+    MatrixTransport? engine;
+    var persisted = false;
+    try {
+      for (var attempt = 0; attempt < 150; attempt++) {
+        _guard(generation);
+        if ((data['expires_at'] as int) * 1000 <=
+            DateTime.now().millisecondsSinceEpoch) {
+          throw StateError('Matrix sign-in expired');
+        }
+        final result = await request(
+          '/api/matrix/poll',
+          method: 'POST',
+          body: {'id': data['id'], 'verifier': data['verifier']},
+        );
+        _guard(generation);
+        if (result['pending'] == true) {
+          await Future<void>.delayed(const Duration(seconds: 2));
+          continue;
+        }
+        if (result['homeserver'] != _profile!['issuer'] ||
+            result['user_id'] != userId) {
+          throw StateError('Matrix sign-in belongs to another account');
+        }
+        final config = <String, dynamic>{
+          'homeserver': result['homeserver'],
+          'user_id': result['user_id'],
+          'store': data['store'],
+          'store_key': data['store_key'],
+        };
+        engine = await factory(config);
+        _guard(generation);
+        await engine.login(result['login_token'] as String);
+        _guard(generation);
+        config['session'] = await engine.credentials();
+        _guard(generation);
+        final sessionKey = _sessionKey, pendingKey = _pendingKey;
+        // Persist the encrypted store credentials before exposing this device.
+        // Losing this write must not leave a seemingly connected, unrecoverable device.
+        await _serializeStorage(() async {
+          _guard(generation);
+          await storage.write(sessionKey, jsonEncode(config));
+        });
+        persisted = true;
+        _guard(generation);
+        final snapshot = await engine.sync();
+        _guard(generation);
+        await _serializeStorage(() async {
+          _guard(generation);
+          await storage.delete(pendingKey);
+        });
+        _guard(generation);
+        _transport = engine;
+        engine = null;
+        _configuration = config;
+        roomList = (snapshot['rooms'] as List).cast<MatrixJson>();
+        changed();
+        error = null;
+        _startSync();
+        return;
+      }
+      throw StateError('Matrix sign-in expired');
+    } catch (_) {
+      if (generation == _generation) {
+        error = 'Matrix sign-in did not finish. Please start again.';
+      }
+    } finally {
+      if (engine != null) {
+        try {
+          await engine.close(!persisted || generation < _revokeBefore);
+        } catch (_) {}
+      }
+      if (generation == _generation) {
+        connecting = false;
+        notifyListeners();
+      }
+    }
+  }
+
+  Future<void> _persist(int generation) async {
+    final config = _configuration;
+    if (config == null) return;
+    _guard(generation);
+    final key = _sessionKey;
+    final encoded = jsonEncode(config);
+    await _serializeStorage(() async {
+      _guard(generation);
+      await storage.write(key, encoded);
+    });
+  }
+
+  Future<void> syncNow() async {
+    final generation = _generation;
+    await transport.sync();
+    _guard(generation);
+    final credentials = await transport.credentials();
+    _guard(generation);
+    if (_configuration != null) {
+      _configuration!['session'] = credentials;
+      await _persist(generation);
+    }
+    await refreshRooms();
+  }
+
+  Future<void> refreshRooms() async {
+    final generation = _generation;
+    final snapshot = await transport.rooms();
+    _guard(generation);
+    roomList = (snapshot['rooms'] as List).cast<MatrixJson>();
+    notifyListeners();
+    changed();
+  }
+
+  MatrixTransport get transport =>
+      _transport ?? (throw StateError('Connect Matrix messaging first'));
+  bool get active => _active;
+  set active(bool value) {
+    _active = value;
+    if (value) _startSync();
+  }
+
+  void _startSync() {
+    if (!_active || !connected || _syncing || !syncEnabled || _disposed) return;
+    _syncing = true;
+    unawaited(_sync(_generation));
+  }
+
+  Future<void> _sync(int generation) async {
+    var backoff = 1;
+    try {
+      while (!_disposed && _active && connected && generation == _generation) {
+        try {
+          final snapshot = await transport.sync();
+          _guard(generation);
+          roomList = (snapshot['rooms'] as List).cast<MatrixJson>();
+          final credentials = await transport.credentials();
+          _guard(generation);
+          if (credentials != _configuration?['session']) {
+            _configuration!['session'] = credentials;
+            await _persist(generation);
+          }
+          error = null;
+          backoff = 1;
+          notifyListeners();
+          if ((snapshot['changed'] as List? ?? []).isNotEmpty ||
+              roomList.any((room) => room['encrypted'] == true)) {
+            changed();
+          }
+        } catch (e) {
+          if (generation != _generation || _disposed) break;
+          if ('$e'.contains('RIVER_MATRIX_SESSION_EXPIRED')) {
+            final old = _transport;
+            _transport = null;
+            error =
+                'This Matrix device session expired. Connect and verify this device again.';
+            try {
+              await old?.close(false);
+            } catch (_) {}
+            notifyListeners();
+            break;
+          }
+          error = 'Matrix messaging is reconnecting…';
+          notifyListeners();
+          await Future<void>.delayed(Duration(seconds: backoff));
+          backoff = min(backoff * 2, 60);
+        }
+      }
+    } finally {
+      _syncing = false;
+      if (generation != _generation && connected) _startSync();
+    }
+  }
+
+  Future<void> disconnect({bool logout = false}) async {
+    final sessionKey = _profile == null ? null : _sessionKey;
+    final pendingKey = _profile == null ? null : _pendingKey;
+    _generation++;
+    if (logout) _revokeBefore = _generation;
+    final old = _transport;
+    _transport = null;
+    _configuration = null;
+    _profile = null;
+    roomList = [];
+    connecting = false;
+    error = null;
+    try {
+      if (logout) {
+        await _serializeStorage(() async {
+          try {
+            if (sessionKey != null) await storage.delete(sessionKey);
+          } finally {
+            if (pendingKey != null) await storage.delete(pendingKey);
+          }
+        });
+      }
+    } finally {
+      if (old != null) {
+        try {
+          await old.close(logout);
+        } catch (_) {}
+      }
+      notifyListeners();
+    }
+  }
+
+  Future<void> cancelConnect() async {
+    if (_profile == null || connected) return;
+    final pendingKey = _pendingKey;
+    _generation++;
+    connecting = false;
+    error = null;
+    await _serializeStorage(() => storage.delete(pendingKey));
+    notifyListeners();
+  }
+
+  @override
+  void dispose() {
+    _disposed = true;
+    unawaited(disconnect());
+    super.dispose();
+  }
+}

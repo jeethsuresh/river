@@ -1,0 +1,38 @@
+[package]
+name = "river_matrix_core"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.96"
+license = "Apache-2.0"
+
+[lib]
+crate-type = ["cdylib", "staticlib", "rlib"]
+
+[dependencies]
+flutter_rust_bridge = "=2.13.0"
+anyhow = "1.0"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+futures-util = "0.3"
+matrix-sdk-common = "=0.19.1"
+uuid = { version = "1", features = ["v4", "js"] }
+url = "2"
+mime = "0.3"
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "webp"] }
+quircs = "0.10"
+
+[target.'cfg(not(target_family = "wasm"))'.dependencies]
+matrix-sdk = { version = "=0.19.1", default-features = false, features = ["e2e-encryption", "automatic-room-key-forwarding", "bundled-sqlite", "qrcode"] }
+rustls = { version = "0.23", default-features = false, features = ["ring", "std"] }
+tokio = { version = "1", features = ["sync", "rt-multi-thread", "macros"] }
+
+[target.'cfg(target_family = "wasm")'.dependencies]
+matrix-sdk = { version = "=0.19.1", default-features = false, features = ["e2e-encryption", "automatic-room-key-forwarding", "indexeddb", "qrcode", "js"] }
+tokio = { version = "1", features = ["sync", "macros"] }
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(frb_expand)'] }
+
+[profile.release]
+opt-level = "s"
+lto = "thin"

@@ -12,3 +12,10 @@ client/.idea
 work
 .signing
 .release
+
+**/.dart_tool
+**/target
+**/build
+client/web/pkg
+
+.matrix-server

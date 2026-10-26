@@ -1,13 +1,13 @@
 {
   "schemaVersion": 1,
-  "version": "0.5.2",
-  "versionCode": 7,
+  "version": "0.6.0",
+  "versionCode": 8,
   "changes": [
-    "Removed the configured 32-person call ceiling. Usable media capacity still depends on devices, relay capacity and server resources.",
-    "Fixed queued refreshes so membership, channel and content actions wait for current data.",
-    "Post saves now persist content and visibility policy before waiting for one final refresh, keeping retries tied to the created post.",
-    "Restored live updates by fixing event-stream negotiation with Gravitas.",
-    "Fixed public comments and reactions when a previously saved private post is published.",
-    "Added production-account integration coverage and documented the remaining device, network, load and accessibility checks."
+    "Connect River as a Matrix device to use Gravitas rooms and rooms from other Matrix servers.",
+    "Send and read end-to-end encrypted messages, threads and Matrix attachments. Existing rooms can enable encryption for future messages.",
+    "Verify your devices by showing or reading a Matrix QR code, using a camera where available, or comparing numbers. Confirm the scan before trusting another device.",
+    "Restore your encryption identity and older messages using a verified device or an encrypted recovery key.",
+    "Keep Matrix sessions and private keys on the device. Encrypted sends stop when the Matrix connection is unavailable.",
+    "Matrix attachments support files up to 32 MiB. Public posts, room details and existing SFU calls retain their separate visibility and security settings."
   ]
 }

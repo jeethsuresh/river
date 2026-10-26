@@ -1,0 +1,6 @@
+FROM rust:1.96.0-bookworm
+WORKDIR /src
+COPY client/packages/river_matrix/rust/ ./
+RUN cargo test --locked --lib --no-run
+ENV MATRIX_TEST_HOMESERVER=https://native.test:8448 MATRIX_TEST_CA=/fixtures/ca.pem
+CMD ["cargo", "test", "--offline", "--locked", "--lib", "core::interop::qr_verification_recovers_historical_encrypted_messages", "--", "--ignored", "--nocapture"]

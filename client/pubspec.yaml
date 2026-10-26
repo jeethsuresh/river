@@ -1,10 +1,12 @@
 name: river
 publish_to: none
 description: River — Gravitas spaces and conversations.
-version: 0.5.2+7
+version: 0.6.0+8
 environment:
   sdk: ^3.10.0
 dependencies:
+  river_matrix:
+    path: packages/river_matrix
   flutter:
     sdk: flutter
   http: ^1.6.0

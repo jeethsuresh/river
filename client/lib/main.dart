@@ -10,6 +10,7 @@ import 'friends_view.dart';
 import 'content_widgets.dart';
 import 'workspace_widgets.dart';
 import 'attachment_widgets.dart';
+import 'matrix_attachment_widgets.dart';
 import 'call_widgets.dart';
 import 'file_models.dart' show FileScope;
 import 'rich_composer.dart';
@@ -259,6 +260,26 @@ class _RiverShellState extends State<RiverShell> {
         final body = Column(
           children: [
             RiverCallBar(api: app),
+            if (app.matrixEnabled &&
+                !app.matrixConnected &&
+                section != 'Account')
+              MaterialBanner(
+                content: Text(
+                  app.matrix.error ??
+                      (app.matrix.connecting
+                          ? 'Confirm Matrix messaging in your browser, then return to River.'
+                          : 'Connect this device to read and send encrypted Matrix messages.'),
+                ),
+                actions: [
+                  TextButton(
+                    onPressed: () => setState(() {
+                      section = 'Account';
+                      app.selected = null;
+                    }),
+                    child: const Text('Device security'),
+                  ),
+                ],
+              ),
             if (app.friendsStatus == 403)
               MaterialBanner(
                 content: const Text(
@@ -314,6 +335,19 @@ class _RiverShellState extends State<RiverShell> {
                       onPressed: () => app.refresh(),
                       icon: const Icon(Icons.refresh),
                     ),
+                    if (app.matrixConnected)
+                      IconButton(
+                        tooltip: 'Join Matrix room',
+                        icon: const Icon(Icons.add_link),
+                        onPressed: () => action(() async {
+                          final target = await ask(
+                            'Join a Matrix room',
+                            '#room:example.org or matrix.to link',
+                            maxLength: 1000,
+                          );
+                          if (target != null) await app.joinMatrixRoom(target);
+                        }),
+                      ),
                     IconButton(
                       tooltip: 'New space',
                       onPressed: () => create('space'),
@@ -489,6 +523,20 @@ class _RiverShellState extends State<RiverShell> {
             ],
           ),
         ),
+        if (app.matrixConnected)
+          ListTile(
+            leading: const Icon(Icons.add_link),
+            title: const Text('Join Matrix room'),
+            onTap: () => action(() async {
+              scaffold.currentState?.closeDrawer();
+              final target = await ask(
+                'Join a Matrix room',
+                '#room:example.org or matrix.to link',
+                maxLength: 1000,
+              );
+              if (target != null) await app.joinMatrixRoom(target);
+            }),
+          ),
         const Divider(),
         ListTile(
           leading: const CircleAvatar(
@@ -849,11 +897,17 @@ class _RiverShellState extends State<RiverShell> {
         ),
       );
     }
-    final viewFilter = g['kind'] == 'channel' ? 'Chat' : filter;
+    final viewFilter =
+        g['kind'] == 'channel' ||
+            g['matrix_only'] == true ||
+            g['encrypted'] == true
+        ? 'Chat'
+        : filter;
     final items = app.events.where((e) {
       if (viewFilter == 'Chat') {
         final relation = (e['content'] as Json)['m.relates_to'] as Json?;
-        return (e['type'] == 'm.room.message' ||
+        return (e['type'] == 'm.room.encrypted' ||
+                e['type'] == 'm.room.message' ||
                 e['type'] == 'cool.gravitas.river.invitation.v1') &&
             relation?['rel_type'] != 'm.thread';
       }
@@ -913,8 +967,9 @@ class _RiverShellState extends State<RiverShell> {
                       ],
                     ),
                   ),
-                  if (['dm', 'group'].contains(g['kind']) ||
-                      g['channel_kind'] == 'drop_in')
+                  if (g['matrix_only'] != true &&
+                      (['dm', 'group'].contains(g['kind']) ||
+                          g['channel_kind'] == 'drop_in'))
                     IconButton(
                       tooltip: 'Join call',
                       icon: const Icon(Icons.call_outlined),
@@ -982,13 +1037,9 @@ class _RiverShellState extends State<RiverShell> {
                           maxLength: 500,
                         );
                         if (description != null) {
-                          await app.request(
-                            '/api/groups/${g['id']}',
-                            method: 'PATCH',
-                            body: {
-                              'name': g['name'],
-                              'description': description,
-                            },
+                          await app.updateGroup(
+                            g['id'] as String,
+                            description: description,
                           );
                           await app.refresh();
                         }
@@ -1008,12 +1059,32 @@ class _RiverShellState extends State<RiverShell> {
                       if (v == 'rename') {
                         final name = await ask('Rename group', 'Name');
                         if (name != null) {
-                          await app.request(
-                            '/api/groups/${g['id']}',
-                            method: 'PATCH',
-                            body: {'name': name},
-                          );
+                          await app.updateGroup(g['id'] as String, name: name);
                           await app.refresh();
+                        }
+                      }
+                      if (v == 'encrypt' && mounted) {
+                        final confirmed = await showDialog<bool>(
+                          context: context,
+                          builder: (ctx) => AlertDialog(
+                            title: const Text('Enable end-to-end encryption?'),
+                            content: const Text(
+                              'Future messages and new Matrix attachments will be encrypted on your devices. Encryption cannot be turned off. Existing messages and room details remain as they are. Calls use their own security settings.',
+                            ),
+                            actions: [
+                              TextButton(
+                                onPressed: () => Navigator.pop(ctx, false),
+                                child: const Text('Cancel'),
+                              ),
+                              FilledButton(
+                                onPressed: () => Navigator.pop(ctx, true),
+                                child: const Text('Enable encryption'),
+                              ),
+                            ],
+                          ),
+                        );
+                        if (confirmed == true) {
+                          await app.enableEncryption(g['id'] as String);
                         }
                       }
                       if (v == 'leave') {
@@ -1021,16 +1092,27 @@ class _RiverShellState extends State<RiverShell> {
                       }
                     }),
                     itemBuilder: (_) => [
+                      if (app.matrixConnected &&
+                          g['can_encrypt'] == true &&
+                          g['encrypted'] != true &&
+                          g['kind'] != 'space')
+                        const PopupMenuItem(
+                          value: 'encrypt',
+                          child: Text('Enable encryption'),
+                        ),
                       const PopupMenuItem(
                         value: 'members',
                         child: Text('Members'),
                       ),
-                      if (['dm', 'group'].contains(g['kind']))
+                      if (g['matrix_only'] != true &&
+                          ['dm', 'group'].contains(g['kind']))
                         const PopupMenuItem(
                           value: 'share-space',
                           child: Text('Invite to a space'),
                         ),
-                      if (g['kind'] == 'space' && g['owner'] == true) ...[
+                      if (g['kind'] == 'space' &&
+                          g['owner'] == true &&
+                          g['matrix_only'] != true) ...[
                         const PopupMenuItem(
                           value: 'description',
                           child: Text('Edit description'),
@@ -1105,7 +1187,9 @@ class _RiverShellState extends State<RiverShell> {
                   ),
                 ),
               const SizedBox(height: 12),
-              if (g['kind'] != 'channel')
+              if (g['kind'] != 'channel' &&
+                  g['matrix_only'] != true &&
+                  g['encrypted'] != true)
                 SegmentedButton<String>(
                   segments: const [
                     ButtonSegment(
@@ -1207,9 +1291,19 @@ class _RiverShellState extends State<RiverShell> {
                     children: [
                       IconButton(
                         tooltip: 'Attach files',
-                        onPressed: sending || app.files == null
+                        onPressed:
+                            sending ||
+                                (!app.matrixConnected && app.files == null)
                             ? null
                             : () => action(() async {
+                                if (app.matrixConnected) {
+                                  await sendMatrixAttachment(
+                                    context,
+                                    app,
+                                    g['id'] as String,
+                                  );
+                                  return;
+                                }
                                 final picked = await app.files!.pick(
                                   FileScope('room', g['id'] as String),
                                   existing: attachments,
