@@ -1,4 +1,4 @@
-# River 0.6.2
+# River 0.7.1
 
 - Automatically renew expiring Gravitas access credentials within the original central session, avoiding hourly login and native device-link prompts.
 - Persist renewed Android credentials in secure storage and browser credentials in the existing encrypted HttpOnly cookie.

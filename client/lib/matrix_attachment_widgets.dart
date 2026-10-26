@@ -3,6 +3,7 @@ import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:mime/mime.dart';
 import 'api.dart';
+import 'media_widgets.dart';
 
 Future<void> sendMatrixAttachment(
   BuildContext context,
@@ -56,9 +57,11 @@ class MatrixAttachmentCard extends StatefulWidget {
     super.key,
     required this.app,
     required this.content,
+    this.sticker = false,
   });
   final RiverApi app;
   final Json content;
+  final bool sticker;
   @override
   State<MatrixAttachmentCard> createState() => _MatrixAttachmentCardState();
 }
@@ -96,7 +99,9 @@ class _MatrixAttachmentCardState extends State<MatrixAttachmentCard> {
   Widget build(BuildContext context) => Column(
     crossAxisAlignment: CrossAxisAlignment.start,
     children: [
-      if (bytes != null && widget.content['msgtype'] == 'm.image')
+      if (bytes != null && widget.sticker)
+        StickerImage(image: MemoryImage(bytes!))
+      else if (bytes != null && widget.content['msgtype'] == 'm.image')
         Image.memory(
           bytes!,
           height: 240,

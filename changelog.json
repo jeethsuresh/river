@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
-  "version": "0.6.2",
-  "versionCode": 10,
+  "version": "0.7.1",
+  "versionCode": 11,
   "changes": [
     "Stay signed in as River automatically renews expiring access credentials within your Gravitas session.",
     "Keep your linked Matrix device and encryption keys when River reconnects; save rotated device credentials immediately.",

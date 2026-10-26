@@ -841,13 +841,30 @@ class RiverApi extends ChangeNotifier {
     notifyListeners();
   }
 
-  Future<Json> thread(String room, String event, {String? before}) {
+  Future<Json> thread(String room, String event, {String? before}) async {
     final wire = matrixRoom(room);
-    return matrixConnected && wire != null
-        ? matrix.transport.thread(wire, event, before)
-        : request(
-            '/api/groups/$room/thread?event_id=${Uri.encodeQueryComponent(event)}${before == null ? '' : '&before=${Uri.encodeQueryComponent(before)}'}',
-          );
+    if (matrixConnected && wire != null) {
+      final result = await matrix.transport.thread(wire, event, before);
+      final rendered = renderMatrixTimeline([
+        result['root'] as Json,
+        ...(result['events'] as List).cast<Json>(),
+        ..._matrixEvents.where(
+          (e) => e['type'] == 'm.reaction' || e['type'] == 'm.room.redaction',
+        ),
+      ], user?['user_id'] as String?);
+      final byId = {for (final e in rendered) e['event_id']: e};
+      return {
+        ...result,
+        'root': byId[(result['root'] as Json)['event_id']],
+        'events': [
+          for (final e in (result['events'] as List).cast<Json>())
+            if (byId[e['event_id']] case final rendered?) rendered,
+        ],
+      };
+    }
+    return request(
+      '/api/groups/$room/thread?event_id=${Uri.encodeQueryComponent(event)}${before == null ? '' : '&before=${Uri.encodeQueryComponent(before)}'}',
+    );
   }
 
   Future<void> react(
@@ -1140,14 +1157,21 @@ class RiverApi extends ChangeNotifier {
     await refresh();
   }
 
-  Future<void> postReaction(String event, String emoji, bool active) async {
-    final key = 'public-reaction:$event:$emoji:$active';
+  Future<void> postReaction(
+    String event,
+    String emoji,
+    bool active, {
+    String? target,
+  }) async {
+    if (user == null) throw ApiException(401, 'login_required');
+    final key = 'public-reaction:$event:$target:$emoji:$active';
     await request(
       '/api/posts/${Uri.encodeComponent(event)}/reactions',
       method: 'POST',
       body: {
         'key': emoji,
         'active': active,
+        if (target != null) 'target_id': target,
         'txn_id': _transactions.putIfAbsent(key, transactionId),
       },
     );

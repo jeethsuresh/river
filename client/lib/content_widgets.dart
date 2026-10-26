@@ -9,6 +9,8 @@ import 'package:flutter/services.dart';
 import 'attachment_widgets.dart';
 import 'matrix_attachment_widgets.dart';
 import 'rich_composer.dart';
+import 'media.dart';
+import 'media_widgets.dart';
 
 const reactionEmojis = [
   '👍',
@@ -73,23 +75,28 @@ class RichBody extends StatelessWidget {
     child: MarkdownBody(
       data: body,
       onTapLink: (_, href, _) => openContentLink(context, href),
-      // Message content never loads local files, assets, data URLs, or remote
-      // tracking images. Images remain explicit links that a person can open.
-      imageBuilder: (uri, title, alt) => TextButton.icon(
-        onPressed: ['http', 'https'].contains(uri.scheme)
-            ? () => openContentLink(context, '$uri')
-            : null,
-        icon: const Icon(Icons.image_outlined),
-        label: Text(alt?.isNotEmpty == true ? alt! : 'Open image'),
-      ),
+      inlineSyntaxes: [MediaLinkSyntax()],
+      imageBuilder: (uri, title, alt) => mediaUri('$uri') == null
+          ? const Text('Unsupported image link')
+          : LinkedMedia(
+              url: '$uri',
+              sticker: title == stickerTitle,
+              label: alt ?? 'Image',
+            ),
     ),
   );
 }
 
 class ReactionBar extends StatefulWidget {
-  const ReactionBar({super.key, required this.summary, required this.change});
+  const ReactionBar({
+    super.key,
+    required this.summary,
+    required this.change,
+    this.enabled = true,
+  });
   final List<Json> summary;
   final Future<void> Function(String emoji, bool active) change;
+  final bool enabled;
   @override
   State<ReactionBar> createState() => _ReactionBarState();
 }
@@ -97,9 +104,9 @@ class ReactionBar extends StatefulWidget {
 class _ReactionBarState extends State<ReactionBar> {
   bool busy = false;
   Future<void> react(String emoji) async {
-    if (busy) return;
+    if (busy || !widget.enabled) return;
     final mine = widget.summary.any(
-      (r) => r['key'] == emoji && r['mine'] == true,
+      (r) => r['key'] == emoji && (r['mine'] == true || r['active'] == true),
     );
     setState(() => busy = true);
     try {
@@ -125,6 +132,16 @@ class _ReactionBarState extends State<ReactionBar> {
             spacing: 8,
             runSpacing: 8,
             children: [
+              TextButton.icon(
+                icon: const Icon(Icons.auto_awesome_outlined),
+                label: const Text('Sticker reaction'),
+                onPressed: () async {
+                  final url = await chooseSticker(ctx);
+                  if (url != null && ctx.mounted) {
+                    Navigator.pop(ctx, '$stickerReactionPrefix$url');
+                  }
+                },
+              ),
               for (final e in reactionEmojis)
                 Semantics(
                   label: 'React $e',
@@ -154,16 +171,28 @@ class _ReactionBarState extends State<ReactionBar> {
     children: [
       for (final r in widget.summary)
         FilterChip(
-          label: Text('${r['key']} ${r['count']}'),
-          selected: r['mine'] == true,
-          tooltip: r['mine'] == true
-              ? 'Remove ${r['key']} reaction'
-              : 'React ${r['key']}',
-          onSelected: busy ? null : (_) => react(r['key'] as String),
+          label: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              if (stickerReactionUrl(r['key'] as String) case final url?)
+                StickerImage(image: NetworkImage(mediaFetchUrl(url)), size: 30)
+              else
+                Text(r['key'] as String),
+              const SizedBox(width: 4),
+              Text('${r['count']}'),
+            ],
+          ),
+          selected: r['mine'] == true || r['active'] == true,
+          tooltip: (r['mine'] == true || r['active'] == true)
+              ? 'Remove ${stickerReactionUrl(r['key'] as String) != null ? 'sticker' : r['key']} reaction'
+              : 'React ${stickerReactionUrl(r['key'] as String) != null ? 'with sticker' : r['key']}',
+          onSelected: busy || !widget.enabled
+              ? null
+              : (_) => react(r['key'] as String),
         ),
       IconButton(
-        tooltip: 'Add reaction',
-        onPressed: busy ? null : choose,
+        tooltip: widget.enabled ? 'Add reaction' : 'Sign in to react',
+        onPressed: busy || !widget.enabled ? null : choose,
         icon: const Icon(Icons.add_reaction_outlined, size: 20),
       ),
     ],
@@ -178,12 +207,14 @@ class ContentCard extends StatelessWidget {
     required this.event,
     required this.reply,
     this.changed,
+    this.publicPostId,
   });
   final RiverApi app;
   final String room;
   final Json event;
   final VoidCallback reply;
   final Future<void> Function()? changed;
+  final String? publicPostId;
   @override
   Widget build(BuildContext context) {
     final c = rendered(event),
@@ -248,12 +279,17 @@ class ContentCard extends StatelessWidget {
             else if ((event['unsigned'] as Json?)?['redacted_because'] != null)
               const Text('Message removed')
             else if ([
-              'm.file',
-              'm.image',
-              'm.audio',
-              'm.video',
-            ].contains(c['msgtype']))
-              MatrixAttachmentCard(app: app, content: c)
+                  'm.file',
+                  'm.image',
+                  'm.audio',
+                  'm.video',
+                ].contains(c['msgtype']) ||
+                event['type'] == 'm.sticker')
+              MatrixAttachmentCard(
+                app: app,
+                content: c,
+                sticker: event['type'] == 'm.sticker',
+              )
             else
               RichBody(c['body'] as String? ?? ''),
             for (final file
@@ -261,28 +297,32 @@ class ContentCard extends StatelessWidget {
                     .cast<Json>())
               AttachmentCard(app: app, file: file),
             const SizedBox(height: 10),
-            if (app.user != null)
-              ReactionBar(
-                summary: summary,
-                change: (emoji, active) async {
-                  if (event['type'] == 'cool.gravitas.river.post.v1') {
-                    await app.postReaction(
-                      event['event_id'] as String,
-                      emoji,
-                      active,
-                    );
-                    if (changed == null) await app.refresh();
-                  } else {
-                    await app.react(
-                      room,
-                      event['event_id'] as String,
-                      emoji,
-                      active,
-                    );
-                  }
-                  await changed?.call();
-                },
-              ),
+            ReactionBar(
+              summary: summary,
+              enabled: app.user != null,
+              change: (emoji, active) async {
+                if (publicPostId != null ||
+                    event['type'] == 'cool.gravitas.river.post.v1') {
+                  await app.postReaction(
+                    publicPostId ?? event['event_id'] as String,
+                    emoji,
+                    active,
+                    target: publicPostId == null
+                        ? null
+                        : event['event_id'] as String,
+                  );
+                  if (changed == null) await app.refresh();
+                } else {
+                  await app.react(
+                    room,
+                    event['event_id'] as String,
+                    emoji,
+                    active,
+                  );
+                }
+                await changed?.call();
+              },
+            ),
             Wrap(
               spacing: 8,
               children: [

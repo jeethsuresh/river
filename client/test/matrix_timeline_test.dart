@@ -61,9 +61,25 @@ void main() {
       ];
       final rendered = renderMatrixTimeline(events, '@me:home');
       expect(rendered.first['reaction_summary'], [
-        {'key': '👍', 'count': 1, 'active': true},
+        {'key': '👍', 'count': 1, 'mine': true, 'active': true},
       ]);
       expect(rendered.first['reply_count'], 1);
     },
   );
+  test('redacted sticker reactions disappear from the thread read model', () {
+    final rendered = renderMatrixTimeline([
+      event('root', '@a:home', {'body': 'Root'}),
+      event('sticker', '@me:home', {
+        'm.relates_to': {
+          'rel_type': 'm.annotation',
+          'event_id': 'root',
+          'key': 'sticker:https://host/a.gif',
+        },
+      }, type: 'm.reaction'),
+      event('remove', '@me:home', {
+        'redacts': 'sticker',
+      }, type: 'm.room.redaction'),
+    ], '@me:home');
+    expect(rendered.first['reaction_summary'], isEmpty);
+  });
 }

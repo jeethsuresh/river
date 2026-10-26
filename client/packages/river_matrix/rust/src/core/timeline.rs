@@ -44,7 +44,7 @@ impl MatrixCore {
         let room = self.room(room_id)?;
         let event = EventId::parse(data["event"].as_str().context("Missing event")?)?;
         let key = data["key"].as_str().context("Missing reaction")?;
-        ensure!(!key.is_empty() && key.len() <= 128, "Invalid reaction");
+        ensure!(!key.is_empty() && key.len() <= 2056, "Invalid reaction");
         let mut own = Vec::new();
         let mut cursor = None;
         for page_index in 0..10 {

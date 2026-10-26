@@ -19,6 +19,8 @@ Next.js River code; Git history retains that implementation.
   and refresh, without creating another request or a copied friendship.
 - Private saved read positions, unread counts and earlier-message pagination.
 - Persistent messages, posts, discussions, replies and reactions, stored centrally.
+- Linked GIFs and images in every shared composer and content view, plus saved
+  stickers with a white contour and emoji/sticker reactions.
 - A responsive home and chat UI for phones, tablets and desktop.
 - Browser cookies are encrypted, Secure, HttpOnly, host-only and SameSite=Lax.
   Android stores the same encrypted app-session envelope in platform secure storage.
@@ -98,6 +100,23 @@ Delegated Gravitas groups retain their internal UUIDs and membership records. Th
   `cool.gravitas.river.discussion.v1` events with `version=1`, `title` and `body`.
   Generic clients may ignore these custom types. No duplicate fallback event is sent.
 - Reactions are standard `m.reaction` with `m.annotation`, target event ID and key.
+  Sticker keys use `sticker:<http-or-https-image-url>`; Gravitas validates these
+  references, retains idempotent add/remove operations, and requires sign-in for
+  public post and comment reactions. Comment targets are checked against the
+  current post audience before joining the public comment room.
+- Linked images use Markdown image destinations; bare image URLs with supported
+  extensions also render inline. Stickers retain the image's original animated
+  bytes and use the `river-sticker` Markdown image title. “Make sticker” saves a
+  separate sticker on this device; the sticker picker can insert it in messages,
+  replies, discussions or posts. There is no reverse conversion action. Saved
+  stickers are separate from room file caches, with a 100-item / 128 MiB budget.
+  The original host must remain reachable when sharing a saved sticker by URL.
+  Web fetches use River's anonymous `/api/public/media` relay to support hosts
+  without CORS; native clients load directly. The relay accepts raster images
+  up to 25 MiB, retains GIF bytes, strips credentials and upstream headers, bounds
+  redirects/concurrency, and rejects private network addresses at connection time.
+  The relay sees the external image URL; Matrix encrypted attachments continue
+  through the separate device-encrypted attachment transport.
 - Group actions emit immutable `cool.gravitas.delegation.v1` audit events containing
   actor (sender), app origin, action and target. Every relayed content event records
   its delegated app origin. No credential appears in an event.
