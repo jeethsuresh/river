@@ -908,6 +908,7 @@ class _RiverShellState extends State<RiverShell> {
         final relation = (e['content'] as Json)['m.relates_to'] as Json?;
         return (e['type'] == 'm.room.encrypted' ||
                 e['type'] == 'm.room.message' ||
+                e['type'] == 'm.sticker' ||
                 e['type'] == 'cool.gravitas.river.invitation.v1') &&
             relation?['rel_type'] != 'm.thread';
       }

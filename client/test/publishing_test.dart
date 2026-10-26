@@ -86,6 +86,77 @@ void main() {
       },
     );
   }
+  testWidgets('public comment reactions use their post visibility boundary', (
+    tester,
+  ) async {
+    Json? sent;
+    String? reactionPath;
+    final api = RiverApi(
+      client: MockClient((request) async {
+        if (request.method == 'POST') {
+          reactionPath = Uri.decodeComponent(request.url.path);
+          sent = jsonDecode(request.body) as Json;
+          return http.Response('{}', 200);
+        }
+        return http.Response(
+          jsonEncode({
+            'entry': {
+              'event_id': r'$post',
+              'type': 'cool.gravitas.river.post.v1',
+              'sender': '@a:home',
+              'content': {'title': 'Post', 'body': 'Body'},
+            },
+            'space': {'id': 'space', 'name': 'Space'},
+            'publication': {
+              'visibility': 'public',
+              'comments_policy': 'public',
+              'anchor_id': r'$anchor',
+            },
+            'member': false,
+            'can_comment': false,
+            'can_view_comments': true,
+            'reaction_summary': [],
+            'comments': [
+              {
+                'event_id': r'$reply',
+                'type': 'm.room.message',
+                'sender': '@b:home',
+                'origin_server_ts': 100,
+                'content': {'body': 'Reply'},
+                'comment_room': 'comment-room',
+                'audience': 'public',
+                'reaction_summary': [
+                  {
+                    'key': 'sticker:https://host/a.gif',
+                    'count': 1,
+                    'mine': true,
+                  },
+                ],
+              },
+            ],
+          }),
+          200,
+        );
+      }),
+    )..user = {'user_id': '@reader:home'};
+    await tester.pumpWidget(
+      MaterialApp(
+        home: PostScreen(app: api, event: r'$post'),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(find.byTooltip('Remove sticker reaction'));
+    await tester.tap(find.byTooltip('Remove sticker reaction'));
+    await tester.pumpAndSettle();
+    expect(reactionPath, r'/api/posts/$post/reactions');
+    expect(sent?['target_id'], r'$reply');
+    expect(sent?['key'], 'sticker:https://host/a.gif');
+    expect(sent?['active'], false);
+    expect(tester.takeException(), isNull);
+    await tester.pumpWidget(const SizedBox());
+    api.dispose();
+  });
+
   testWidgets(
     'format toolbar surrounds the selection and keeps selection useful',
     (tester) async {
