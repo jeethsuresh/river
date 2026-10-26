@@ -204,19 +204,19 @@ class _PostScreenState extends State<PostScreen> {
                       const SizedBox(height: 20),
                       RichBody((entry['content'] as Json)['body'] as String),
                       const SizedBox(height: 16),
-                      if (widget.app.user != null)
-                        ReactionBar(
-                          summary: ((data?['reaction_summary'] as List?) ?? [])
-                              .cast<Json>(),
-                          change: (emoji, active) async {
-                            await widget.app.postReaction(
-                              widget.event,
-                              emoji,
-                              active,
-                            );
-                            await load();
-                          },
-                        ),
+                      ReactionBar(
+                        enabled: widget.app.user != null,
+                        summary: ((data?['reaction_summary'] as List?) ?? [])
+                            .cast<Json>(),
+                        change: (emoji, active) async {
+                          await widget.app.postReaction(
+                            widget.event,
+                            emoji,
+                            active,
+                          );
+                          await load();
+                        },
+                      ),
                       if (data?['member'] == true &&
                           entry['sender'] == widget.app.user?['user_id'])
                         TextButton.icon(
@@ -289,6 +289,7 @@ class _PostScreenState extends State<PostScreen> {
                                 app: widget.app,
                                 room: c['comment_room'] as String,
                                 event: c,
+                                publicPostId: widget.event,
                                 changed: load,
                                 reply: () => setState(() {
                                   parent = c;

@@ -275,28 +275,21 @@ void main() {
     },
   );
 
-  testWidgets(
-    'untrusted Markdown images never load files assets data or remote trackers',
-    (tester) async {
-      await tester.pumpWidget(
-        const MaterialApp(
-          home: Scaffold(
-            body: RichBody(
-              '![file](file:///private/secret)\n\n![asset](assets/secret.png)\n\n![data](data:image/png;base64,AA)\n\n![remote](https://example.com/tracker.png)',
-            ),
+  testWidgets('untrusted Markdown never loads local or executable images', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      const MaterialApp(
+        home: Scaffold(
+          body: RichBody(
+            '![file](file:///private/secret)\n\n![asset](assets/secret.png)\n\n![data](data:image/png;base64,AA)',
           ),
         ),
-      );
-      await tester.pumpAndSettle();
-      expect(find.byType(Image), findsNothing);
-      final buttons = tester
-          .widgetList<TextButton>(
-            find.byWidgetPredicate((w) => w is TextButton),
-          )
-          .toList();
-      expect(buttons, hasLength(4));
-      expect(buttons.where((b) => b.onPressed != null), hasLength(1));
-      expect(tester.takeException(), isNull);
-    },
-  );
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(find.byType(Image), findsNothing);
+    expect(find.text('Unsupported image link'), findsNWidgets(3));
+    expect(tester.takeException(), isNull);
+  });
 }

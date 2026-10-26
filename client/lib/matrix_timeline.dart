@@ -7,8 +7,14 @@ List<MatrixEvent> renderMatrixTimeline(List<MatrixEvent> raw, String? ownUser) {
   final byId = {for (final event in events) event['event_id']: event};
   final reactions = <String, Map<String, Set<String>>>{};
   final replies = <String, Set<String>>{};
+  final redactions = {
+    for (final event in events)
+      if (event['type'] == 'm.room.redaction')
+        event['redacts'] ?? (event['content'] as Map?)?['redacts'],
+  };
   bool redacted(MatrixEvent e) =>
-      (e['unsigned'] as Map?)?['redacted_because'] != null;
+      (e['unsigned'] as Map?)?['redacted_because'] != null ||
+      redactions.contains(e['event_id']);
   for (final event in events) {
     if (redacted(event)) continue;
     final content = event['content'] as Map? ?? {};
@@ -64,6 +70,7 @@ List<MatrixEvent> renderMatrixTimeline(List<MatrixEvent> raw, String? ownUser) {
         {
           'key': count.key,
           'count': count.value,
+          'mine': seen[count.key]?.contains(ownUser) ?? false,
           'active': seen[count.key]?.contains(ownUser) ?? false,
         },
     ];

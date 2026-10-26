@@ -8,6 +8,8 @@ import 'package:flutter_quill/flutter_quill.dart' as q;
 import 'package:markdown/markdown.dart' as md;
 import 'package:markdown_quill/markdown_quill.dart';
 import 'content_widgets.dart';
+import 'media.dart';
+import 'media_widgets.dart';
 import 'publishing_widgets.dart' show MarkdownShortcuts, MarkdownToolbar;
 
 /// One editor for web and Android. Markdown remains the portable event body;
@@ -284,6 +286,25 @@ class _RichComposerState extends State<RichComposer> {
     focus.requestFocus();
   }
 
+  Future<void> insertMedia({bool sticker = false}) async {
+    final url = sticker
+        ? await chooseSticker(context)
+        : await askMediaLink(context);
+    if (url == null || !mounted || !widget.enabled) return;
+    final text = widget.controller.text;
+    final selection = widget.controller.selection;
+    final start = selection.isValid ? selection.start : text.length;
+    final end = selection.isValid ? selection.end : text.length;
+    final inserted = '\n\n${mediaMarkdown(url, sticker: sticker)}\n\n';
+    if ((text.length - (end - start) + inserted.length) > widget.maxLength) {
+      return;
+    }
+    widget.controller.value = TextEditingValue(
+      text: text.replaceRange(start, end, inserted),
+      selection: TextSelection.collapsed(offset: start + inserted.length),
+    );
+  }
+
   @override
   void dispose() {
     widget.controller.removeListener(sourceChanged);
@@ -332,6 +353,22 @@ class _RichComposerState extends State<RichComposer> {
                 ),
             ],
           ),
+        ),
+        Wrap(
+          children: [
+            IconButton(
+              tooltip: 'Insert image or GIF',
+              onPressed: widget.enabled ? insertMedia : null,
+              icon: const Icon(Icons.gif_box_outlined),
+            ),
+            IconButton(
+              tooltip: 'Insert sticker',
+              onPressed: widget.enabled
+                  ? () => insertMedia(sticker: true)
+                  : null,
+              icon: const Icon(Icons.auto_awesome_outlined),
+            ),
+          ],
         ),
         if (extended && mode == 'Markdown')
           const Text(
