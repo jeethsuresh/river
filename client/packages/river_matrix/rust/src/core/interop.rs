@@ -41,7 +41,9 @@ async fn device(name: &str) -> Result<MatrixCore> {
 }
 async fn step(clients: &[&MatrixCore]) -> Result<()> {
     for core in clients {
-        core.sync().await.context("River production sync path failed")?;
+        core.sync()
+            .await
+            .context("River production sync path failed")?;
     }
     Ok(())
 }
