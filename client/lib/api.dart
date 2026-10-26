@@ -156,6 +156,9 @@ class RiverApi extends ChangeNotifier {
   int? friendsStatus;
   bool loadingOlder = false;
   int _generation = 0;
+  int _credentialRevision = 0;
+  Future<void>? _renewing;
+  Future<void> _sessionStorageQueue = Future.value();
   bool _disposed = false;
   final _transactions = <String, String>{};
   final _read = <String, String>{};
@@ -204,10 +207,13 @@ class RiverApi extends ChangeNotifier {
 
   void _expired() {
     _generation++;
+    _credentialRevision++;
     user = null;
     token = null;
     _clear();
-    if (!kIsWeb) unawaited(storage.delete(key: 'river_session'));
+    if (!kIsWeb) {
+      unawaited(_sessionStorage(() => storage.delete(key: 'river_session')));
+    }
     notifyListeners();
   }
 
@@ -232,6 +238,9 @@ class RiverApi extends ChangeNotifier {
     if (!liveEnabled || !active || _live != null || user == null) return;
     _live = LiveUpdates(
       url: uri('/api/live'),
+      prepare: () async {
+        await request('/api/session');
+      },
       headers: () => {
         if (!kIsWeb && token != null) 'Authorization': 'Bearer $token',
       },
@@ -255,6 +264,87 @@ class RiverApi extends ChangeNotifier {
       kIsWeb ? Uri.base.resolve(path) : Uri.parse('$endpoint$path');
   Future<Json> request(String path, {String method = 'GET', Json? body}) async {
     final generation = _generation;
+    final revision = _credentialRevision;
+    var response = await _send(path, method: method, body: body);
+    if (response.statusCode == 401 &&
+        path.startsWith('/api/') &&
+        !path.startsWith('/api/native/') &&
+        path != '/api/session/refresh') {
+      if (revision == _credentialRevision) await _renewSession();
+      if (generation != _generation) throw ApiException(409, 'session_changed');
+      response = await _send(path, method: method, body: body);
+    }
+    if (response.statusCode == 401) _expired();
+    return _responseData(response);
+  }
+
+  Future<void> _sessionStorage(Future<void> Function() operation) {
+    final result = _sessionStorageQueue.then((_) => operation());
+    _sessionStorageQueue = result.then<void>(
+      (_) {},
+      onError: (Object _, StackTrace _) {},
+    );
+    return result;
+  }
+
+  Future<void> _renewSession() async {
+    if (_renewing != null) return _renewing!;
+    final pending = _performRenewal();
+    _renewing = pending;
+    try {
+      await pending;
+    } finally {
+      if (identical(_renewing, pending)) _renewing = null;
+    }
+  }
+
+  Future<void> _performRenewal() async {
+    final generation = _generation;
+    final response = await _send('/api/session/refresh', method: 'POST');
+    if (response.statusCode == 401) _expired();
+    final data = _responseData(response);
+    if (!kIsWeb) {
+      final renewed = data['session'];
+      if (renewed is! String || renewed.isEmpty) {
+        throw ApiException(502, 'invalid_response');
+      }
+      await _sessionStorage(() async {
+        if (generation != _generation) {
+          throw ApiException(409, 'session_changed');
+        }
+        await storage.write(key: 'river_session', value: renewed);
+        if (generation != _generation) {
+          throw ApiException(409, 'session_changed');
+        }
+        token = renewed;
+      });
+    }
+    if (generation != _generation) throw ApiException(409, 'session_changed');
+    _credentialRevision++;
+  }
+
+  Json _responseData(http.Response response) {
+    Json data;
+    try {
+      data = jsonDecode(response.body) as Json;
+    } catch (_) {
+      throw ApiException(502, 'invalid_response');
+    }
+    if (response.statusCode >= 400) {
+      throw ApiException(
+        response.statusCode,
+        data['error'] as String? ?? 'unavailable',
+      );
+    }
+    return data;
+  }
+
+  Future<http.Response> _send(
+    String path, {
+    String method = 'GET',
+    Json? body,
+  }) async {
+    final generation = _generation;
     final account = accountKey;
     final r = http.Request(method, uri(path));
     r.headers.addAll({
@@ -270,20 +360,7 @@ class RiverApi extends ChangeNotifier {
     if (generation != _generation || account != accountKey) {
       throw ApiException(409, 'session_changed');
     }
-    Json data;
-    try {
-      data = jsonDecode(response.body) as Json;
-    } catch (_) {
-      throw ApiException(502, 'invalid_response');
-    }
-    if (response.statusCode == 401) _expired();
-    if (response.statusCode >= 400) {
-      throw ApiException(
-        response.statusCode,
-        data['error'] as String? ?? 'unavailable',
-      );
-    }
-    return data;
+    return response;
   }
 
   Future<void> boot() async {
@@ -508,6 +585,15 @@ class RiverApi extends ChangeNotifier {
   }
 
   Future<void> logout() async {
+    final renewal = _renewing;
+    _generation++;
+    // Browsers apply Set-Cookie before Dart sees the response. Clear the cookie
+    // after an in-flight renewal finishes so it cannot undo an explicit logout.
+    if (kIsWeb && renewal != null) {
+      try {
+        await renewal;
+      } catch (_) {}
+    }
     try {
       await _matrix?.disconnect(logout: true);
     } catch (_) {}
@@ -515,7 +601,7 @@ class RiverApi extends ChangeNotifier {
       await request('/auth/logout', method: 'POST');
     } else {
       token = null;
-      await storage.delete(key: 'river_session');
+      await _sessionStorage(() => storage.delete(key: 'river_session'));
     }
     _expired();
     if (kIsWeb) await launchUrl(uri('/?auto=off'), webOnlyWindowName: '_self');

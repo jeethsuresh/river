@@ -166,8 +166,18 @@ After increasing the version name and Android build number, push or merge to `ma
 Configure the Go process with `GRAVITAS_SESSION_KEY` (32 random bytes, base64url),
 `GRAVITAS_ISSUER=https://gravitas.cool`, `APP_URL=https://chat.gravitas.cool`,
 `STATIC_DIR=/app/web` and `ADDR=:8080`. The session key belongs in a Kubernetes
-Secret. Session envelopes deliberately expire before their delegated access token
-(one hour); sign in again using existing IAM consent. Token refresh is a next task.
+Secret. New sign-ins retain the delegated refresh token only inside the encrypted app-session
+envelope. River renews expired access automatically, persists the replacement in the
+HttpOnly browser cookie or Android secure storage, and preserves the linked Matrix
+device and keys. The envelope lasts only until the original central login family
+expires (at most 30 days); logout and consent revocation still deny access immediately.
+Temporary IAM failures return 503 without deleting credentials. Older installations
+need one sign-in after updating because their envelopes never contained refresh tokens.
+Native device approval transfers that login to the app and clears the browser handoff
+cookie, so the browser and app do not share a rotating refresh token. Concurrent
+renewals and immediate response retries share a bounded two-minute result cache in
+the current single-replica backend; successful clients persist the replacement so
+normal backend restarts do not end their sessions.
 Pending Android links are bounded and in memory; restart requires starting a new link.
 
 ## Deploy

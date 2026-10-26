@@ -60,15 +60,19 @@ type flow struct {
 	Silent   bool
 }
 type session struct {
-	Identity     Identity
-	Expires      int64
-	CheckToken   string
-	SessionID    string
-	CheckExpires int64
-	LocalToken   string
+	Identity      Identity
+	Expires       int64
+	CheckToken    string
+	SessionID     string
+	CheckExpires  int64
+	LocalToken    string
+	RefreshToken  string
+	AccessExpires int64
 }
 
 type Client struct {
+	refreshMu      sync.Mutex
+	refreshes      map[[32]byte]*renewal
 	federationMu   sync.Mutex
 	federated      map[string]*Client
 	federatedOrder []string
@@ -287,11 +291,13 @@ func (c *Client) Callback(w http.ResponseWriter, r *http.Request) (Authorization
 		return identity, "", errors.New("IAM is unavailable")
 	}
 	var tokens struct {
-		AccessToken string `json:"access_token"`
-		TokenType   string `json:"token_type"`
-		CheckToken  string `json:"session_check_token"`
-		CheckTTL    int64  `json:"session_check_expires_in"`
-		SessionID   string `json:"session_id"`
+		AccessToken  string `json:"access_token"`
+		RefreshToken string `json:"refresh_token"`
+		ExpiresIn    int64  `json:"expires_in"`
+		TokenType    string `json:"token_type"`
+		CheckToken   string `json:"session_check_token"`
+		CheckTTL     int64  `json:"session_check_expires_in"`
+		SessionID    string `json:"session_id"`
 	}
 	if err = readJSON(resp, &tokens); err != nil {
 		return identity, "", err
@@ -313,6 +319,13 @@ func (c *Client) Callback(w http.ResponseWriter, r *http.Request) (Authorization
 		return Authorization{}, "", errors.New("invalid IAM session binding")
 	}
 	identity.AccessToken = tokens.AccessToken
+	if tokens.RefreshToken != "" {
+		if tokens.ExpiresIn <= 0 || tokens.ExpiresIn > int64(SessionLifetime/time.Second) || len(tokens.RefreshToken) > 256 {
+			return Authorization{}, "", errors.New("invalid IAM refresh binding")
+		}
+		identity.RefreshToken = tokens.RefreshToken
+		identity.AccessExpires = time.Now().Unix() + tokens.ExpiresIn
+	}
 	identity.CheckToken = tokens.CheckToken
 	identity.SessionID = tokens.SessionID
 	identity.CheckExpires = time.Now().Unix() + tokens.CheckTTL

@@ -1,14 +1,11 @@
 {
   "schemaVersion": 1,
-  "version": "0.6.1",
-  "versionCode": 9,
+  "version": "0.6.2",
+  "versionCode": 10,
   "changes": [
-    "Connect River as a Matrix device to use Gravitas rooms and rooms from other Matrix servers.",
-    "Open threads update as Matrix messages arrive, including rooms hosted on other servers.",
-    "Send and read end-to-end encrypted messages, threads and Matrix attachments. Existing rooms can enable encryption for future messages.",
-    "Verify your devices by showing or reading a Matrix QR code, using a camera where available, or comparing numbers. Confirm the scan before trusting another device.",
-    "Restore your encryption identity and older messages using a verified device or an encrypted recovery key.",
-    "Keep Matrix sessions and private keys on the device. Encrypted sends stop when the Matrix connection is unavailable.",
-    "Matrix attachments support files up to 32 MiB. Public posts, room details and existing SFU calls retain their separate visibility and security settings."
+    "Stay signed in as River automatically renews expiring access credentials within your Gravitas session.",
+    "Keep your linked Matrix device and encryption keys when River reconnects; save rotated device credentials immediately.",
+    "Temporary server outages keep saved credentials so River can reconnect when service returns.",
+    "After updating from an older version, sign in once to enable automatic renewal. Gravitas sign-out, revoked permissions and the central session expiry still require sign-in."
   ]
 }

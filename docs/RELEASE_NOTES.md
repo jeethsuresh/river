@@ -1,16 +1,9 @@
-# River 0.5.2
+# River 0.6.2
 
-- Remove the configured 32-participant call ceiling from the Go broker and SFU configuration. Usable call capacity still depends on media, devices and server resources.
-- Restore live updates by accepting Gravitas’s JSON API negotiation before its SSE stream.
-- Wait for queued refreshes after membership, channel and content actions so an in-flight older read cannot leave the shared web/Android client using stale state.
-- Persist post content and visibility policy before awaiting one final snapshot, preserving the created post across policy retries.
-- Add repeatable, opt-in production-account journey tests and a tracked verification ledger for the remaining physical-device, network, load, storage and accessibility checks.
+- Automatically renew expiring Gravitas access credentials within the original central session, avoiding hourly login and native device-link prompts.
+- Persist renewed Android credentials in secure storage and browser credentials in the existing encrypted HttpOnly cookie.
+- Reconnect live updates after access-token expiry and preserve saved credentials during temporary outages.
+- Save Matrix credentials immediately when initial reconnect sync rotates them, retaining the same device store and encryption keys.
+- Older versions discarded refresh tokens, so sign in once after updating to enable renewal. Central logout, permission revocation and the original session limit (up to 30 days) still apply.
 
-Uses River’s existing permanent Android signing certificate and minimum Android
-7.0 (API 24). Gravitas handles accounts; password recovery remains deferred.
-Backend/web deployment follows the current tested main-only workflow. See docs/VERIFICATION_GAPS.md for
-the bounded admission check and the precise verification limits.
-
-Preserves 0.5.1's username/domain sign-in and the current verified signed Android
-release workflow. GitHub publishes the signed APK after its release tests pass;
-backend/web deployment runs automatically after the required main-branch tests.
+Uses the existing permanent River Android signing certificate and package.

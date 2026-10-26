@@ -11,12 +11,15 @@ import 'package:url_launcher/url_launcher.dart';
 import 'matrix_store_location.dart';
 
 typedef MatrixJson = Map<String, dynamic>;
-typedef MatrixRequest =
-    Future<MatrixJson> Function(String path, {String method, MatrixJson? body});
+typedef MatrixRequest = Future<MatrixJson> Function(
+  String path, {
+  String method,
+  MatrixJson? body,
+});
 
-String _randomSecret() => base64UrlEncode(
-  List.generate(32, (_) => Random.secure().nextInt(256)),
-).replaceAll('=', '');
+String _randomSecret() =>
+    base64UrlEncode(List.generate(32, (_) => Random.secure().nextInt(256)))
+        .replaceAll('=', '');
 
 abstract interface class MatrixTransport {
   Future<MatrixJson> login(String token);
@@ -51,8 +54,9 @@ abstract interface class MatrixTransport {
   Future<void> close(bool logout);
 }
 
-typedef MatrixFactory =
-    Future<MatrixTransport> Function(MatrixJson configuration);
+typedef MatrixFactory = Future<MatrixTransport> Function(
+  MatrixJson configuration,
+);
 
 class RustMatrixTransport implements MatrixTransport {
   RustMatrixTransport(this.engine);
@@ -281,6 +285,16 @@ class MatrixMessaging extends ChangeNotifier {
         try {
           final snapshot = await engine.sync();
           _guard(generation);
+          // Reconnecting can rotate the Matrix refresh token immediately.
+          // Save it before publishing the restored device, including when
+          // background sync is disabled or the app closes after this read.
+          config['session'] = await engine.credentials();
+          _guard(generation);
+          await _serializeStorage(() async {
+            _guard(generation);
+            await storage.write(sessionKey, jsonEncode(config));
+          });
+          _guard(generation);
           _transport = engine;
           _configuration = config;
           roomList = (snapshot['rooms'] as List).cast<MatrixJson>();
@@ -408,8 +422,11 @@ class MatrixMessaging extends ChangeNotifier {
         _guard(generation);
         final snapshot = await engine.sync();
         _guard(generation);
+        config['session'] = await engine.credentials();
+        _guard(generation);
         await _serializeStorage(() async {
           _guard(generation);
+          await storage.write(sessionKey, jsonEncode(config));
           await storage.delete(pendingKey);
         });
         _guard(generation);
@@ -514,8 +531,7 @@ class MatrixMessaging extends ChangeNotifier {
           if ('$e'.contains('RIVER_MATRIX_SESSION_EXPIRED')) {
             final old = _transport;
             _transport = null;
-            error =
-                'This Matrix device session expired. Connect and verify this device again.';
+            error = 'This Matrix device session expired. Connect and verify this device again.';
             try {
               await old?.close(false);
             } catch (_) {}
