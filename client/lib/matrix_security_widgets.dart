@@ -41,7 +41,7 @@ class _MatrixSecurityPanelState extends State<MatrixSecurityPanel> {
   }
 
   Future<void> load() async {
-    if (loading || busy || !messaging.connected) return;
+    if (loading || busy || !messaging.connected || !messaging.active) return;
     loading = true;
     final engine = messaging.transport;
     try {

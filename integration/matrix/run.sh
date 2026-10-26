@@ -10,7 +10,7 @@ cleanup() {
   if (( status != 0 )); then
     for suffix in native synapse; do docker logs --tail 60 "$name-$suffix" 2>&1 || true; done
   fi
-  for suffix in client native synapse pg; do docker rm -fv "$name-$suffix" >/dev/null 2>&1 || true; done
+  for suffix in browser client native synapse pg; do docker rm -fv "$name-$suffix" >/dev/null 2>&1 || true; done
   docker network rm "$name" >/dev/null 2>&1 || true
   rm -rf "$fixtures"
   exit "$status"
@@ -51,11 +51,15 @@ docker run -d --name "$name-native" --network "$name" --network-alias native.tes
   -e WALLABY_SKIP=1 -e INTEROP_HOLD=1 -e INTEROP_SERVE_ONLY=1 \
   --entrypoint mix "$server_image" run --no-start integration/matrix/native.exs >/dev/null
 for attempt in $(seq 1 90); do
-  if docker logs "$name-native" 2>&1 | rg -q 'INTEROP CRYPTO SERVER READY'; then break; fi
+  if docker logs "$name-native" 2>&1 | grep -q 'INTEROP CRYPTO SERVER READY'; then break; fi
   if [[ $(docker inspect -f '{{.State.Running}}' "$name-native") != true ]] || (( attempt == 90 )); then
     docker logs --tail 40 "$name-native"; exit 1
   fi
   sleep 1
 done
 docker run --name "$name-client" --network "$name" --security-opt label=disable \
-  -v "$fixtures:/fixtures:ro" "$client_image"
+  -v "$fixtures/ca.pem:/fixtures/ca.pem:ro" "$client_image"
+if [[ -n ${4:-} ]]; then
+  docker run --name "$name-browser" --network "$name" --security-opt label=disable \
+    -v "$fixtures/peer.pem:/fixtures/peer.pem:ro" "$4"
+fi

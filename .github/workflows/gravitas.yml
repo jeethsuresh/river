@@ -27,8 +27,9 @@ jobs:
         run: |
           docker build -f .matrix-server/Dockerfile.tests -t river-matrix-server:test .matrix-server
           docker build -f Dockerfile.matrix-tests -t river-matrix-client:test .
+          docker build --target matrix-browser-interop-client -t river-matrix-browser:test .
       - name: Verify QR trust and encrypted key recovery
-        run: bash integration/matrix/run.sh river-matrix-server:test river-matrix-client:test .matrix-server
+        run: bash integration/matrix/run.sh river-matrix-server:test river-matrix-client:test .matrix-server river-matrix-browser:test
   matrix-platforms:
     name: Matrix SDK (${{ matrix.platform }})
     strategy:

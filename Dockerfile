@@ -38,6 +38,16 @@ COPY --from=matrix-web-build /out/pkg /src/client/web/pkg
 COPY scripts/test-matrix-browser.sh /src/scripts/test-matrix-browser.sh
 RUN bash /src/scripts/test-matrix-browser.sh
 
+FROM flutter-sdk AS matrix-browser-interop-client
+RUN apt-get update && apt-get install -y --no-install-recommends chromium python3 openssl \
+    && rm -rf /var/lib/apt/lists/*
+COPY --from=matrix-web-build /out/pkg /src/client/web/pkg
+RUN flutter build web --release --no-pub --no-web-resources-cdn \
+    --target tool/matrix_web_interop.dart --output /opt/river-matrix-browser
+COPY scripts/run-matrix-browser-interop.sh /opt/run-matrix-browser-interop.sh
+ENV DART_EXECUTABLE=/opt/flutter/bin/cache/dart-sdk/bin/dart
+CMD ["bash", "/opt/run-matrix-browser-interop.sh"]
+
 FROM flutter-sdk AS frontend-build
 COPY --from=matrix-web-build /out/pkg /src/client/web/pkg
 RUN flutter build web --release --no-pub --no-web-resources-cdn
