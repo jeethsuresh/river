@@ -29,11 +29,12 @@ type pairing struct {
 	Expires                             time.Time
 }
 type server struct {
-	auth   *gravitas.Client
-	static string
-	mu     sync.Mutex
-	pairs  map[string]*pairing
-	files  *signalHub
+	auth        *gravitas.Client
+	static      string
+	mu          sync.Mutex
+	pairs       map[string]*pairing
+	matrixLinks map[string]*matrixLink
+	files       *signalHub
 }
 
 var uuidPattern = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)
@@ -97,6 +98,12 @@ func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Referrer-Policy", "no-referrer")
 	w.Header().Set("Permissions-Policy", "camera=(self), microphone=(self), display-capture=(self)")
 	switch r.URL.Path {
+	case "/matrix/link":
+		s.matrixStart(w, r)
+		return
+	case "/matrix/callback":
+		s.matrixCallback(w, r)
+		return
 	case "/healthz":
 		respond(w, 200, map[string]string{"status": "ok", "app": "River"})
 		return
@@ -192,6 +199,12 @@ func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		switch r.URL.Path {
+		case "/api/matrix/link":
+			s.matrixNew(w, r, session)
+			return
+		case "/api/matrix/poll":
+			s.matrixPoll(w, r, session)
+			return
 		case "/api/live":
 			s.live(w, r, session)
 			return

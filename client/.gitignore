@@ -43,3 +43,6 @@ app.*.map.json
 /android/app/debug
 /android/app/profile
 /android/app/release
+
+# Generated Matrix WebAssembly assets are built from locked Rust sources.
+/web/pkg/

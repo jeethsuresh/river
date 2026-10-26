@@ -18,3 +18,6 @@ work/
 __pycache__/
 
 flutter_*.log
+
+# Isolated Matrix protocol checkout used by CI only.
+.matrix-server/

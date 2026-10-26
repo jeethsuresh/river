@@ -23,7 +23,7 @@ Next.js River code; Git history retains that implementation.
 - Browser cookies are encrypted, Secure, HttpOnly, host-only and SameSite=Lax.
   Android stores the same encrypted app-session envelope in platform secure storage.
 - Android uses the system browser and an explicit device-link confirmation with a
-  verifier challenge and five-minute, single-use exchange. Passwords never enter River.
+  verifier challenge and five-minute, single-use exchange. Matrix device sign-in uses the same browser approval model. Initial encryption setup may require a password, sent directly from the SDK to Gravitas.
 - Every protected request validates the central session proof; central logout and
   consent revocation deny subsequent access. IAM outages fail closed.
 
@@ -36,19 +36,22 @@ conversations, catch-up and participating threads, public posts/blogs with indep
 comment policies, peer file attachments and calling. The Go process brokers
 centrally authorized MatrixRTC memberships with a LiveKit SFU and Coturn relay.
 See [the parity contract](docs/ORBIT_PARITY.md) and [media setup](deploy/media/README.md).
-Gravitas remains a Matrix API subset, without federation or end-to-end encryption.
+Gravitas implements native Matrix client/server and room federation APIs. River connects a local Matrix device through its Apache-2.0 adapter, using native Sliding Sync when advertised and classic sync otherwise. It sends standard messages, threads, reactions, edits and encrypted attachments through that device. Existing Gravitas contacts, delegated space tools, publishing and calls retain their app permissions.
+
+Device security in Account supports showing a Matrix QR code, reading a QR image, camera capture where supported, SAS number comparison, cross-signing and encrypted key recovery. Confirming a QR scan is required before granting trust. Matrix sessions and private encryption keys stay in the client's encrypted store; the Go server receives only the one-use SSO login token. Encrypted messages never fall back to a clear-text send when the Matrix connection fails.
+
+The adapter has native plugin builds for Android, iOS, macOS, Windows and Linux and a WebAssembly/IndexedDB implementation for Flutter web. River currently distributes web and Android applications; platform CI links the adapter on the other Flutter targets. See [the adapter](client/packages/river_matrix/README.md) for pinned dependencies and build/test instructions. Standard encrypted file uploads are limited to 32 MiB by River.
 
 ## Exact current mapping and event contract
 
-A Gravitas group already **is** a `rooms` UUID with `room_memberships`; there is no
-second group table. River preserves that single source of access decisions.
+Delegated Gravitas groups retain their internal UUIDs and membership records. Their canonical Matrix `room_id` comes from the signed room graph, and River uses that ID for Matrix traffic. A Matrix-only or remote room keeps its full `!room:server` ID. River merges these room lists by canonical ID, preserving local app permissions for calls and publishing.
 
-- A River space maps 1:1 to that group and `!<uuid>:gravitas.cool`, with
+- A River space maps 1:1 to that group and its canonical Matrix room ID, with
   `m.room.create.content.type = m.space`.
 - A River DM/group conversation maps 1:1 to a normal Matrix room and group. Its
   `cool.gravitas.river.group.v1` state identifies `kind=dm` or `kind=group`. Invitations use
   `m.room.member` with `is_direct=true`. Private Matrix `m.direct` account data is
-  not yet implemented, so automatic DM recognition by other clients is incomplete.
+  maintained by Gravitas and the SDK lets other Matrix clients recognize direct rooms.
 - Each channel is a separate room/group linked by `m.space.child` and canonical
   `m.space.parent`. A `river_channels` row is the authoritative parent link.
   The root timeline is retained for existing content and space posts/discussions.
@@ -77,8 +80,8 @@ second group table. River preserves that single source of access decisions.
   preserved in place. New immutable actions use `cool.gravitas.contact.v1` with
   version, actor, target, originating app and action. Historical River friend events
   retain their types. App event queries expose only the calling app's actions and
-  hide another person's block events. These are delegated private account APIs;
-  full standard Matrix account-data endpoints remain pending.
+  hide another person's block events. These remain delegated private contact APIs;
+  standard Matrix account-data endpoints are used separately by the Matrix SDK.
   Blocks stop contact requests and direct messages, while shared space channels
   retain their normal group ACL. Creating a canonical DM additionally checks the
   contact's current app consent. Reopening an already-joined DM still requires
@@ -108,7 +111,7 @@ Room membership, app room selection and operation scope must all permit access.
 `groups.create` adds **only the newly created group** to a selected app grant.
 `groups.manage` grants no global administration or authority over another owner's group.
 History is `shared`: a joined member can read prior retained group events; removed
-members cannot read through River. End-to-end encryption is not implemented.
+members cannot read through River. Encrypted-room messages and standard attachments use client-side Matrix encryption; public publishing and room state remain server-readable.
 
 Delegated endpoints live on the main Gravitas server at `/app/v1/groups`:
 `GET/POST`, `PATCH /:id`, `POST /:id/membership`, `GET /:id/events`, and
@@ -127,7 +130,7 @@ client. Event pagination uses a same-room event ID cursor with a stable database
 
 The Dockerfile and Android CI pin Flutter 3.47.7 at
 `abaf9c523780a608bd46686fd5e53740a07077f8`.
-Go is pinned to 1.25.2 for the image. Dependencies are locked in `client/pubspec.lock`.
+Go is pinned to 1.25.2 for the image. Rust 1.96.0 and wasm-bindgen 0.2.129 build the Matrix core. Flutter and Rust dependencies are locked in their tracked lockfiles. Run `bash scripts/matrix-toolchain.sh` and the web asset build from the adapter README before building Flutter locally; the production Dockerfile does this automatically.
 
 ```
 cd backend
@@ -137,6 +140,9 @@ cd ../client
 flutter pub get --enforce-lockfile
 flutter analyze
 flutter test
+cd ..
+bash scripts/build-matrix-web.sh
+cd client
 flutter build web --release --no-web-resources-cdn
 flutter build apk --debug --target-platform android-arm64,android-x64
 ```
@@ -197,10 +203,9 @@ An APK upload alone does not install its API migration, web image or media pods.
 Physical-device Bluetooth, mobile-network handoff and large-call capacity require
 separate device/load verification. Password recovery remains outside this River
 release at the user's request; registration/password/settings/logout use Gravitas.
-Standard Matrix account data, full RTC focus discovery/client interoperability,
-federation and E2EE are not implemented by this Matrix API subset.
+Matrix-only rooms support messaging and device encryption. Gravitas-specific publishing, contacts and SFU calling continue to use their delegated app APIs. Matrix QR verification synchronizes message encryption keys; it does not imply that a LiveKit call is end-to-end encrypted. Public posts cannot be made private retroactively by enabling room encryption. Generic Matrix clients may ignore River-specific post and discussion events.
 
-Protocol references: [Matrix events and spaces](https://spec.matrix.org/v1.16/client-server-api/),
+Protocol references: [Matrix events and spaces](https://spec.matrix.org/v1.19/client-server-api/),
 [MatrixRTC](https://github.com/matrix-org/matrix-spec-proposals/pull/4143).
 
 ## Contacts release compatibility

@@ -1,0 +1,9 @@
+River Matrix adapter
+Copyright 2026 River contributors
+
+The adapter in this directory is licensed under Apache-2.0.
+Matrix Rust SDK and its cryptographic components: Apache-2.0, Matrix.org Foundation and Element contributors.
+Flutter Rust Bridge: MIT, its contributors. Generated bindings use that project's code generator.
+Cargokit: MIT; original license retained in cargokit/LICENSE. Its local changes pin Rust 1.96.0 and recognize numbered Rust toolchains.
+See Cargo.lock and the root Flutter pubspec.lock for exact transitive dependencies and their upstream licenses.
+This notice applies to this package; it does not declare a license for the rest of River.

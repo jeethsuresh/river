@@ -3,6 +3,8 @@ import 'dart:convert';
 import 'dart:math';
 
 import 'live_updates.dart';
+import 'matrix_messaging.dart';
+import 'matrix_timeline.dart';
 import 'calls.dart';
 import 'peer_files.dart';
 import 'file_models.dart' show FileScope;
@@ -42,10 +44,84 @@ class ApiException implements Exception {
 }
 
 class RiverApi extends ChangeNotifier {
-  RiverApi({http.Client? client, bool? live})
-    : client = client ?? http.Client(),
-      liveEnabled = live ?? client == null;
+  RiverApi({
+    http.Client? client,
+    bool? live,
+    MatrixFactory? matrixFactory,
+    MatrixStorage? matrixStorage,
+    bool? matrixEnabled,
+  }) : client = client ?? http.Client(),
+       liveEnabled = live ?? client == null,
+       matrixEnabled = matrixEnabled ?? (live ?? client == null),
+       _matrixFactory = matrixFactory,
+       _matrixStorage = matrixStorage;
   final bool liveEnabled;
+  final bool matrixEnabled;
+  final MatrixFactory? _matrixFactory;
+  final MatrixStorage? _matrixStorage;
+  MatrixMessaging? _matrix;
+  MatrixMessaging get matrix => _matrix ??= (MatrixMessaging(
+    request: request,
+    factory: _matrixFactory,
+    storage: _matrixStorage,
+    syncEnabled: liveEnabled,
+    changed: () {
+      if (user != null && active) unawaited(refresh());
+    },
+  )..addListener(notifyListeners));
+  bool get matrixConnected => _matrix?.connected ?? false;
+  Json? group(String id) => groups.where((g) => g['id'] == id).firstOrNull;
+  String? matrixRoom(String id) => group(id)?['room_id'] as String?;
+  bool encrypted(String id) => group(id)?['encrypted'] == true;
+
+  List<Json> _matrixGroups(List<Json> delegated) {
+    if (!matrixConnected) return delegated;
+    final byWire = <String, Json>{
+      for (final g in delegated)
+        if (g['room_id'] is String) g['room_id'] as String: g,
+    };
+    for (final room in matrix.roomList) {
+      final wire = room['room_id'] as String;
+      final old = byWire[wire];
+      if (!['join', 'invite', 'knock'].contains(room['membership'])) {
+        byWire.remove(wire);
+        continue;
+      }
+      byWire[wire] = {
+        if (old != null) ...old,
+        'id': old?['id'] ?? wire,
+        'room_id': wire,
+        'name': room['name'],
+        'description': room['description'] ?? old?['description'] ?? '',
+        'channel_kind': room['channel_kind'] ?? old?['channel_kind'],
+        'membership': room['membership'],
+        'kind': old?['kind'] ?? room['kind'],
+        'members': old?['members'] ?? <Json>[],
+        'owner_id': room['can_manage'] == true ? (user?['sub']) : null,
+        'owner': room['can_manage'] == true,
+        'can_manage': room['can_manage'],
+        'can_encrypt': room['can_encrypt'],
+        'encrypted': room['encrypted'],
+        'unread_count': room['unread_count'],
+        'matrix_only': old == null,
+        'matrix_parents': room['parents'] ?? [],
+      };
+    }
+    for (final room in byWire.values) {
+      final parents = room['matrix_parents'] as List? ?? [];
+      final parentId = parents
+          .where((p) => byWire[p]?['kind'] == 'space')
+          .firstOrNull;
+      if (parentId != null && room['kind'] != 'space') {
+        final parent = byWire[parentId]!;
+        room['parent_id'] = parent['id'];
+        room['kind'] = 'channel';
+        room['channel_kind'] ??= 'text';
+      }
+    }
+    return byWire.values.toList();
+  }
+
   LiveUpdates? _live;
   final changes = StreamController<void>.broadcast();
   Set<String> online = {};
@@ -63,6 +139,7 @@ class RiverApi extends ChangeNotifier {
   Json? user;
   String? get accountKey =>
       user == null ? null : "${user?['issuer']}|${user?['sub']}";
+  List<Json> _matrixEvents = [];
   List<Json> groups = [],
       events = [],
       recent = [],
@@ -93,6 +170,7 @@ class RiverApi extends ChangeNotifier {
   int get incomingRequests =>
       requests.where((r) => r['direction'] == 'incoming').length;
   void _clear() {
+    if (_matrix != null) unawaited(_matrix!.disconnect());
     _live?.close();
     _live = null;
     unawaited(_calls?.leave());
@@ -104,6 +182,7 @@ class RiverApi extends ChangeNotifier {
     }
     online = {};
     groups = [];
+    _matrixEvents = [];
     events = [];
     recent = [];
     catchUp = [];
@@ -136,6 +215,7 @@ class RiverApi extends ChangeNotifier {
   set active(bool value) {
     _active = value;
     files?.setActive(value);
+    _matrix?.active = value;
     if (!value) {
       _live?.close();
       _live = null;
@@ -216,6 +296,7 @@ class RiverApi extends ChangeNotifier {
       final next = data['user'] as Json;
       if (accountKey != "${next['issuer']}|${next['sub']}") _clear();
       user = next;
+      if (matrixEnabled) await matrix.bind(next);
       if (liveEnabled && files == null) {
         final nextFiles = await PeerFiles.create(this, uri('/'), accountKey!);
         if (accountKey == "${next['issuer']}|${next['sub']}") {
@@ -246,7 +327,7 @@ class RiverApi extends ChangeNotifier {
     try {
       final result = await request('/api/overview');
       if (account != accountKey) return;
-      groups = (result['groups'] as List).cast<Json>();
+      groups = _matrixGroups((result['groups'] as List).cast<Json>());
       await files?.setScopes([
         for (final g in groups.where((g) => g['membership'] == 'join'))
           FileScope('room', g['id'] as String),
@@ -300,7 +381,16 @@ class RiverApi extends ChangeNotifier {
           groups.any(
             (g) => g['id'] == selectedId && g['membership'] == 'join',
           )) {
-        final data = await request('/api/groups/$selectedId/events');
+        final wire = matrixRoom(selectedId);
+        final data = matrixConnected && wire != null
+            ? await matrix.transport.history(wire, null)
+            : await request('/api/groups/$selectedId/events');
+        if (matrixConnected && wire != null) {
+          final roster = await matrix.transport.members(wire);
+          if (account == accountKey && selectedId == selected) {
+            group(selectedId)?['members'] = roster['members'];
+          }
+        }
         if (account == accountKey && selectedId == selected) {
           final latest = (data['events'] as List).cast<Json>();
           final initial = events.isEmpty;
@@ -344,6 +434,7 @@ class RiverApi extends ChangeNotifier {
 
   Future<void> open(String? id) async {
     selected = id;
+    _matrixEvents = [];
     events = [];
     nextCursor = null;
     notifyListeners();
@@ -414,6 +505,9 @@ class RiverApi extends ChangeNotifier {
   }
 
   Future<void> logout() async {
+    try {
+      await _matrix?.disconnect(logout: true);
+    } catch (_) {}
     if (kIsWeb) {
       await request('/auth/logout', method: 'POST');
     } else {
@@ -438,6 +532,7 @@ class RiverApi extends ChangeNotifier {
       },
     );
     _transactions.remove('create:$name:$kind');
+    if (matrixConnected) await matrix.syncNow();
     selected = result['id'] as String;
     events = [];
     nextCursor = null;
@@ -450,7 +545,19 @@ class RiverApi extends ChangeNotifier {
     }
   }
 
-  void _mergeEvents(List<Json> incoming) {
+  void _mergeEvents(List<Json> incoming, {bool older = false}) {
+    if (matrixConnected) {
+      final updates = {for (final e in incoming) e['event_id'] as String: e};
+      final previous = _matrixEvents
+          .map((e) => updates[e['event_id']] ?? e)
+          .toList();
+      final known = previous.map((e) => e['event_id']).toSet();
+      final added = incoming.where((e) => !known.contains(e['event_id']));
+      // The homeserver/SDK supplies DAG order. Remote timestamps are untrusted.
+      _matrixEvents = older ? [...added, ...previous] : [...previous, ...added];
+      events = renderMatrixTimeline(_matrixEvents, user?['user_id'] as String?);
+      return;
+    }
     final merged = <String, Json>{
       for (final e in events) e['event_id'] as String: e,
     };
@@ -479,11 +586,14 @@ class RiverApi extends ChangeNotifier {
     loadingOlder = true;
     notifyListeners();
     try {
-      final data = await request(
-        '/api/groups/$room/events?before=${Uri.encodeQueryComponent(cursor)}',
-      );
+      final wire = matrixRoom(room);
+      final data = matrixConnected && wire != null
+          ? await matrix.transport.history(wire, cursor)
+          : await request(
+              '/api/groups/$room/events?before=${Uri.encodeQueryComponent(cursor)}',
+            );
       if (account == accountKey && room == selected) {
-        _mergeEvents((data['events'] as List).cast<Json>());
+        _mergeEvents((data['events'] as List).cast<Json>(), older: true);
         nextCursor = data['next_cursor'] as String?;
       }
     } finally {
@@ -497,11 +607,20 @@ class RiverApi extends ChangeNotifier {
     final account = accountKey;
     _read[room] = event;
     try {
-      await request(
-        '/api/groups/$room/read',
-        method: 'POST',
-        body: {'event_id': event},
-      );
+      final wire = matrixRoom(room);
+      if (matrixConnected && wire != null) {
+        await matrix.transport.action({
+          'action': 'read',
+          'room': wire,
+          'event': event,
+        });
+      } else {
+        await request(
+          '/api/groups/$room/read',
+          method: 'POST',
+          body: {'event_id': event},
+        );
+      }
       if (account == accountKey &&
           selected == room &&
           events.lastOrNull?['event_id'] == event) {
@@ -528,6 +647,7 @@ class RiverApi extends ChangeNotifier {
       },
     );
     _transactions.remove(key);
+    if (matrixConnected) await matrix.syncNow();
     selected = result['id'] as String;
     events = [];
     nextCursor = null;
@@ -535,8 +655,9 @@ class RiverApi extends ChangeNotifier {
   }
 
   String userId(String value) {
-    final v = value.trim().toLowerCase();
-    if (v.startsWith('@') && v.contains(':')) return v;
+    final entered = value.trim();
+    if (entered.startsWith('@') && entered.contains(':')) return entered;
+    final v = entered.toLowerCase();
     final domain =
         user?['domain'] as String? ??
         (user?['user_id'] as String?)?.split(':').skip(1).join(':') ??
@@ -560,11 +681,34 @@ class RiverApi extends ChangeNotifier {
   }
 
   Future<void> messageFriend(String person) async {
+    if (matrixConnected &&
+        !friends.any((f) => f['user_id'] == userId(person))) {
+      final result = await matrix.transport.action({
+        'action': 'direct',
+        'user': userId(person),
+      });
+      await matrix.refreshRooms();
+      await refresh();
+      final room = groups
+          .where((g) => g['room_id'] == result['room_id'])
+          .firstOrNull;
+      if (room != null) await open(room['id'] as String);
+      return;
+    }
     final result = await request(
       '/api/direct',
       method: 'POST',
       body: {'user_id': userId(person)},
     );
+    await refresh();
+    if (matrixConnected) {
+      // The new local room must first arrive in the Matrix sync before use.
+      await matrix.syncNow();
+      final wire = matrixRoom(result['id'] as String);
+      if (wire != null) {
+        await matrix.transport.action({'action': 'encrypt', 'room': wire});
+      }
+    }
     await open(result['id'] as String);
   }
 
@@ -580,6 +724,7 @@ class RiverApi extends ChangeNotifier {
       },
     );
     _transactions.remove(key);
+    if (matrixConnected) await matrix.syncNow();
     await open(result['id'] as String);
   }
 
@@ -607,9 +752,14 @@ class RiverApi extends ChangeNotifier {
     notifyListeners();
   }
 
-  Future<Json> thread(String room, String event, {String? before}) => request(
-    '/api/groups/$room/thread?event_id=${Uri.encodeQueryComponent(event)}${before == null ? '' : '&before=${Uri.encodeQueryComponent(before)}'}',
-  );
+  Future<Json> thread(String room, String event, {String? before}) {
+    final wire = matrixRoom(room);
+    return matrixConnected && wire != null
+        ? matrix.transport.thread(wire, event, before)
+        : request(
+            '/api/groups/$room/thread?event_id=${Uri.encodeQueryComponent(event)}${before == null ? '' : '&before=${Uri.encodeQueryComponent(before)}'}',
+          );
+  }
 
   Future<void> react(
     String room,
@@ -618,6 +768,20 @@ class RiverApi extends ChangeNotifier {
     bool active,
   ) async {
     final key = 'reaction:$room:$event:$emoji:$active';
+    final wire = matrixRoom(room);
+    if (matrixConnected && wire != null) {
+      await matrix.transport.action({
+        'action': 'reaction',
+        'room': wire,
+        'event': event,
+        'key': emoji,
+        'active': active,
+        'transaction': _transactions.putIfAbsent(key, transactionId),
+      });
+      _transactions.remove(key);
+      await refresh();
+      return;
+    }
     await request(
       '/api/groups/$room/reactions',
       method: 'POST',
@@ -640,6 +804,20 @@ class RiverApi extends ChangeNotifier {
     bool refreshAfter = true,
   }) async {
     final key = 'edit:$room:$event:$title:$body';
+    final wire = matrixRoom(room);
+    if (matrixConnected && wire != null) {
+      await matrix.transport.action({
+        'action': 'edit',
+        'room': wire,
+        'event': event,
+        'title': title,
+        'body': body,
+        'transaction': _transactions.putIfAbsent(key, transactionId),
+      });
+      _transactions.remove(key);
+      if (refreshAfter) await refresh();
+      return;
+    }
     await request(
       '/api/groups/$room/entry',
       method: 'POST',
@@ -654,7 +832,97 @@ class RiverApi extends ChangeNotifier {
     if (refreshAfter) await refresh();
   }
 
+  Future<void> updateGroup(
+    String id, {
+    String? name,
+    String? description,
+  }) async {
+    final wire = matrixRoom(id);
+    if (matrixConnected && wire != null) {
+      if (name != null) {
+        await matrix.transport.action({
+          'action': 'rename',
+          'room': wire,
+          'name': name,
+        });
+      }
+      if (description != null) {
+        await matrix.transport.action({
+          'action': 'state',
+          'room': wire,
+          'type': 'm.room.topic',
+          'content': {'topic': description},
+        });
+      }
+      await matrix.refreshRooms();
+    } else {
+      await request(
+        '/api/groups/$id',
+        method: 'PATCH',
+        body: {
+          if (name != null) 'name': name,
+          if (description != null) 'description': description,
+        },
+      );
+    }
+    await refresh();
+  }
+
+  Future<void> enableEncryption(String id) async {
+    final wire = matrixRoom(id);
+    if (!matrixConnected || wire == null) {
+      throw StateError('Connect Matrix messaging first.');
+    }
+    await matrix.transport.action({'action': 'encrypt', 'room': wire});
+    await matrix.refreshRooms();
+    await refresh();
+  }
+
+  Future<void> joinMatrixRoom(String target) async {
+    if (!matrixConnected) throw StateError('Connect Matrix messaging first.');
+    final url = Uri.tryParse(target.trim());
+    final String room;
+    final List<String> via;
+    if (url?.host == 'matrix.to') {
+      final link = Uri.parse(url!.fragment);
+      room = Uri.decodeComponent(link.path.replaceFirst(RegExp(r'^/'), ''));
+      via = link.queryParametersAll['via'] ?? [];
+    } else {
+      room = target.trim();
+      via = [];
+    }
+    if (!room.startsWith('!') && !room.startsWith('#')) {
+      throw StateError('Enter a Matrix room ID, alias or matrix.to room link.');
+    }
+    final result = await matrix.transport.action({
+      'action': 'join',
+      'room': room,
+      'via': via,
+    });
+    await matrix.refreshRooms();
+    await refresh();
+    final joined = groups
+        .where((g) => g['room_id'] == result['room_id'])
+        .firstOrNull;
+    if (joined != null) await open(joined['id'] as String);
+  }
+
   Future<void> membership(String id, String action, [String? person]) async {
+    final wire = matrixRoom(id);
+    // A delegated local invitation also grants River access to calls/publishing.
+    // Keep that explicit approval path for local invitations.
+    if (matrixConnected &&
+        wire != null &&
+        (action != 'join' || group(id)?['matrix_only'] == true)) {
+      await matrix.transport.action({
+        'action': action,
+        'room': wire,
+        if (person != null) 'user': userId(person),
+      });
+      await matrix.refreshRooms();
+      await refresh();
+      return;
+    }
     await request(
       '/api/groups/$id/membership',
       method: 'POST',
@@ -670,13 +938,69 @@ class RiverApi extends ChangeNotifier {
     String txn, {
     bool refreshAfter = true,
   }) async {
-    final result = await request(
-      '/api/groups/$id/events/$type/$txn',
-      method: 'PUT',
-      body: {'content': content},
-    );
+    final account = accountKey;
+    final wire = matrixRoom(id);
+    final delegatedContent = [
+      'cool.gravitas.river.post.v1',
+      'cool.gravitas.river.discussion.v1',
+    ].contains(type);
+    if (delegatedContent && encrypted(id)) {
+      throw StateError(
+        'Public posts and discussions cannot be created in an encrypted room. Use encrypted chat instead.',
+      );
+    }
+    if (!delegatedContent &&
+        matrixEnabled &&
+        (!matrixConnected || wire == null)) {
+      throw StateError(
+        'Connect Matrix messaging and wait for this room to sync before sending.',
+      );
+    }
+    if (encrypted(id) && !matrixConnected) {
+      throw StateError(
+        'Reconnect Matrix messaging to send to this encrypted room.',
+      );
+    }
+    if (encrypted(id) &&
+        (content['cool.gravitas.river.attachments'] as List? ?? [])
+            .isNotEmpty) {
+      throw StateError(
+        'Remove the pending legacy files and attach them again for encrypted delivery.',
+      );
+    }
+    final result = !delegatedContent && matrixConnected && wire != null
+        ? await matrix.transport.send(wire, type, content, txn)
+        : await request(
+            '/api/groups/$id/events/$type/$txn',
+            method: 'PUT',
+            body: {'content': content},
+          );
+    if (account != accountKey) throw ApiException(409, 'session_changed');
     if (refreshAfter) await refresh();
     return result;
+  }
+
+  Future<void> sendMatrixFile(
+    String id,
+    String name,
+    String mime,
+    Uint8List bytes,
+  ) async {
+    final wire = matrixRoom(id), account = accountKey;
+    if (!matrixConnected || wire == null) {
+      throw StateError('Connect Matrix messaging first.');
+    }
+    final key = 'file:$wire:$name:$mime:${sha256.convert(bytes)}';
+    await matrix.transport.sendAttachment(
+      wire,
+      name,
+      mime,
+      bytes,
+      _transactions.putIfAbsent(key, transactionId),
+    );
+    if (account != accountKey) throw ApiException(409, 'session_changed');
+    _transactions.remove(key);
+    await refresh();
   }
 
   Future<Json> publicPost(String event, {String? before}) => request(
@@ -753,6 +1077,7 @@ class RiverApi extends ChangeNotifier {
     timer?.cancel();
     _live?.close();
     _calls?.dispose();
+    _matrix?.dispose();
     final oldFiles = files;
     if (oldFiles != null) {
       unawaited(oldFiles.close().then((_) => oldFiles.dispose()));

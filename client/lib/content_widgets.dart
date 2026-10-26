@@ -7,6 +7,7 @@ import 'api.dart';
 import 'publishing_widgets.dart';
 import 'package:flutter/services.dart';
 import 'attachment_widgets.dart';
+import 'matrix_attachment_widgets.dart';
 import 'rich_composer.dart';
 
 const reactionEmojis = [
@@ -240,7 +241,21 @@ class ContentCard extends StatelessWidget {
                 ),
               ),
             const SizedBox(height: 12),
-            RichBody(c['body'] as String? ?? ''),
+            if (event['type'] == 'm.room.encrypted')
+              const Text(
+                'Encrypted message · verify this device or restore your recovery key to read it.',
+              )
+            else if ((event['unsigned'] as Json?)?['redacted_because'] != null)
+              const Text('Message removed')
+            else if ([
+              'm.file',
+              'm.image',
+              'm.audio',
+              'm.video',
+            ].contains(c['msgtype']))
+              MatrixAttachmentCard(app: app, content: c)
+            else
+              RichBody(c['body'] as String? ?? ''),
             for (final file
                 in ((c['cool.gravitas.river.attachments'] as List?) ?? [])
                     .cast<Json>())
@@ -599,7 +614,15 @@ class _ThreadScreenState extends State<ThreadScreen> {
     super.dispose();
   }
 
-  void merge(List<Json> incoming) {
+  void merge(List<Json> incoming, {bool older = false}) {
+    if (widget.app.matrixConnected) {
+      final updates = {for (final e in incoming) e['event_id']: e};
+      final existing = events.map((e) => updates[e['event_id']] ?? e).toList();
+      final ids = existing.map((e) => e['event_id']).toSet();
+      final added = incoming.where((e) => !ids.contains(e['event_id']));
+      events = older ? [...added, ...existing] : [...existing, ...added];
+      return;
+    }
     final all = {for (final e in events) e['event_id'] as String: e};
     for (final e in incoming) {
       all[e['event_id'] as String] = e;
@@ -649,7 +672,7 @@ class _ThreadScreenState extends State<ThreadScreen> {
           cursor = result['next_cursor'] as String?;
         }
         loaded = true;
-        merge(incoming);
+        merge(incoming, older: older);
         error = null;
       });
     } catch (e) {

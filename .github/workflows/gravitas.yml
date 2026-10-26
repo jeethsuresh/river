@@ -11,9 +11,67 @@ concurrency:
   group: river-${{ github.ref }}
   cancel-in-progress: false
 jobs:
+  matrix-interop:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - name: Check out the Gravitas interoperability fixture
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: jeethsuresh/iam-server
+          ref: bbc2272efa74d7b57edc740e742d6319e455f6be
+          path: .matrix-server
+          persist-credentials: false
+      - name: Build disposable protocol peers and River client
+        run: |
+          docker build -f .matrix-server/Dockerfile.tests -t river-matrix-server:test .matrix-server
+          docker build -f Dockerfile.matrix-tests -t river-matrix-client:test .
+          docker build --target matrix-browser-interop-client -t river-matrix-browser:test .
+      - name: Verify QR trust and encrypted key recovery
+        run: bash integration/matrix/run.sh river-matrix-server:test river-matrix-client:test .matrix-server river-matrix-browser:test
+  matrix-platforms:
+    name: Matrix SDK (${{ matrix.platform }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {os: ubuntu-24.04, platform: linux}
+          - {os: windows-2025, platform: windows}
+          - {os: macos-15, platform: macos}
+          - {os: macos-15, platform: ios}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - name: Install pinned Flutter
+        run: |
+          git init "$RUNNER_TEMP/river-flutter"
+          git -C "$RUNNER_TEMP/river-flutter" remote add origin https://github.com/flutter/flutter.git
+          git -C "$RUNNER_TEMP/river-flutter" fetch --depth 1 origin refs/tags/3.47.7:refs/tags/3.47.7
+          git -C "$RUNNER_TEMP/river-flutter" checkout --detach abaf9c523780a608bd46686fd5e53740a07077f8
+          test "$(git -C "$RUNNER_TEMP/river-flutter" rev-parse HEAD)" = abaf9c523780a608bd46686fd5e53740a07077f8
+          echo "$RUNNER_TEMP/river-flutter/bin" >> "$GITHUB_PATH"
+      - name: Install pinned Rust
+        run: bash scripts/matrix-toolchain.sh
+      - name: Linux platform dependencies
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y clang cmake ninja-build pkg-config libgtk-3-dev liblzma-dev
+      - name: Test Matrix core and binary QR handling
+        run: cargo test --locked --manifest-path client/packages/river_matrix/rust/Cargo.toml --lib
+      - name: Verify browser bridge
+        if: runner.os == 'Linux'
+        run: |
+          rustup target add wasm32-unknown-unknown --toolchain 1.96.0
+          cargo check --locked --manifest-path client/packages/river_matrix/rust/Cargo.toml --target wasm32-unknown-unknown
+      - name: Link Flutter platform application
+        run: python3 scripts/matrix-platform-smoke.py '${{ matrix.platform }}'
   android:
     runs-on: ubuntu-24.04
-    timeout-minutes: 25
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
       - name: Install pinned Flutter SDK
@@ -23,6 +81,8 @@ jobs:
           git -C "$RUNNER_TEMP/river-flutter" fetch --depth 1 origin refs/tags/3.47.7:refs/tags/3.47.7
           git -C "$RUNNER_TEMP/river-flutter" checkout --detach abaf9c523780a608bd46686fd5e53740a07077f8
           test "$(git -C "$RUNNER_TEMP/river-flutter" rev-parse HEAD)" = abaf9c523780a608bd46686fd5e53740a07077f8
+      - name: Install pinned Rust
+        run: bash scripts/matrix-toolchain.sh
       - name: Build shared Android client
         working-directory: client
         env:
@@ -34,9 +94,9 @@ jobs:
           flutter pub get --enforce-lockfile
           flutter build apk --debug --no-pub
   image:
-    needs: android
+    needs: [android, matrix-platforms, matrix-interop]
     runs-on: ubuntu-24.04
-    timeout-minutes: 35
+    timeout-minutes: 60
     permissions:
       contents: read
       packages: write
@@ -49,6 +109,8 @@ jobs:
         run: docker buildx build --target backend-test .
       - name: Analyze and test shared Flutter UI
         run: docker buildx build --target frontend-test .
+      - name: Verify browser Matrix WebAssembly runtime
+        run: docker buildx build --target matrix-browser-test .
       - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f
         if: github.event_name != 'pull_request'
         with:

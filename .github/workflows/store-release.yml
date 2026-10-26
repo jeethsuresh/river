@@ -48,7 +48,7 @@ jobs:
     if: needs.plan.outputs.build == 'true'
     needs: plan
     runs-on: ubuntu-24.04
-    timeout-minutes: 45
+    timeout-minutes: 60
     permissions:
       contents: write
     environment: android-release
@@ -77,6 +77,8 @@ jobs:
           packages: platform-tools
           log-accepted-android-sdk-licenses: false
       - run: sdkmanager 'platforms;android-36' 'build-tools;35.0.0' 'ndk;28.2.13676358'
+      - name: Install pinned Rust
+        run: bash scripts/matrix-toolchain.sh
       - name: Test before loading signing credentials
         working-directory: client
         run: |
