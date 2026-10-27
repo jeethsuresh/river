@@ -3,6 +3,7 @@ pub(crate) mod connection;
 mod credential_refresh_test;
 #[cfg(all(test, not(target_family = "wasm")))]
 mod interop;
+mod local;
 mod media;
 mod security;
 mod timeline;

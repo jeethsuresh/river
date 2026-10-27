@@ -4,9 +4,19 @@ import 'dart:convert';
 import 'dart:io';
 
 Future<void> main(List<String> args) async {
-  if (args.length != 3) {
-    throw ArgumentError('Expected browser, peer SPKI and test URL');
+  if (args.length < 3 || args.length > 4) {
+    throw ArgumentError(
+      'Expected browser, peer SPKI, test URL and optional smoke mode',
+    );
   }
+  final smoke = args.length == 4 && args[3] == 'smoke';
+  final element = smoke ? 'matrix-smoke' : 'matrix-interop';
+  final pass = smoke
+      ? 'RIVER_MATRIX_BROWSER_PASS'
+      : 'RIVER_MATRIX_WEB_CRYPTO_PASS';
+  final fail = smoke
+      ? 'RIVER_MATRIX_BROWSER_FAIL'
+      : 'RIVER_MATRIX_WEB_CRYPTO_FAIL';
   final directory = await Directory.systemTemp.createTemp(
     'river-matrix-chrome-',
   );
@@ -14,7 +24,7 @@ Future<void> main(List<String> args) async {
   WebSocket? socket;
   StreamSubscription<dynamic>? subscription;
   final pending = <int, Completer<Map<String, dynamic>>>{};
-  var sequence = 0;
+  var sequence = 0, navigations = 0, expectedNavigation = 0;
   final diagnostics = <String>[];
   try {
     browser = await Process.start(args[0], [
@@ -26,7 +36,8 @@ Future<void> main(List<String> args) async {
       '--remote-debugging-address=127.0.0.1',
       '--remote-debugging-port=18793',
       '--user-data-dir=${directory.path}',
-      '--ignore-certificate-errors-spki-list=${args[1]}',
+      if (args[1].isNotEmpty)
+        '--ignore-certificate-errors-spki-list=${args[1]}',
       'about:blank',
     ]);
     unawaited(browser.stdout.drain<void>());
@@ -64,6 +75,10 @@ Future<void> main(List<String> args) async {
       final message = jsonDecode(raw as String) as Map<String, dynamic>;
       final id = message['id'];
       if (id is int) pending.remove(id)?.complete(message);
+      if (message['method'] == 'Page.frameNavigated' &&
+          (message['params']['frame'] as Map)['parentId'] == null) {
+        navigations++;
+      }
       if (message['method'] == 'Runtime.exceptionThrown') {
         final details = message['params']['exceptionDetails'];
         diagnostics.add(
@@ -82,23 +97,70 @@ Future<void> main(List<String> args) async {
     }
 
     await command('Runtime.enable', {});
+    await command('Page.enable', {});
     await command('Page.navigate', {'url': args[2]});
     var status = '';
+    var reloadedOffline = false;
     final deadline = DateTime.now().add(const Duration(seconds: 150));
     while (DateTime.now().isBefore(deadline)) {
       final response = await command('Runtime.evaluate', {
-        'expression':
-            "document.getElementById('matrix-interop')?.textContent ?? ''",
+        'expression': "document.getElementById('$element')?.textContent ?? ''",
         'returnByValue': true,
       });
       status = response['result']?['result']?['value'] as String? ?? '';
-      if (status.contains('RIVER_MATRIX_WEB_CRYPTO_PASS')) {
+      if (status.contains(pass)) {
+        if (smoke && reloadedOffline && navigations < expectedNavigation) {
+          continue;
+        }
+        if (smoke && !reloadedOffline) {
+          await command('Runtime.evaluate', {
+            'expression': 'navigator.serviceWorker.ready.then(() => true)',
+            'awaitPromise': true,
+            'returnByValue': true,
+          });
+          await command('Network.enable', {});
+          await command('Network.emulateNetworkConditions', {
+            'offline': true,
+            'latency': 0,
+            'downloadThroughput': 0,
+            'uploadThroughput': 0,
+          });
+          final denied = await command('Runtime.evaluate', {
+            'expression':
+                "fetch('/api/offline-smoke', {cache: 'no-store'}).then(() => false, () => true)",
+            'awaitPromise': true,
+            'returnByValue': true,
+          });
+          if (denied['result']?['result']?['value'] != true) {
+            throw StateError(
+              'The service worker cached an API response or the network stayed available',
+            );
+          }
+          final server = int.tryParse(
+            Platform.environment['MATRIX_OFFLINE_SERVER_PID'] ?? '',
+          );
+          if (server == null ||
+              server <= 0 ||
+              server == pid ||
+              !Process.killPid(server)) {
+            throw StateError(
+              'The disposable web server could not be stopped for the offline reload',
+            );
+          }
+          expectedNavigation = navigations + 1;
+          await command('Page.reload', {'ignoreCache': false});
+          reloadedOffline = true;
+          await Future<void>.delayed(const Duration(seconds: 1));
+          continue;
+        }
         stdout.writeln(
-          'RIVER MATRIX WEB IndexedDB, production QR renderer/scanner, key transfer, history and encrypted attachment PASS',
+          smoke
+              ? 'RIVER MATRIX BROWSER encrypted IndexedDB and offline page reload PASS'
+              : 'RIVER MATRIX WEB IndexedDB, production QR renderer/scanner, key transfer, history and encrypted attachment PASS',
         );
         return;
       }
-      if (status.contains('RIVER_MATRIX_WEB_CRYPTO_FAIL')) {
+      if (status.contains(fail)) {
         throw StateError(status);
       }
       await Future<void>.delayed(const Duration(milliseconds: 250));

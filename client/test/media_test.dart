@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 import 'package:flutter/material.dart';
+import 'package:crypto/crypto.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
@@ -12,7 +13,162 @@ import 'package:river/media.dart';
 import 'package:river/media_widgets.dart';
 import 'package:river/rich_composer.dart';
 
+class ReconnectingImageCache extends LinkedImageCache {
+  ReconnectingImageCache()
+    : super(ByteStore(Directory('unused-in-memory-store')));
+  bool available = false;
+  int loads = 0;
+  @override
+  Future<Uint8List> load(String url, {http.Client? client}) async {
+    loads++;
+    if (!available) throw http.ClientException('offline');
+    return base64Decode(
+      'R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7',
+    );
+  }
+}
+
 void main() {
+  test(
+    'linked images survive restart offline, verify bytes, and retain peer files during eviction',
+    () async {
+      final directory = await Directory.systemTemp.createTemp(
+        'river-image-cache-',
+      );
+      addTearDown(() => directory.delete(recursive: true));
+      final store = ByteStore(directory);
+      await store.initialize();
+      final gif = base64Decode(
+        'R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7',
+      );
+      await store.put('peer-file', Uint8List.fromList([1, 2, 3]));
+      var downloads = 0;
+      final online = MockClient((request) async {
+        downloads++;
+        expect(request.headers.keys, isNot(contains('authorization')));
+        return http.Response.bytes(gif, 200);
+      });
+      final cache = LinkedImageCache(store, budget: gif.length);
+      await Future.wait([
+        cache.load('https://host/first.gif', client: online),
+        cache.load('https://host/first.gif', client: online),
+      ]);
+      expect(
+        downloads,
+        1,
+        reason: 'Concurrent image requests share the download',
+      );
+      final offline = MockClient(
+        (_) async => throw http.ClientException('offline'),
+      );
+      final reopened = LinkedImageCache(
+        ByteStore(directory),
+        budget: gif.length,
+      );
+      expect(
+        await reopened.load('https://host/first.gif', client: offline),
+        gif,
+      );
+      await reopened.load('https://host/second.gif', client: online);
+      expect(
+        await store.get(
+          'image-${sha256.convert(utf8.encode('https://host/first.gif'))}',
+        ),
+        isNull,
+      );
+      expect(await store.get('peer-file'), [1, 2, 3]);
+      final key =
+          'image-${sha256.convert(utf8.encode('https://host/second.gif'))}';
+      await store.put(key, Uint8List.fromList([0]));
+      final corrupt = LinkedImageCache(ByteStore(directory));
+      expect(
+        await corrupt.load('https://host/second.gif', client: online),
+        gif,
+      );
+      expect(
+        downloads,
+        3,
+        reason: 'Corrupt bytes must be fetched and verified again',
+      );
+      final invalid = MockClient(
+        (_) async => http.Response('<html>not an image</html>', 200),
+      );
+      await expectLater(
+        corrupt.load('https://host/error.gif', client: invalid),
+        throwsA(anything),
+      );
+      await expectLater(
+        corrupt.load('https://host/error.gif', client: offline),
+        throwsA(isA<http.ClientException>()),
+      );
+    },
+  );
+
+  late Directory widgetImages;
+  setUpAll(() async {
+    widgetImages = await Directory.systemTemp.createTemp('river-image-widget-');
+    final gif = base64Decode(
+      'R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7',
+    );
+    await LinkedImageCache(ByteStore(widgetImages)).load(
+      'https://host/offline.gif',
+      client: MockClient((_) async => http.Response.bytes(gif, 200)),
+    );
+  });
+  tearDownAll(() => widgetImages.delete(recursive: true));
+
+  testWidgets(
+    'a linked animated image renders from the persistent cache offline',
+    (tester) async {
+      await tester.runAsync(() async {
+        await tester.pumpWidget(
+          MaterialApp(
+            home: LinkedImageScope(
+              cache: LinkedImageCache(ByteStore(widgetImages)),
+              child: const Scaffold(
+                body: LinkedMedia(
+                  url: 'https://host/offline.gif',
+                  sticker: true,
+                ),
+              ),
+            ),
+          ),
+        );
+        await Future<void>.delayed(const Duration(milliseconds: 100));
+      });
+      await tester.pumpAndSettle();
+      expect(find.byType(StickerImage), findsOneWidget);
+      expect(find.textContaining('Image unavailable'), findsNothing);
+      expect(tester.takeException(), isNull);
+    },
+  );
+
+  testWidgets('linked images retry when the connection returns', (
+    tester,
+  ) async {
+    final cache = ReconnectingImageCache();
+    Widget view(bool online) => MaterialApp(
+      home: LinkedImageScope(
+        cache: cache,
+        networkAvailable: online,
+        child: const Scaffold(
+          body: LinkedMedia(url: 'https://host/reconnect.gif'),
+        ),
+      ),
+    );
+    await tester.pumpWidget(view(false));
+    await tester.pumpAndSettle();
+    expect(find.text('Retry image'), findsOneWidget);
+    expect(cache.loads, 1);
+    cache.available = true;
+    await tester.pumpWidget(view(true));
+    await tester.pumpAndSettle();
+    expect(cache.loads, 2);
+    expect(find.text('Retry image'), findsNothing);
+    expect(find.byType(Image), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
   test('media links reject local and executable sources', () {
     for (final url in [
       'file:///secret',
@@ -113,7 +269,6 @@ void main() {
           .toList();
       expect(media, hasLength(3));
       expect(media.where((m) => m.sticker), hasLength(1));
-      expect(find.byType(StickerImage), findsOneWidget);
       expect(find.text('Make sticker'), findsNWidgets(2));
       expect(find.text('Save sticker'), findsOneWidget);
       expect(find.textContaining('Convert to image'), findsNothing);

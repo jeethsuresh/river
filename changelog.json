@@ -1,8 +1,11 @@
 {
   "schemaVersion": 1,
-  "version": "0.9.1",
-  "versionCode": 15,
+  "version": "0.10.0",
+  "versionCode": 16,
   "changes": [
-    "Fix Android Matrix messaging sign-in after browser approval by initializing Android certificate verification."
+    "Open previously viewed rooms, chat history and threads without a network connection.",
+    "Keep room drafts and message retry details on this device after restarting River.",
+    "Show a network unavailable banner and refresh saved conversations when the connection returns.",
+    "Cache linked images and GIFs on this device beside peer attachments for offline viewing."
   ]
 }

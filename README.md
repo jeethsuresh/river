@@ -57,6 +57,38 @@ Device security in Account supports showing a Matrix QR code, reading a QR image
 
 The adapter has native plugin builds for Android, iOS, macOS, Windows and Linux and a WebAssembly/IndexedDB implementation for Flutter web. River currently distributes web and Android applications; platform CI links the adapter on the other Flutter targets. See [the adapter](client/packages/river_matrix/README.md) for pinned dependencies and build/test instructions. Standard encrypted file uploads are limited to 32 MiB by River.
 
+## Local storage and offline viewing
+
+The Matrix adapter keeps room state and encryption keys in IndexedDB on web and
+SQLite under the application support directory on desktop/mobile. River stores
+viewed chat timelines, loaded thread pages, room navigation metadata, composer
+drafts, pending attachment references and retry transaction IDs in that same
+account/device state database. Generic SDK custom values bypass ordinary store
+encryption, so River wraps these records with the SDK storage cipher and the
+existing device store secret. Records are bound to their room and scope.
+
+The web build generates a versioned static app-shell service worker so the page
+can reload offline after its first successful load. It caches static resources
+only, excludes auth/API/Matrix endpoints and preserves account and media stores.
+Build web with `bash scripts/build-river-web.sh --release --no-pub --no-web-resources-cdn`
+after building the Matrix WebAssembly adapter.
+
+Cached rooms and viewed messages load before network checks finish. Offline
+clients show **Network unavailable** in the header, keep drafts editable and
+retry synchronization when active. Sending and server mutations require a
+connection; this is not an automatic outgoing message queue. Earlier history
+and threads that have not been loaded require a connection. Logout or an
+explicit session rejection clears the visible profile and its startup identity.
+
+Linked images/GIFs are fetched anonymously, validated and cached beside peer file
+attachments: browser Cache API on web, application support files on native.
+The image index uses URL hashes and verifies saved bytes. Its separate 128 MiB
+budget evicts oldest images without removing peer attachments; the latter retain
+their existing 256 MiB budget. Saved stickers remain a separate device library.
+Local database/storage errors are shown without discarding the in-memory draft.
+A single saved timeline or thread record is limited to 16 MiB; a larger record
+reports a local save error while its online view remains usable.
+
 ## Exact current mapping and event contract
 
 Delegated Gravitas groups retain their internal UUIDs and membership records. Their canonical Matrix `room_id` comes from the signed room graph, and River uses that ID for Matrix traffic. A Matrix-only or remote room keeps its full `!room:server` ID. River merges these room lists by canonical ID, preserving local app permissions for calls and publishing.

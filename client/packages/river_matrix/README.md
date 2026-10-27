@@ -17,7 +17,7 @@ cargo install --locked wasm-bindgen-cli --version 0.2.129
 bash scripts/build-matrix-web.sh
 cd client
 flutter pub get --enforce-lockfile
-flutter build web --release --no-pub --no-web-resources-cdn
+bash ../scripts/build-river-web.sh --release --no-pub --no-web-resources-cdn
 ```
 
 Run Rust tests with `cargo test --locked --manifest-path client/packages/river_matrix/rust/Cargo.toml --lib`. The real three-device QR/backup/attachment test runs separately in the private-CA Gravitas fixture using `integration/matrix/run.sh`, and is an explicit CI prerequisite for shipping. It also verifies existing unencrypted DMs with a non-owner participant, authorized creator upgrades, encrypted reopens, unchanged power levels, and encrypted new-DM messages on the wire. A real-time Chromium test also reopens encrypted IndexedDB state, scans a QR image painted by River, and verifies QR-only historical decryption and encrypted attachment bytes. Its test trust root and test password exist only in test code.

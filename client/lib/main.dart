@@ -14,6 +14,7 @@ import 'matrix_attachment_widgets.dart';
 import 'call_widgets.dart';
 import 'file_models.dart' show FileScope;
 import 'rich_composer.dart';
+import 'media_widgets.dart';
 
 import 'package:flutter_quill/flutter_quill.dart'
     show FlutterQuillLocalizations;
@@ -62,6 +63,11 @@ class _RiverAppState extends State<RiverApp> with WidgetsBindingObserver {
     builder: (_, _) => MaterialApp(
       key: ValueKey(app.accountKey),
       title: 'River',
+      builder: (context, child) => LinkedImageScope(
+        cache: app.linkedImages,
+        networkAvailable: !app.networkUnavailable,
+        child: child!,
+      ),
       localizationsDelegates: FlutterQuillLocalizations.localizationsDelegates,
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
@@ -124,6 +130,7 @@ class _RiverShellState extends State<RiverShell> {
   void initState() {
     super.initState();
     timeline.addListener(scrolled);
+    draft.addListener(composerChanged);
   }
 
   void scrolled() {
@@ -150,7 +157,47 @@ class _RiverShellState extends State<RiverShell> {
     });
   }
 
+  bool _bindingComposer = false;
+  int _composerRevision = 0;
+  String? _composerAccount;
+  final _lastDraftWrites = <String, String>{};
   String? retryTxn, retryPayload;
+
+  Json composerSnapshot() => {
+    'text': draft.text,
+    'files': List<Json>.of(attachments),
+    'txn': retryTxn,
+    'payload': retryPayload,
+  };
+
+  void composerChanged() {
+    if (!_bindingComposer) {
+      _composerRevision++;
+      unawaited(persistComposer());
+    }
+  }
+
+  Future<void> persistComposer() async {
+    final room = composerRoom;
+    if (room == null ||
+        !app.matrixConnected ||
+        _composerAccount != app.accountKey) {
+      return;
+    }
+    final value = composerSnapshot(), encoded = jsonEncode(composerSnapshot());
+    if (_lastDraftWrites[room] == encoded) return;
+    _lastDraftWrites[room] = encoded;
+    await app.saveDraft(
+      room,
+      draft.text.isEmpty && attachments.isEmpty && retryTxn == null
+          ? null
+          : value,
+    );
+    if (app.cacheError != null && _lastDraftWrites[room] == encoded) {
+      _lastDraftWrites.remove(room);
+    }
+  }
+
   String? composerRoom;
   final drafts =
       <
@@ -161,7 +208,15 @@ class _RiverShellState extends State<RiverShell> {
   void bindComposer() {
     final id = app.selected;
     final room = id == null ? null : app.matrixRoom(id) ?? id;
+    if (_composerAccount != app.accountKey) {
+      drafts.clear();
+      _lastDraftWrites.clear();
+      composerRoom = null;
+      _composerAccount = app.accountKey;
+    }
     if (room == composerRoom) return;
+    unawaited(persistComposer());
+    _bindingComposer = true;
     if (composerRoom != null) {
       drafts[composerRoom!] = (
         text: draft.text,
@@ -178,6 +233,36 @@ class _RiverShellState extends State<RiverShell> {
       ..addAll(saved?.files ?? []);
     retryTxn = saved?.txn;
     retryPayload = saved?.payload;
+    _bindingComposer = false;
+    final revision = ++_composerRevision, account = app.accountKey;
+    if (saved == null && room != null && app.matrixConnected) {
+      unawaited(
+        (() async {
+          try {
+            final value = await app.draft(room);
+            if (!mounted ||
+                account != app.accountKey ||
+                room != composerRoom ||
+                revision != _composerRevision ||
+                value == null) {
+              return;
+            }
+            setState(() {
+              _bindingComposer = true;
+              draft.text = value['text'] as String? ?? '';
+              attachments
+                ..clear()
+                ..addAll(((value['files'] as List?) ?? []).cast<Json>());
+              retryTxn = value['txn'] as String?;
+              retryPayload = value['payload'] as String?;
+              _bindingComposer = false;
+            });
+          } catch (_) {
+            // Keep an editable composer when local storage cannot be opened.
+          }
+        })(),
+      );
+    }
   }
 
   final scaffold = GlobalKey<ScaffoldState>();
@@ -194,8 +279,9 @@ class _RiverShellState extends State<RiverShell> {
       await operation();
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text('$e')));
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('$e')));
       }
     }
   }
@@ -284,6 +370,28 @@ class _RiverShellState extends State<RiverShell> {
         final wide = box.maxWidth >= 1000;
         final body = Column(
           children: [
+            if (app.networkUnavailable)
+              MaterialBanner(
+                key: const ValueKey('network-unavailable'),
+                leading: const Icon(Icons.wifi_off),
+                content: const Text('Network unavailable'),
+                actions: [
+                  TextButton(
+                    onPressed: () => app.refresh(),
+                    child: const Text('Retry'),
+                  ),
+                ],
+              ),
+            if (app.cacheError != null)
+              MaterialBanner(
+                content: Text(app.cacheError!),
+                actions: [
+                  TextButton(
+                    onPressed: () => app.refresh(),
+                    child: const Text('Retry'),
+                  ),
+                ],
+              ),
             RiverCallBar(api: app),
             if (app.matrixEnabled &&
                 !app.matrixConnected &&
@@ -317,7 +425,7 @@ class _RiverShellState extends State<RiverShell> {
                   ),
                 ],
               ),
-            if (app.error != null)
+            if (app.error != null && !app.networkUnavailable)
               MaterialBanner(
                 content: Text(app.error!),
                 actions: [
@@ -1356,7 +1464,10 @@ class _RiverShellState extends State<RiverShell> {
                 if (attachments.isNotEmpty && viewFilter == 'Chat')
                   PendingAttachments(
                     files: attachments,
-                    remove: (f) => setState(() => attachments.remove(f)),
+                    remove: (f) => setState(() {
+                      attachments.remove(f);
+                      composerChanged();
+                    }),
                   ),
                 if (viewFilter != 'Chat')
                   FilledButton.icon(
@@ -1397,7 +1508,10 @@ class _RiverShellState extends State<RiverShell> {
                                   existing: attachments,
                                 );
                                 if (mounted && app.selected == g['id']) {
-                                  setState(() => attachments.addAll(picked));
+                                  setState(() {
+                                    attachments.addAll(picked);
+                                    composerChanged();
+                                  });
                                 }
                               }),
                         icon: const Icon(Icons.attach_file),
@@ -1458,7 +1572,7 @@ class _RiverShellState extends State<RiverShell> {
   );
 
   Future<void> send(Json g) async {
-    final room = composerRoom;
+    final room = composerRoom, account = app.accountKey;
     final body = draft.text.trim();
     if ((body.isEmpty && attachments.isEmpty) || sending) return;
     const type = 'm.room.message';
@@ -1478,6 +1592,8 @@ class _RiverShellState extends State<RiverShell> {
       retryPayload = payload;
     }
     retryTxn ??= transactionId();
+    await persistComposer();
+    if (!mounted || account != app.accountKey) return;
     try {
       await app.send(g['id'] as String, type, content, retryTxn!);
       for (final f
@@ -1489,11 +1605,14 @@ class _RiverShellState extends State<RiverShell> {
         draft.clear();
         attachments.clear();
         retryTxn = null;
+        retryPayload = null;
+        await persistComposer();
       } else if (drafts[room]?.payload == payload &&
           drafts[room]?.text.trim() == body) {
         // A completed send must also clear its saved draft if navigation moved
         // to another conversation while the request was in flight.
         drafts.remove(room);
+        if (room != null) await app.saveDraft(room, null);
       }
     } catch (e) {
       if (mounted) {

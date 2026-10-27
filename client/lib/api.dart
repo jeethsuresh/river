@@ -7,6 +7,7 @@ import 'matrix_messaging.dart';
 import 'matrix_timeline.dart';
 import 'calls.dart';
 import 'peer_files.dart';
+import 'media.dart' show LinkedImageCache;
 import 'file_models.dart' show FileScope;
 
 import 'package:crypto/crypto.dart';
@@ -70,12 +71,166 @@ class RiverApi extends ChangeNotifier {
     storage: _matrixStorage,
     syncEnabled: liveEnabled,
     changed: () {
-      if (!_disposed && user != null && active) {
+      if (!_disposed && !_restoringLocal && user != null && active) {
         changes.add(null);
         unawaited(refresh());
       }
     },
   )..addListener(notifyListeners));
+  final MatrixStorage _fallbackIdentity = const SecureMatrixStorage();
+  MatrixStorage get _identity => _matrixStorage ?? _fallbackIdentity;
+  bool _restoringLocal = false,
+      _offlineSession = false,
+      _apiUnavailable = false;
+  bool get networkUnavailable =>
+      _apiUnavailable || (_matrix?.networkUnavailable ?? false);
+  bool get readOnly => networkUnavailable || _offlineSession;
+  String? cacheError;
+  final _cacheFailures = <String>{};
+  int _historyRevision = 0;
+  LinkedImageCache? linkedImages;
+
+  void requireNetwork() {
+    // Cached startup credentials need fresh authorization before any write.
+    // An already validated session may retry a failed operation to probe recovery.
+    if (_offlineSession) {
+      throw StateError('Network unavailable. Reconnect to make changes.');
+    }
+  }
+
+  Future<void> _saveLocal(
+    String scope,
+    Json? value, {
+    String? room,
+    String? event,
+  }) async {
+    if (!matrixConnected) return;
+    final account = accountKey;
+    try {
+      await matrix.writeLocal(scope, value, room: room, event: event);
+      if (account == accountKey) {
+        _cacheFailures.remove('$scope:$room:$event');
+        if (_cacheFailures.isEmpty) cacheError = null;
+      }
+    } catch (_) {
+      if (account == accountKey) {
+        _cacheFailures.add('$scope:$room:$event');
+        cacheError =
+            'Changes could not be saved on this device. Check available storage.';
+        notifyListeners();
+      }
+    }
+  }
+
+  Future<Json?> draft(String room) =>
+      matrixConnected ? matrix.readLocal('draft', room: room) : Future.value();
+  Future<void> saveDraft(String room, Json? value) =>
+      _saveLocal('draft', value, room: room);
+
+  Future<void> _saveOverview() => _saveLocal('overview', {
+    'groups': groups,
+    'recent': recent,
+    'selected': selected,
+  });
+
+  Future<void> _saveHistory(String id) async {
+    final wire = matrixRoom(id);
+    if (!matrixConnected || wire == null) return;
+    await _saveLocal('history', {
+      'events': _matrixEvents,
+      'next_cursor': nextCursor,
+    }, room: wire);
+  }
+
+  Future<void> _loadHistory(String id) async {
+    final wire = matrixRoom(id), account = accountKey;
+    final revision = _historyRevision;
+    if (!matrixConnected ||
+        wire == null ||
+        group(id)?['membership'] != 'join') {
+      return;
+    }
+    final cached = await matrix.readLocal('history', room: wire);
+    if (cached != null &&
+        account == accountKey &&
+        selected == id &&
+        revision == _historyRevision) {
+      _mergeEvents((cached['events'] as List).cast<Json>());
+      nextCursor = cached['next_cursor'] as String?;
+      notifyListeners();
+    }
+  }
+
+  Future<void> _initializeFiles() async {
+    if (!liveEnabled || files != null || user == null) return;
+    final account = accountKey;
+    final next = await PeerFiles.create(this, uri('/'), account!);
+    if (account != accountKey) {
+      next.dispose();
+      return;
+    }
+    files = next;
+    linkedImages = LinkedImageCache(next.cache.store);
+  }
+
+  Future<void> _rememberIdentity() async {
+    if (matrixEnabled && user != null) {
+      final snapshot = jsonEncode({'origin': uri('/').origin, 'profile': user});
+      final generation = _generation;
+      await _sessionStorage(() async {
+        if (generation == _generation && user != null) {
+          await _identity.write('river.offline_profile', snapshot);
+        }
+      });
+    }
+  }
+
+  Future<void> _restoreLocal() async {
+    if (!matrixEnabled) return;
+    _restoringLocal = true;
+    final generation = _generation;
+    try {
+      final saved = await _identity.read('river.offline_profile');
+      if (saved == null || generation != _generation) return;
+      final record = jsonDecode(saved) as Json;
+      final profile = record['profile'] as Json;
+      if (record['origin'] != uri('/').origin ||
+          profile['issuer'] is! String ||
+          profile['sub'] is! String ||
+          profile['user_id'] is! String) {
+        return;
+      }
+      user = profile;
+      _offlineSession = true;
+      await matrix.bind(profile, synchronize: false);
+      if (!matrixConnected) {
+        user = null;
+        return;
+      }
+      final cached = await matrix.readLocal('overview');
+      if (generation != _generation) return;
+      groups = _matrixGroups(((cached?['groups'] as List?) ?? []).cast<Json>());
+      recent = ((cached?['recent'] as List?) ?? []).cast<Json>();
+      selected = cached?['selected'] as String?;
+      if (!groups.any((g) => g['id'] == selected)) selected = null;
+      await _initializeFiles();
+      if (selected != null) await _loadHistory(selected!);
+      loading = false;
+      notifyListeners();
+    } catch (_) {
+      // A broken local record must not prevent normal online sign-in.
+      if (generation == _generation) {
+        cacheError = 'Some saved data could not be opened on this device.';
+      }
+    } finally {
+      if (generation == _generation && user != null && matrixConnected) {
+        loading = false;
+        notifyListeners();
+      }
+      _restoringLocal = false;
+    }
+  }
+
   bool get matrixConnected => _matrix?.connected ?? false;
   Json? group(String id) => groups.where((g) => g['id'] == id).firstOrNull;
   String? matrixRoom(String id) => group(id)?['room_id'] as String?;
@@ -193,6 +348,7 @@ class RiverApi extends ChangeNotifier {
     activeCalls = [];
     final oldFiles = files;
     files = null;
+    linkedImages = null;
     if (oldFiles != null) {
       unawaited(oldFiles.close().then((_) => oldFiles.dispose()));
     }
@@ -213,9 +369,13 @@ class RiverApi extends ChangeNotifier {
     friendsStatus = null;
     _transactions.clear();
     _read.clear();
+    _cacheFailures.clear();
+    cacheError = null;
   }
 
   void _expired() {
+    unawaited(_sessionStorage(() => _identity.delete('river.offline_profile')));
+    _offlineSession = false;
     _generation++;
     _credentialRevision++;
     user = null;
@@ -273,6 +433,12 @@ class RiverApi extends ChangeNotifier {
   Uri uri(String path) =>
       kIsWeb ? Uri.base.resolve(path) : Uri.parse('$endpoint$path');
   Future<Json> request(String path, {String method = 'GET', Json? body}) async {
+    if (method != 'GET' &&
+        path.startsWith('/api/') &&
+        !path.startsWith('/api/native/') &&
+        path != '/api/session/refresh') {
+      requireNetwork();
+    }
     final generation = _generation;
     final revision = _credentialRevision;
     var response = await _send(path, method: method, body: body);
@@ -284,7 +450,10 @@ class RiverApi extends ChangeNotifier {
       if (generation != _generation) throw ApiException(409, 'session_changed');
       response = await _send(path, method: method, body: body);
     }
-    if (response.statusCode == 401) _expired();
+    if (response.statusCode == 401 ||
+        (path == '/api/session' && response.statusCode == 403)) {
+      _expired();
+    }
     return _responseData(response);
   }
 
@@ -363,10 +532,28 @@ class RiverApi extends ChangeNotifier {
       if (!kIsWeb && token != null) 'Authorization': 'Bearer $token',
     });
     if (body != null) r.body = jsonEncode(body);
-    final response = await client
-        .send(r)
-        .then(http.Response.fromStream)
-        .timeout(const Duration(seconds: 20));
+    late http.Response response;
+    try {
+      response = await client
+          .send(r)
+          .then(http.Response.fromStream)
+          .timeout(const Duration(seconds: 20));
+      if (generation == _generation && account == accountKey) {
+        final unavailable = [502, 503, 504].contains(response.statusCode);
+        if (_apiUnavailable != unavailable) {
+          _apiUnavailable = unavailable;
+          notifyListeners();
+        }
+      }
+    } on Object catch (e) {
+      if ((e is http.ClientException || e is TimeoutException) &&
+          generation == _generation &&
+          account == accountKey) {
+        _apiUnavailable = true;
+        notifyListeners();
+      }
+      rethrow;
+    }
     if (generation != _generation || account != accountKey) {
       throw ApiException(409, 'session_changed');
     }
@@ -374,6 +561,7 @@ class RiverApi extends ChangeNotifier {
   }
 
   Future<void> boot() async {
+    await _restoreLocal();
     if (!kIsWeb) {
       token = await storage.read(key: 'river_session');
       final pending = await storage.read(key: 'river_native_pending');
@@ -398,16 +586,13 @@ class RiverApi extends ChangeNotifier {
       final next = data['user'] as Json;
       if (accountKey != "${next['issuer']}|${next['sub']}") _clear();
       user = next;
-      if (matrixEnabled) await matrix.bind(next);
-      if (liveEnabled && files == null) {
-        final nextFiles = await PeerFiles.create(this, uri('/'), accountKey!);
-        if (accountKey == "${next['issuer']}|${next['sub']}") {
-          files = nextFiles;
-        } else {
-          await nextFiles.close();
-          nextFiles.dispose();
-        }
+      _offlineSession = false;
+      await _rememberIdentity();
+      if (matrixEnabled) {
+        await matrix.bind(next);
+        matrix.active = active;
       }
+      await _initializeFiles();
       await refresh();
     } catch (e) {
       if (user != null) error = '$e';
@@ -415,6 +600,17 @@ class RiverApi extends ChangeNotifier {
     loading = false;
     notifyListeners();
     startLive();
+    if (liveEnabled) {
+      timer ??= Timer.periodic(const Duration(seconds: 10), (_) {
+        if (!_disposed &&
+            active &&
+            user != null &&
+            !busy &&
+            networkUnavailable) {
+          unawaited(refresh());
+        }
+      });
+    }
   }
 
   Future<void> refresh() async {
@@ -427,10 +623,25 @@ class RiverApi extends ChangeNotifier {
     busy = true;
     final account = accountKey;
     try {
+      if (_offlineSession) {
+        final session = await request('/api/session');
+        if (account != accountKey) return;
+        final profile = session['user'] as Json;
+        if (account != "${profile['issuer']}|${profile['sub']}") {
+          _clear();
+          user = profile;
+          await matrix.bind(profile);
+          await _initializeFiles();
+        }
+        _offlineSession = false;
+        await _rememberIdentity();
+        if (matrixEnabled) matrix.active = active;
+      }
       final result = await request('/api/overview');
       if (account != accountKey) return;
       final selectedWire = selected == null ? null : matrixRoom(selected!);
       groups = _matrixGroups((result['groups'] as List).cast<Json>());
+      await _saveOverview();
       // A native Matrix room may subsequently acquire its delegated River ID.
       // Keep the open conversation when that metadata arrives.
       if (selectedWire != null) {
@@ -509,6 +720,7 @@ class RiverApi extends ChangeNotifier {
           if (initial || (!overlap && latest.isNotEmpty)) {
             nextCursor = data['next_cursor'] as String?;
           }
+          await _saveHistory(selectedId);
         }
         if (matrixConnected && wire != null) {
           // A roster failure must not discard a successfully fetched timeline.
@@ -528,9 +740,11 @@ class RiverApi extends ChangeNotifier {
           if (e.status == 403) online = {};
         }
       }
+      await _saveOverview();
       error = null;
     } catch (e) {
-      error = '$e';
+      if (matrixNetworkFailure(e)) _apiUnavailable = true;
+      error = networkUnavailable ? null : '$e';
     } finally {
       final queued = _queuedRefresh;
       _queuedRefresh = null;
@@ -554,6 +768,16 @@ class RiverApi extends ChangeNotifier {
     _matrixEvents = [];
     events = [];
     nextCursor = null;
+    final account = accountKey;
+    try {
+      if (id != null) await _loadHistory(id);
+      await _saveOverview();
+    } catch (_) {
+      if (account == accountKey && id == selected) {
+        cacheError = 'Some saved messages could not be opened on this device.';
+      }
+    }
+    if (account != accountKey || id != selected) return;
     notifyListeners();
     await refresh();
   }
@@ -725,7 +949,12 @@ class RiverApi extends ChangeNotifier {
     final renewal = _renewing;
     _generation++;
     if (!kIsWeb) {
-      await _sessionStorage(() => storage.delete(key: 'river_native_pending'));
+      token = null;
+      await _sessionStorage(() async {
+        await storage.delete(key: 'river_native_pending');
+        await storage.delete(key: 'river_session');
+        await _identity.delete('river.offline_profile');
+      });
     }
     // Browsers apply Set-Cookie before Dart sees the response. Clear the cookie
     // after an in-flight renewal finishes so it cannot undo an explicit logout.
@@ -744,6 +973,7 @@ class RiverApi extends ChangeNotifier {
       await _sessionStorage(() => storage.delete(key: 'river_session'));
     }
     _expired();
+    await _sessionStorage(() => _identity.delete('river.offline_profile'));
     if (kIsWeb) await launchUrl(uri('/?auto=off'), webOnlyWindowName: '_self');
   }
 
@@ -772,6 +1002,7 @@ class RiverApi extends ChangeNotifier {
   }
 
   void _mergeEvents(List<Json> incoming, {bool older = false}) {
+    _historyRevision++;
     if (matrixConnected) {
       final updates = {for (final e in incoming) e['event_id'] as String: e};
       final previous = _matrixEvents
@@ -809,6 +1040,7 @@ class RiverApi extends ChangeNotifier {
   Future<void> older() async {
     final cursor = nextCursor, room = selected, account = accountKey;
     if (cursor == null || room == null || loadingOlder) return;
+    requireNetwork();
     loadingOlder = true;
     notifyListeners();
     try {
@@ -821,6 +1053,7 @@ class RiverApi extends ChangeNotifier {
       if (account == accountKey && room == selected) {
         _mergeEvents((data['events'] as List).cast<Json>(), older: true);
         nextCursor = data['next_cursor'] as String?;
+        await _saveHistory(room);
       }
     } finally {
       loadingOlder = false;
@@ -829,6 +1062,7 @@ class RiverApi extends ChangeNotifier {
   }
 
   Future<void> markRead(String room, String event) async {
+    if (readOnly) return;
     if (_read[room] == event) return;
     final account = accountKey;
     _read[room] = event;
@@ -904,6 +1138,7 @@ class RiverApi extends ChangeNotifier {
   }
 
   Future<void> messageFriend(String person) async {
+    requireNetwork();
     final account = accountKey;
     if (matrixConnected &&
         !friends.any((f) => f['user_id'] == userId(person))) {
@@ -1014,7 +1249,40 @@ class RiverApi extends ChangeNotifier {
     final managedSpace =
         group(room)?['kind'] == 'space' && group(room)?['matrix_only'] != true;
     if (matrixConnected && wire != null && !managedSpace) {
-      final result = await matrix.transport.thread(wire, event, before);
+      Json? cached;
+      try {
+        cached = await matrix.readLocal('thread', room: wire, event: event);
+      } catch (_) {}
+      Json result;
+      if (readOnly) {
+        result =
+            cached ??
+            (throw StateError(
+              'This thread is not saved on this device. Connect to load it.',
+            ));
+      } else {
+        try {
+          result = await matrix.transport.thread(wire, event, before);
+          final page = (result['events'] as List).cast<Json>();
+          final previous = ((cached?['events'] as List?) ?? []).cast<Json>();
+          final updates = {for (final e in page) e['event_id']: e};
+          final known = previous.map((e) => e['event_id']).toSet();
+          final kept = [for (final e in previous) updates[e['event_id']] ?? e];
+          final added = page.where((e) => !known.contains(e['event_id']));
+          result = {
+            ...result,
+            'events': before == null
+                ? [...kept, ...added]
+                : [...added, ...kept],
+          };
+          await _saveLocal('thread', result, room: wire, event: event);
+        } catch (e) {
+          if (!matrixNetworkFailure(e) || cached == null) rethrow;
+          _apiUnavailable = true;
+          notifyListeners();
+          result = cached;
+        }
+      }
       final rendered = renderMatrixTimeline([
         result['root'] as Json,
         ...(result['events'] as List).cast<Json>(),
@@ -1043,6 +1311,7 @@ class RiverApi extends ChangeNotifier {
     String emoji,
     bool active,
   ) async {
+    requireNetwork();
     final key = 'reaction:$room:$event:$emoji:$active';
     final wire = matrixRoom(room);
     if (matrixConnected && wire != null) {
@@ -1100,6 +1369,7 @@ class RiverApi extends ChangeNotifier {
     String? name,
     String? description,
   }) async {
+    requireNetwork();
     final wire = matrixRoom(id);
     if (matrixConnected && wire != null) {
       if (name != null) {
@@ -1132,6 +1402,7 @@ class RiverApi extends ChangeNotifier {
   }
 
   Future<void> enableEncryption(String id) async {
+    requireNetwork();
     final wire = matrixRoom(id);
     if (!matrixConnected || wire == null) {
       throw StateError('Connect Matrix messaging first.');
@@ -1142,6 +1413,7 @@ class RiverApi extends ChangeNotifier {
   }
 
   Future<void> joinMatrixRoom(String target) async {
+    requireNetwork();
     if (!matrixConnected) throw StateError('Connect Matrix messaging first.');
     final url = Uri.tryParse(target.trim());
     final String room;
@@ -1171,6 +1443,7 @@ class RiverApi extends ChangeNotifier {
   }
 
   Future<void> membership(String id, String action, [String? person]) async {
+    requireNetwork();
     final wire = matrixRoom(id);
     final accepting = action == 'accept' || action == 'join';
     // A delegated local invitation also grants River access to calls/publishing.
@@ -1213,6 +1486,7 @@ class RiverApi extends ChangeNotifier {
     String txn, {
     bool refreshAfter = true,
   }) async {
+    requireNetwork();
     final account = accountKey;
     final wire = matrixRoom(id);
     final delegatedContent = [
@@ -1271,6 +1545,7 @@ class RiverApi extends ChangeNotifier {
     String mime,
     Uint8List bytes,
   ) async {
+    requireNetwork();
     final wire = matrixRoom(id), account = accountKey;
     if (!matrixConnected || wire == null) {
       throw StateError('Connect Matrix messaging first.');

@@ -17,6 +17,10 @@ fn sync_error(error: matrix_sdk::Error) -> anyhow::Error {
         Some(matrix_sdk::ruma::api::error::ErrorKind::UnknownToken { .. })
     ) {
         anyhow::anyhow!("RIVER_MATRIX_SESSION_EXPIRED")
+    } else if matches!(&error, matrix_sdk::Error::Http(e)
+        if matches!(e.as_ref(), matrix_sdk::HttpError::Reqwest(_)))
+    {
+        anyhow::anyhow!("RIVER_NETWORK_UNAVAILABLE: {error}")
     } else {
         sdk_error(error)
     }
@@ -44,6 +48,7 @@ const POLL_TIMEOUT: Duration = Duration::from_millis(10);
 /// SDK store. This object and its session are never sent to River's Go relay.
 pub struct MatrixCore {
     pub(crate) client: Client,
+    pub(crate) local_key: Option<zeroize::Zeroizing<String>>,
     pub(crate) own_user: OwnedUserId,
     sliding: Mutex<Option<SlidingSync>>,
     connection_id: String,
@@ -114,7 +119,9 @@ impl MatrixCore {
                 .await
                 .map_err(sdk_error)?;
         }
-        Ok(Self::from_client(client, own_user, holder))
+        let mut core = Self::from_client(client, own_user, holder);
+        core.local_key = Some(zeroize::Zeroizing::new(store_key));
+        Ok(core)
     }
 
     pub(crate) fn from_client(client: Client, own_user: OwnedUserId, holder: String) -> Self {
@@ -139,6 +146,7 @@ impl MatrixCore {
         });
         Self {
             client,
+            local_key: None,
             own_user,
             verification_flows,
             connection_id: holder[..15].to_owned(),
@@ -410,6 +418,8 @@ impl MatrixCore {
             data[key].as_str().with_context(|| format!("Missing {key}"))
         };
         match text("action")? {
+            "local_read" => return self.local_data(&data, false).await,
+            "local_write" => return self.local_data(&data, true).await,
             "reaction" => {
                 self.reaction(&data).await?;
             }
