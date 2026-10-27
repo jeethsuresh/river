@@ -35,7 +35,7 @@ def resumed():
 
 
 def wait_resumed():
-    for _ in range(40):
+    for _ in range(120):
         activity = resumed()
         if activity:
             return activity
@@ -43,11 +43,29 @@ def wait_resumed():
     raise AssertionError('River did not become the resumed Android activity')
 
 
+def background():
+    # HOME key injection can return before the launcher transition completes,
+    # letting a queued HOME event hide a just-opened browser callback.
+    device('shell', 'am', 'start', '-W', '-a', 'android.intent.action.MAIN',
+           '-c', 'android.intent.category.HOME')
+    for _ in range(120):
+        if resumed() is None:
+            time.sleep(.25)
+            if resumed() is None:
+                return
+        time.sleep(.25)
+    raise AssertionError('River did not finish moving to the background')
+
+
 def open_link(kind):
     result = device('shell', 'am', 'start', '-W', '-a', 'android.intent.action.VIEW',
                     '-c', 'android.intent.category.BROWSABLE', '-d', 'river://auth/' + kind)
     assert 'Error:' not in result and 'Status: ok' in result, result
-    return wait_resumed()
+    try:
+        return wait_resumed()
+    except AssertionError:
+        print('Android browser return launch result: ' + result, flush=True)
+        raise
 
 
 with (output / 'emulator.log').open('w') as log:
@@ -74,7 +92,7 @@ with (output / 'emulator.log').open('w') as log:
         device('shell', 'am', 'start', '-W', '-n', component)
         original = wait_resumed()
         for kind in ['native', 'matrix']:
-            device('shell', 'input', 'keyevent', '3')
+            background()
             assert open_link(kind) == original, 'Warm return created a second River activity'
             print('ANDROID AUTH RETURN PASS warm ' + kind, flush=True)
         for kind in ['native', 'matrix']:
@@ -136,6 +154,12 @@ with (output / 'emulator.log').open('w') as log:
             fixture.verify()
     except BaseException:
         log.flush()
+        try:
+            app_pid = device('shell', 'pidof', package, check=False).strip()
+            if app_pid:
+                print(device('logcat', '-d', '--pid=' + app_pid), flush=True)
+        except subprocess.TimeoutExpired:
+            pass
         print('Android emulator diagnostics:', flush=True)
         print('\n'.join((output / 'emulator.log').read_text().splitlines()[-100:]), flush=True)
         try:
