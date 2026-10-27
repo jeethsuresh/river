@@ -980,7 +980,9 @@ class RiverApi extends ChangeNotifier {
     final wire = matrixRoom(room);
     // Space entries and their authored edits are custom Matrix objects rendered
     // by the space content API, alongside ordinary thread replies.
-    if (matrixConnected && wire != null && group(room)?['kind'] != 'space') {
+    final managedSpace =
+        group(room)?['kind'] == 'space' && group(room)?['matrix_only'] != true;
+    if (matrixConnected && wire != null && !managedSpace) {
       final result = await matrix.transport.thread(wire, event, before);
       final rendered = renderMatrixTimeline([
         result['root'] as Json,

@@ -76,6 +76,23 @@ class RoomTransport extends FakeMatrixTransport {
   };
 }
 
+class SpaceThreadTransport extends RoomTransport {
+  int threadReads = 0;
+  @override
+  Future<MatrixJson> thread(String room, String event, String? cursor) async {
+    threadReads++;
+    return {
+      'root': {
+        'event_id': event,
+        'type': 'm.room.message',
+        'sender': '@alice:example.org',
+        'content': {'body': 'Matrix space chat'},
+      },
+      'events': <MatrixJson>[],
+    };
+  }
+}
+
 Future<RiverApi> connected(
   RoomTransport engine,
   List<http.Request> requests,
@@ -124,6 +141,18 @@ Future<RiverApi> connected(
 }
 
 void main() {
+  test('Matrix-only space chat threads use the Matrix transport', () async {
+    final engine = SpaceThreadTransport(), requests = <http.Request>[];
+    final api = await connected(engine, requests);
+    api.group('local')!['kind'] = 'space';
+    api.group('local')!['matrix_only'] = true;
+    final result = await api.thread('local', r'$chat');
+    expect(engine.threadReads, 1);
+    expect(result['root']['content']['body'], 'Matrix space chat');
+    expect(requests.where((r) => r.url.path.endsWith('/thread')), isEmpty);
+    api.dispose();
+  });
+
   test(
     'connected Matrix uses space projections for entry threads and edits',
     () async {
