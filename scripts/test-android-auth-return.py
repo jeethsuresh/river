@@ -89,9 +89,27 @@ with (output / 'emulator.log').open('w') as log:
             'FATAL EXCEPTION', 'Could not navigate to initial route',
             'Failed to handle route',
         ]), 'River crashed or tried to navigate to an auth callback route'
-        from android_matrix_fixture import Fixture
+        from android_matrix_fixture import Fixture, FIXTURE
         with Fixture() as fixture:
             device('shell', 'am', 'force-stop', package)
+            # The verifier uses AndroidCAStore directly, rather than app XML
+            # trust overrides. Install one CA only in this disposable emulator.
+            device('root')
+            device('wait-for-device')
+            assert device('shell', 'id', '-u').strip() == '0'
+            ca = FIXTURE / 'trusted-ca.pem'
+            name = subprocess.check_output([
+                'openssl', 'x509', '-in', str(ca), '-subject_hash_old', '-noout',
+            ], text=True).strip() + '.0'
+            # Android sets the per-user directory at app startup. Retain the
+            # Conscrypt default location too for system/older runtime peers.
+            for directory in ['/data/misc/user/0/cacerts-added', '/data/misc/keychain/cacerts-added']:
+                device('shell', 'mkdir', '-p', directory)
+                device('push', str(ca), directory + '/' + name)
+                device('shell', 'chmod', '0755', directory)
+                device('shell', 'chmod', '0644', directory + '/' + name)
+                device('shell', 'chown', '-R', 'system:system', directory)
+                device('shell', 'restorecon', '-RF', directory)
             device('install', '-r', str(args.matrix_apk.resolve()), timeout=120)
             device('shell', 'pm', 'clear', package)  # Disposable emulator only.
             for port in [8448, 8449]:

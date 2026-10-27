@@ -1,6 +1,6 @@
 """Disposable HTTPS Matrix peer for the installed Android SDK regression test.
 
-Only debug APKs trust its generated CA. No production account or service is used.
+Only the disposable emulator trusts its generated CA. No production account or service is used.
 """
 import collections
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -12,7 +12,6 @@ import subprocess
 import threading
 from urllib.parse import urlsplit
 
-ROOT = Path(__file__).resolve().parents[1]
 FIXTURE = Path(os.environ['RUNNER_TEMP']) / 'river-android-matrix-fixture'
 USER = '@alice:localhost:8448'
 ACCESS = 'disposable-android-fixture-access-token'
@@ -20,39 +19,35 @@ ACCESS = 'disposable-android-fixture-access-token'
 
 def prepare():
     FIXTURE.mkdir(parents=True, exist_ok=True)
+    (FIXTURE / 'extensions.cnf').write_text('''subjectAltName=DNS:localhost
+basicConstraints=critical,CA:FALSE
+keyUsage=critical,digitalSignature,keyEncipherment
+extendedKeyUsage=serverAuth
+''')
     for name in ['trusted', 'untrusted']:
         subprocess.run([
             'openssl', 'req', '-x509', '-newkey', 'rsa:2048', '-nodes',
-            '-keyout', str(FIXTURE / f'{name}.key'),
-            '-out', str(FIXTURE / f'{name}.pem'), '-days', '2',
-            '-subj', f'/CN=River Android {name} test peer',
-            '-addext', 'subjectAltName=DNS:localhost',
+            '-keyout', str(FIXTURE / f'{name}-ca.key'),
+            '-out', str(FIXTURE / f'{name}-ca.pem'), '-days', '2',
+            '-subj', f'/CN=River Android {name} test CA',
             '-addext', 'basicConstraints=critical,CA:TRUE',
+            '-addext', 'keyUsage=critical,keyCertSign,cRLSign',
+        ], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        subprocess.run([
+            'openssl', 'req', '-newkey', 'rsa:2048', '-nodes',
+            '-keyout', str(FIXTURE / f'{name}.key'),
+            '-out', str(FIXTURE / f'{name}.csr'), '-subj', '/CN=localhost',
+        ], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        subprocess.run([
+            'openssl', 'x509', '-req', '-in', str(FIXTURE / f'{name}.csr'),
+            '-CA', str(FIXTURE / f'{name}-ca.pem'),
+            '-CAkey', str(FIXTURE / f'{name}-ca.key'), '-CAcreateserial',
+            '-out', str(FIXTURE / f'{name}.pem'), '-days', '2',
+            '-extfile', str(FIXTURE / 'extensions.cnf'),
         ], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         (FIXTURE / f'{name}.key').chmod(0o600)
-    debug = ROOT / 'client/android/app/src/debug'
-    (debug / 'res/raw').mkdir(parents=True, exist_ok=True)
-    (debug / 'res/xml').mkdir(parents=True, exist_ok=True)
-    (debug / 'res/raw/river_matrix_test_ca.pem').write_bytes(
-        (FIXTURE / 'trusted.pem').read_bytes())
-    (debug / 'res/xml/river_matrix_test_security.xml').write_text('''<?xml version="1.0"?>
-<network-security-config>
-  <base-config cleartextTrafficPermitted="true">
-    <trust-anchors><certificates src="system"/></trust-anchors>
-  </base-config>
-  <domain-config>
-    <domain>localhost</domain>
-    <domain>127.0.0.1</domain>
-    <trust-anchors><certificates src="@raw/river_matrix_test_ca"/></trust-anchors>
-  </domain-config>
-</network-security-config>
-''')
-    manifest = debug / 'AndroidManifest.xml'
-    text = manifest.read_text()
-    text = text.replace('<manifest ', '<manifest xmlns:tools="http://schemas.android.com/tools" ', 1)
-    if 'android:networkSecurityConfig=' not in text:
-        text = text.replace('<application ', '<application tools:replace="android:networkSecurityConfig" android:networkSecurityConfig="@xml/river_matrix_test_security" ', 1)
-    manifest.write_text(text)
+        (FIXTURE / f'{name}-ca.key').unlink()
+
 
 
 class Fixture:
