@@ -1,13 +1,98 @@
 import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
+
 import 'api.dart';
 import 'matrix_security_widgets.dart';
 import 'content_widgets.dart';
 import 'publishing_widgets.dart';
 
-class ConversationPicker extends StatefulWidget {
-  const ConversationPicker({super.key, required this.app});
+class SubgroupDetails extends StatefulWidget {
+  const SubgroupDetails({
+    super.key,
+    required this.app,
+    required this.group,
+    required this.open,
+  });
   final RiverApi app;
+  final Json group;
+  final void Function(String?) open;
+  @override
+  State<SubgroupDetails> createState() => _SubgroupDetailsState();
+}
+
+class _SubgroupDetailsState extends State<SubgroupDetails> {
+  late final Future<Json> details = widget.app.subgroups(
+    widget.group['id'] as String,
+  );
+  @override
+  Widget build(BuildContext context) => AlertDialog(
+    title: Text('${widget.group['name']} · Group hierarchy'),
+    content: SizedBox(
+      width: 440,
+      height: 400,
+      child: FutureBuilder<Json>(
+        future: details,
+        builder: (context, snapshot) {
+          if (snapshot.hasError) {
+            return Text(
+              'Could not load the group hierarchy: ${snapshot.error}',
+            );
+          }
+          final data = snapshot.data;
+          if (data == null) {
+            return const Center(child: CircularProgressIndicator());
+          }
+          return ListView(
+            children: [
+              Text('${data['participant_count']} participants'),
+              const SizedBox(height: 8),
+              const Text(
+                'Groups below are related by their current participants. Each conversation keeps its own visibility and permissions.',
+              ),
+              for (final section in const {
+                'containing_groups': 'Containing groups',
+                'contained_groups': 'Sub-groups',
+                'same_participant_groups': 'Same participants',
+              }.entries) ...[
+                const SizedBox(height: 20),
+                Text(
+                  section.value,
+                  style: const TextStyle(fontWeight: FontWeight.bold),
+                ),
+                if ((data[section.key] as List? ?? []).isEmpty)
+                  const Padding(
+                    padding: EdgeInsets.symmetric(vertical: 8),
+                    child: Text('No groups to show.'),
+                  ),
+                for (final related
+                    in (data[section.key] as List? ?? []).cast<Json>())
+                  ListTile(
+                    leading: const Icon(Icons.account_tree_outlined),
+                    title: Text(related['name'] as String),
+                    onTap: () {
+                      Navigator.pop(context);
+                      widget.open(related['id'] as String);
+                    },
+                  ),
+              ],
+            ],
+          );
+        },
+      ),
+    ),
+    actions: [
+      TextButton(
+        onPressed: () => Navigator.pop(context),
+        child: const Text('Done'),
+      ),
+    ],
+  );
+}
+
+class ConversationPicker extends StatefulWidget {
+  const ConversationPicker({super.key, required this.app, this.contextGroup});
+  final RiverApi app;
+  final Json? contextGroup;
   @override
   State<ConversationPicker> createState() => _ConversationPickerState();
 }
@@ -33,6 +118,7 @@ class _ConversationPickerState extends State<ConversationPicker> {
       await widget.app.conversation(
         name.text.trim().isEmpty ? 'Conversation' : name.text.trim(),
         selected.toList()..sort(),
+        contextId: widget.contextGroup?['id'] as String?,
       );
       if (mounted) Navigator.pop(context, true);
     } catch (e) {
@@ -42,15 +128,41 @@ class _ConversationPickerState extends State<ConversationPicker> {
     }
   }
 
+  List<Json> get candidates {
+    if (widget.contextGroup == null) return widget.app.friends;
+    return (widget.contextGroup!['members'] as List? ?? [])
+        .cast<Json>()
+        .where(
+          (person) =>
+              person['principal_id'] != widget.app.user?['sub'] &&
+              (person['user_id'] ??
+                      widget.app.userId(person['username'] as String)) !=
+                  widget.app.user?['user_id'],
+        )
+        .map(
+          (person) => <String, dynamic>{
+            ...person,
+            'user_id':
+                person['user_id'] ??
+                widget.app.userId(person['username'] as String),
+          },
+        )
+        .toList();
+  }
+
   @override
   Widget build(BuildContext context) => AlertDialog(
-    title: const Text('New conversation'),
+    title: Text(
+      widget.contextGroup == null
+          ? 'New conversation'
+          : 'Conversation in ${widget.contextGroup!['name']}',
+    ),
     content: SizedBox(
       width: 440,
       height: 420,
       child: Column(
         children: [
-          if (selected.length > 1)
+          if (selected.length > 1 || widget.contextGroup != null)
             TextField(
               controller: name,
               maxLength: 80,
@@ -59,12 +171,14 @@ class _ConversationPickerState extends State<ConversationPicker> {
           TextField(
             controller: query,
             onChanged: (_) => setState(() {}),
-            decoration: const InputDecoration(
-              labelText: 'Find a friend',
+            decoration: InputDecoration(
+              labelText: widget.contextGroup == null
+                  ? 'Find a friend'
+                  : 'Find a group member',
               prefixIcon: Icon(Icons.search),
             ),
           ),
-          if (widget.app.matrixConnected)
+          if (widget.app.matrixConnected && widget.contextGroup == null)
             TextButton.icon(
               icon: const Icon(Icons.public),
               label: const Text('Message a Matrix user'),
@@ -94,15 +208,17 @@ class _ConversationPickerState extends State<ConversationPicker> {
                     },
             ),
           Expanded(
-            child: widget.app.friends.isEmpty
-                ? const Center(
+            child: candidates.isEmpty
+                ? Center(
                     child: Text(
-                      'Add a Gravitas contact who uses River to start a conversation.',
+                      widget.contextGroup == null
+                          ? 'Add a Gravitas contact who uses River to start a conversation.'
+                          : 'Invite people to this group before starting a conversation.',
                     ),
                   )
                 : ListView(
                     children: [
-                      for (final friend in widget.app.friends.where(
+                      for (final friend in candidates.where(
                         (p) => '${p['username']}'.toLowerCase().contains(
                           query.text.toLowerCase(),
                         ),
@@ -113,7 +229,9 @@ class _ConversationPickerState extends State<ConversationPicker> {
                           subtitle: Text(
                             widget.app.online.contains(friend['user_id'])
                                 ? 'Online'
-                                : 'River friend',
+                                : widget.contextGroup == null
+                                ? 'River friend'
+                                : 'Group member',
                           ),
                           onChanged: busy
                               ? null

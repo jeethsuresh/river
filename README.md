@@ -9,6 +9,11 @@ Next.js River code; Git history retains that implementation.
 
 - Gravitas PKCE sign-in with required full Matrix room access and explicit operation scopes.
 - Spaces and DM/group conversations backed by real Gravitas groups/Matrix rooms.
+- Conversations with selected members of an existing space/group, without
+  requiring contact relationships; invitations still require acceptance.
+- A group hierarchy view showing authorized containing groups, sub-groups and
+  conversations with equal participant sets. Participant changes move a
+  conversation's subgroup while preserving its placement, visibility and history.
 - Owner invitations, invitation acceptance/decline, rename, member removal and leaving.
 - Separate text/drop-in channel rooms with standard Matrix parent/child links;
   new spaces start with a lobby and lounge. Space membership changes update all

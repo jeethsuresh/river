@@ -362,6 +362,9 @@ func proxyRoute(r *http.Request) (string, bool) {
 	if len(parts) == 4 && parts[3] == "membership" && r.Method == "POST" {
 		return "/app/v1/groups/" + parts[2] + "/membership", true
 	}
+	if len(parts) == 4 && parts[3] == "subgroups" && r.Method == "GET" {
+		return "/app/v1/groups/" + parts[2] + "/subgroups", true
+	}
 	if len(parts) == 4 && parts[3] == "channels" && (r.Method == "GET" || r.Method == "POST") {
 		return "/app/v1/groups/" + parts[2] + "/channels", true
 	}
