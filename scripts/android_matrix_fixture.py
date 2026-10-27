@@ -49,8 +49,9 @@ def prepare():
 ''')
     manifest = debug / 'AndroidManifest.xml'
     text = manifest.read_text()
+    text = text.replace('<manifest ', '<manifest xmlns:tools="http://schemas.android.com/tools" ', 1)
     if 'android:networkSecurityConfig=' not in text:
-        text = text.replace('<application ', '<application android:networkSecurityConfig="@xml/river_matrix_test_security" ', 1)
+        text = text.replace('<application ', '<application tools:replace="android:networkSecurityConfig" android:networkSecurityConfig="@xml/river_matrix_test_security" ', 1)
     manifest.write_text(text)
 
 
