@@ -136,7 +136,13 @@ class Fixture:
         assert self.counts['POST', '/_matrix/client/v3/logout'] == 1, self.counts
         print('ANDROID MATRIX HTTPS PASS login, sync, persisted-device restore, logout', flush=True)
 
-    def __exit__(self, *_):
+    def __exit__(self, error_type, *_):
+        if error_type:
+            print('Matrix fixture requests: ' + json.dumps([
+                {'method': method, 'path': path, 'count': count}
+                for (method, path), count in sorted(self.counts.items())
+            ]), flush=True)
+            print('Matrix fixture TLS violations: ' + json.dumps(self.violations), flush=True)
         for server in self.servers:
             server.shutdown()
             server.server_close()

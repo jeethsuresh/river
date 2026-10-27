@@ -87,26 +87,6 @@ with (output / 'emulator.log').open('w') as log:
         else:
             raise AssertionError('Android emulator boot timed out')
         device('shell', 'input', 'keyevent', '82')
-        device('install', '-r', str(args.apk.resolve()), timeout=120)
-        device('logcat', '-c')
-        device('shell', 'am', 'start', '-W', '-n', component)
-        original = wait_resumed()
-        for kind in ['native', 'matrix']:
-            background()
-            assert open_link(kind) == original, 'Warm return created a second River activity'
-            print('ANDROID AUTH RETURN PASS warm ' + kind, flush=True)
-        for kind in ['native', 'matrix']:
-            device('shell', 'am', 'force-stop', package)
-            assert open_link(kind) != original, 'Cold return reused a stopped activity'
-            print('ANDROID AUTH RETURN PASS cold ' + kind, flush=True)
-        pid = device('shell', 'pidof', package).strip()
-        assert pid, 'River exited after the return link'
-        logs = device('logcat', '-d', '--pid=' + pid)
-        (output / 'river.log').write_text(logs)
-        assert not any(message in logs for message in [
-            'FATAL EXCEPTION', 'Could not navigate to initial route',
-            'Failed to handle route',
-        ]), 'River crashed or tried to navigate to an auth callback route'
         from android_matrix_fixture import Fixture, FIXTURE
         with Fixture() as fixture:
             device('shell', 'am', 'force-stop', package)
@@ -152,6 +132,27 @@ with (output / 'emulator.log').open('w') as log:
                 # device, without repeating the consumed browser login token.
                 device('shell', 'am', 'force-stop', package)
             fixture.verify()
+        # Also exercise browser returns in the normal River application.
+        device('install', '-r', str(args.apk.resolve()), timeout=120)
+        device('logcat', '-c')
+        device('shell', 'am', 'start', '-W', '-n', component)
+        original = wait_resumed()
+        for kind in ['native', 'matrix']:
+            background()
+            assert open_link(kind) == original, 'Warm return created a second River activity'
+            print('ANDROID AUTH RETURN PASS warm ' + kind, flush=True)
+        for kind in ['native', 'matrix']:
+            device('shell', 'am', 'force-stop', package)
+            assert open_link(kind) != original, 'Cold return reused a stopped activity'
+            print('ANDROID AUTH RETURN PASS cold ' + kind, flush=True)
+        pid = device('shell', 'pidof', package).strip()
+        assert pid, 'River exited after the return link'
+        logs = device('logcat', '-d', '--pid=' + pid)
+        (output / 'river.log').write_text(logs)
+        assert not any(message in logs for message in [
+            'FATAL EXCEPTION', 'Could not navigate to initial route',
+            'Failed to handle route',
+        ]), 'River crashed or tried to navigate to an auth callback route'
     except BaseException:
         log.flush()
         try:
