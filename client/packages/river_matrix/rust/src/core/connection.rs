@@ -194,7 +194,8 @@ impl MatrixCore {
     }
 
     /// One sync request per connection. The Dart controller owns the cancellable
-    /// loop and saves refreshed credentials after each successful response.
+    /// loop and saves credentials after requests, including failures. A token
+    /// rotation wakes a pending poll so it can be persisted immediately.
     pub async fn sync(&self) -> Result<String> {
         self.active()?;
         let _poll = self.polling.lock().await;
@@ -242,27 +243,50 @@ impl MatrixCore {
         }
         let connection = sliding.clone();
         drop(sliding);
-        let changed = if let Some(connection) = connection {
-            connection.sync_once().await.map_err(sync_error)?.rooms
-        } else {
-            let response = self
-                .client
-                .sync_once(SyncSettings::default().timeout(POLL_TIMEOUT))
-                .await
-                .map_err(sync_error)?;
-            response
-                .rooms
-                .joined
-                .keys()
-                .chain(response.rooms.invited.keys())
-                .chain(response.rooms.left.keys())
-                .chain(response.rooms.knocked.keys())
-                .cloned()
-                .collect()
+        let mut session_changes = self.client.subscribe_to_session_changes();
+        let poll = async {
+            if let Some(connection) = connection {
+                Ok::<_, anyhow::Error>(connection.sync_once().await.map_err(sync_error)?.rooms)
+            } else {
+                let response = self
+                    .client
+                    .sync_once(SyncSettings::default().timeout(POLL_TIMEOUT))
+                    .await
+                    .map_err(sync_error)?;
+                Ok(response
+                    .rooms
+                    .joined
+                    .keys()
+                    .chain(response.rooms.invited.keys())
+                    .chain(response.rooms.left.keys())
+                    .chain(response.rooms.knocked.keys())
+                    .cloned()
+                    .collect())
+            }
+        };
+        tokio::pin!(poll);
+        let (changed, credentials_changed) = loop {
+            tokio::select! {
+                result = &mut poll => break (result?, false),
+                change = session_changes.recv() => match change {
+                    Ok(matrix_sdk::SessionChange::TokensRefreshed) |
+                    Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {
+                        // Do not hold a newly rotated single-use refresh token
+                        // behind another long poll. Return it to the durable
+                        // client store now; the next sync resumes the same cursor.
+                        break (Vec::new(), true);
+                    }
+                    Err(tokio::sync::broadcast::error::RecvError::Closed) => {
+                        break ((&mut poll).await?, false);
+                    }
+                    _ => {}
+                }
+            }
         };
         self.active()?;
         let mut result: Value = serde_json::from_str(&self.rooms().await.map_err(sdk_error)?)?;
         result["changed"] = json!(changed);
+        result["credentials_changed"] = json!(credentials_changed);
         Ok(result.to_string())
     }
 
