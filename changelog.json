@@ -1,12 +1,10 @@
 {
   "schemaVersion": 1,
-  "version": "0.8.0",
-  "versionCode": 13,
+  "version": "0.9.0",
+  "versionCode": 14,
   "changes": [
-    "Posts and discussions belong to spaces. Conversations and space channels contain chat only.",
-    "Space posts and discussions use custom Matrix events that identify their owning space.",
-    "River requests full access to your current and future Matrix spaces and conversations at sign-in. Existing accounts must approve the new permission.",
-    "Open existing direct conversations when your role cannot change encryption settings. Preserve encrypted conversations and require encryption for new direct conversations.",
-    "Save refreshed Matrix credentials after authenticated operations so reconnecting keeps the same device and encryption keys. Retry temporary storage failures without losing rotated credentials."
+    "Start conversations with selected members of a space or group, even when they are not contacts.",
+    "Explore the groups and subgroups that contain a conversation's current participants.",
+    "Conversations follow their participant subgroup as people join or leave, while their visibility and history keep their existing permissions."
   ]
 }

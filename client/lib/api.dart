@@ -957,15 +957,24 @@ class RiverApi extends ChangeNotifier {
     await open(result['id'] as String);
   }
 
-  Future<void> conversation(String name, List<String> members) async {
-    if (members.length == 1) return messageFriend(members.single);
-    final key = 'conversation:$name:${members.join(',')}';
+  Future<Json> subgroups(String id) => request('/api/groups/$id/subgroups');
+
+  Future<void> conversation(
+    String name,
+    List<String> members, {
+    String? contextId,
+  }) async {
+    if (members.length == 1 && contextId == null) {
+      return messageFriend(members.single);
+    }
+    final key = 'conversation:$contextId:$name:${members.join(',')}';
     final result = await request(
       '/api/conversations',
       method: 'POST',
       body: {
         'name': name,
         'member_ids': members,
+        if (contextId != null) 'context_id': contextId,
         'txn_id': _transactions.putIfAbsent(key, transactionId),
       },
     );

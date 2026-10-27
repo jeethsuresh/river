@@ -14,6 +14,7 @@ import 'matrix_attachment_widgets.dart';
 import 'call_widgets.dart';
 import 'file_models.dart' show FileScope;
 import 'rich_composer.dart';
+
 import 'package:flutter_quill/flutter_quill.dart'
     show FlutterQuillLocalizations;
 
@@ -193,9 +194,8 @@ class _RiverShellState extends State<RiverShell> {
       await operation();
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text('$e')));
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text('$e')));
       }
     }
   }
@@ -986,7 +986,7 @@ class _RiverShellState extends State<RiverShell> {
                           ),
                         ),
                         Text(
-                          '${g['kind'] == 'dm'
+                          '${['dm', 'group'].contains(g['kind'])
                               ? 'Conversation'
                               : g['kind'] == 'channel'
                               ? 'Channel'
@@ -1073,6 +1073,20 @@ class _RiverShellState extends State<RiverShell> {
                           await app.refresh();
                         }
                       }
+                      if (v == 'conversation' && mounted) {
+                        await showDialog<bool>(
+                          context: context,
+                          builder: (_) =>
+                              ConversationPicker(app: app, contextGroup: g),
+                        );
+                      }
+                      if (v == 'subgroups' && mounted) {
+                        await showDialog<void>(
+                          context: context,
+                          builder: (_) =>
+                              SubgroupDetails(app: app, group: g, open: open),
+                        );
+                      }
                       if (v == 'members') {
                         await members(g);
                       }
@@ -1129,6 +1143,17 @@ class _RiverShellState extends State<RiverShell> {
                           value: 'encrypt',
                           child: Text('Enable encryption'),
                         ),
+                      if (g['matrix_only'] != true) ...[
+                        const PopupMenuItem(
+                          value: 'subgroups',
+                          child: Text('Group hierarchy'),
+                        ),
+                        if (g['kind'] != 'channel')
+                          const PopupMenuItem(
+                            value: 'conversation',
+                            child: Text('Conversation with selected members'),
+                          ),
+                      ],
                       const PopupMenuItem(
                         value: 'members',
                         child: Text('Members'),
@@ -1180,6 +1205,40 @@ class _RiverShellState extends State<RiverShell> {
                   child: Padding(
                     padding: const EdgeInsets.all(8),
                     child: Text(g['description'] as String),
+                  ),
+                ),
+              if (app.groups.any(
+                (room) =>
+                    room['context_id'] == g['id'] &&
+                    room['membership'] == 'join',
+              ))
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: Wrap(
+                    children: [
+                      for (final room in app.groups.where(
+                        (room) =>
+                            room['context_id'] == g['id'] &&
+                            room['membership'] == 'join',
+                      ))
+                        TextButton.icon(
+                          onPressed: () => open(room['id'] as String),
+                          icon: const Icon(Icons.forum_outlined, size: 16),
+                          label: Text(room['name'] as String),
+                        ),
+                    ],
+                  ),
+                ),
+              if (g['context_id'] != null &&
+                  app.group(g['context_id'] as String) != null)
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: TextButton.icon(
+                    onPressed: () => open(g['context_id'] as String),
+                    icon: const Icon(Icons.arrow_upward, size: 16),
+                    label: Text(
+                      'In ${app.group(g['context_id'] as String)!['name']}',
+                    ),
                   ),
                 ),
               if (g['parent_id'] != null)
