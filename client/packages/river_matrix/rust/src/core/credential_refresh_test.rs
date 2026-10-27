@@ -76,6 +76,9 @@ fn serve(
     seen: Arc<AtomicBool>,
     gate: Arc<(Mutex<bool>, Condvar)>,
 ) -> Result<()> {
+    // Accepted sockets can inherit the listener's nonblocking mode on Windows.
+    // This fixture serves each connection on its own blocking thread.
+    stream.set_nonblocking(false)?;
     stream.set_read_timeout(Some(Duration::from_secs(5)))?;
     let mut bytes = Vec::new();
     let mut part = [0u8; 8192];
