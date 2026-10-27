@@ -175,7 +175,7 @@ func TestRouteAndStaticBoundaries(t *testing.T) {
 		t.Fatal(err)
 	}
 	requested := " " + login.Query().Get("scope") + " "
-	for _, permission := range []string{"contacts.read", "contacts.manage"} {
+	for _, permission := range []string{"matrix.full", "contacts.read", "contacts.manage"} {
 		if !strings.Contains(requested, " "+permission+" ") {
 			t.Fatalf("contact consent missing: %s", permission)
 		}

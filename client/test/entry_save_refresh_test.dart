@@ -35,6 +35,9 @@ void main() {
         return http.Response('{"friends":[],"requests":[],"blocked":[]}', 200);
       }),
     )..user = {'issuer': 'https://gravitas.cool', 'sub': 'alice'};
+    api.groups = [
+      {'id': 'space', 'kind': 'space'},
+    ];
     await tester.binding.setSurfaceSize(const Size(1000, 1000));
     addTearDown(() => tester.binding.setSurfaceSize(null));
     await tester.pumpWidget(
@@ -122,6 +125,9 @@ void main() {
           );
         }),
       )..user = {'issuer': 'https://gravitas.cool', 'sub': 'alice'};
+      api.groups = [
+        {'id': 'space', 'kind': 'space'},
+      ];
       await tester.binding.setSurfaceSize(const Size(1000, 1000));
       addTearDown(() => tester.binding.setSurfaceSize(null));
       await tester.pumpWidget(

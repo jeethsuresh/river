@@ -2,11 +2,18 @@
 //! production clients never accept a TLS bypass or a test certificate.
 use super::connection::MatrixCore;
 use anyhow::{Context, Result};
-use matrix_sdk::{Client, ruma::api::client::room::create_room};
+use matrix_sdk::{
+    Client,
+    ruma::{api::client::room::create_room, events::StateEventType},
+};
 use serde_json::{Value, json};
 use std::{io::Cursor, time::Duration};
 
 async fn device(name: &str) -> Result<MatrixCore> {
+    device_as(name, "cryptoalice").await
+}
+
+async fn device_as(name: &str, user: &str) -> Result<MatrixCore> {
     let homeserver = std::env::var("MATRIX_TEST_HOMESERVER")?;
     anyhow::ensure!(
         homeserver == "https://native.test:8448",
@@ -29,7 +36,7 @@ async fn device(name: &str) -> Result<MatrixCore> {
         .await?;
     client
         .matrix_auth()
-        .login_username("cryptoalice", "password123")
+        .login_username(user, "password123")
         .device_id(name)
         .send()
         .await?;
@@ -72,6 +79,130 @@ fn image(code: &Value) -> Result<Vec<u8>> {
     let mut png = Cursor::new(Vec::new());
     image.write_to(&mut png, image::ImageFormat::Png)?;
     Ok(png.into_inner())
+}
+
+async fn direct_room_permissions(first: &MatrixCore) -> Result<()> {
+    let peer = device_as(&format!("RIVER-DM-{}", uuid::Uuid::new_v4()), "deactlater").await?;
+    step(&[first, &peer]).await?;
+    let mut create = create_room::v3::Request::new();
+    create.is_direct = true;
+    create.invite = vec![peer.own_user.clone()];
+    create.power_level_content_override = Some(serde_json::from_value(json!({
+        "users": { first.own_user.as_str(): 100 },
+        "users_default": 0, "state_default": 100, "events_default": 0
+    }))?);
+    let legacy = first.client.create_room(create).await?;
+    step(&[first, &peer]).await?;
+    peer.action(json!({"action":"join", "room":legacy.room_id()}).to_string())
+        .await?;
+    peer.client
+        .account()
+        .mark_as_dm(legacy.room_id(), &[first.own_user.clone()])
+        .await?;
+    step(&[first, &peer]).await?;
+    let joined = peer
+        .client
+        .get_room(legacy.room_id())
+        .context("Joined DM missing")?;
+    joined.request_encryption_state().await?;
+    assert!(!joined.encryption_state().is_encrypted());
+    assert!(
+        !joined
+            .power_levels_or_default()
+            .await
+            .user_can_send_state(&peer.own_user, StateEventType::RoomEncryption)
+    );
+    let acl_event = serde_json::to_value(
+        joined
+            .get_state_event(StateEventType::RoomPowerLevels, "")
+            .await?,
+    )?;
+    let acl = acl_event["content"].clone();
+    assert_eq!(acl["state_default"], 100);
+    let opened: Value = serde_json::from_str(
+        &peer
+            .action(json!({"action":"direct", "user":first.own_user}).to_string())
+            .await?,
+    )?;
+    assert_eq!(opened["room_id"], legacy.room_id().as_str());
+    assert!(!joined.encryption_state().is_encrypted());
+    assert_eq!(
+        serde_json::to_value(
+            joined
+                .get_state_event(StateEventType::RoomPowerLevels, "")
+                .await?
+        )?["content"],
+        acl
+    );
+
+    // The creator can upgrade the same legacy DM. The other participant then
+    // reopens it without changing its encryption state or power levels.
+    let upgraded: Value = serde_json::from_str(
+        &first
+            .action(json!({"action":"direct", "user":peer.own_user}).to_string())
+            .await?,
+    )?;
+    assert_eq!(upgraded["room_id"], legacy.room_id().as_str());
+    step(&[first, &peer]).await?;
+    assert!(joined.encryption_state().is_encrypted());
+    peer.action(json!({"action":"direct", "user":first.own_user}).to_string())
+        .await?;
+    assert!(joined.encryption_state().is_encrypted());
+    assert_eq!(
+        serde_json::to_value(
+            joined
+                .get_state_event(StateEventType::RoomPowerLevels, "")
+                .await?
+        )?["content"],
+        acl
+    );
+
+    let new_peer = matrix_sdk::ruma::UserId::parse("@deactclient:native.test:8448")?;
+    assert!(first.client.get_dm_room(&new_peer).is_none());
+    let created: Value = serde_json::from_str(
+        &first
+            .action(json!({"action":"direct", "user":new_peer}).to_string())
+            .await?,
+    )?;
+    let created_id =
+        matrix_sdk::ruma::RoomId::parse(created["room_id"].as_str().context("New DM ID missing")?)?;
+    let room = first
+        .client
+        .get_room(&created_id)
+        .context("New DM missing")?;
+    room.request_encryption_state().await?;
+    assert!(room.encryption_state().is_encrypted());
+    let sent: Value = serde_json::from_str(
+        &first
+            .send(
+                created_id.to_string(),
+                "m.room.message".into(),
+                json!({"msgtype":"m.text", "body":"new DM stays encrypted"}).to_string(),
+                format!("dm-encrypted-{}", uuid::Uuid::new_v4()),
+            )
+            .await?,
+    )?;
+    let raw = first
+        .client
+        .send(
+            matrix_sdk::ruma::api::client::room::get_room_event::v3::Request::new(
+                created_id,
+                matrix_sdk::ruma::EventId::parse(
+                    sent["event_id"].as_str().context("DM message ID missing")?,
+                )?,
+            ),
+        )
+        .await?;
+    let raw: Value = serde_json::from_str(raw.event.json().get())?;
+    assert_eq!(raw["type"], "m.room.encrypted");
+    assert!(
+        !raw["content"]
+            .to_string()
+            .contains("new DM stays encrypted")
+    );
+    peer.close(true).await?;
+    println!("RIVER MATRIX new/encrypted/legacy DM permissions and unchanged ACL PASS");
+    Ok(())
 }
 
 #[tokio::test]
@@ -283,6 +414,7 @@ async fn qr_verification_recovers_historical_encrypted_messages() -> Result<()> 
         recovered,
         "Recovery-key device did not decrypt historical messages"
     );
+    direct_room_permissions(&first).await?;
     first.close(true).await?;
     second.close(true).await?;
     third.close(true).await?;

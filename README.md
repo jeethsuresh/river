@@ -7,7 +7,7 @@ Next.js River code; Git history retains that implementation.
 
 ## Current capabilities
 
-- Gravitas PKCE sign-in with explicit scopes and group selection.
+- Gravitas PKCE sign-in with required full Matrix room access and explicit operation scopes.
 - Spaces and DM/group conversations backed by real Gravitas groups/Matrix rooms.
 - Owner invitations, invitation acceptance/decline, rename, member removal and leaving.
 - Separate text/drop-in channel rooms with standard Matrix parent/child links;
@@ -56,19 +56,25 @@ The adapter has native plugin builds for Android, iOS, macOS, Windows and Linux 
 
 Delegated Gravitas groups retain their internal UUIDs and membership records. Their canonical Matrix `room_id` comes from the signed room graph, and River uses that ID for Matrix traffic. A Matrix-only or remote room keeps its full `!room:server` ID. River merges these room lists by canonical ID, preserving local app permissions for calls and publishing.
 
-- A River space maps 1:1 to that group and its canonical Matrix room ID, with
-  `m.room.create.content.type = m.space`.
+- A River space is a Matrix space (`m.room.create.content.type = m.space`)
+  containing multiple conversation rooms. Its root group/room identifies the space
+  and transports space-owned custom events. It is not a conversation.
 - A River DM/group conversation maps 1:1 to a normal Matrix room and group. Its
   `cool.gravitas.river.group.v1` state identifies `kind=dm` or `kind=group`. Invitations use
   `m.room.member` with `is_direct=true`. Private Matrix `m.direct` account data is
   maintained by Gravitas and the SDK lets other Matrix clients recognize direct rooms.
 - Each channel is a separate room/group linked by `m.space.child` and canonical
   `m.space.parent`. A `river_channels` row is the authoritative parent link.
-  The root timeline is retained for existing content and space posts/discussions.
+  Posts and discussions belong to the parent space, never to a child room.
+  Conversations (including DMs and group chats) are exactly one normal Matrix room.
   Membership changes and child creation take the same space row lock; accepting,
   leaving or removing a member propagates to every channel in the transaction.
   Independent child joins/invites/leaves are denied. Child writes recheck the
   current parent and child memberships while holding the root lock.
+- River requests `matrix.full` by default: consent requires access to all current
+  and future Matrix spaces/conversations, within membership and account permissions.
+  Existing selected-room grants need renewed consent; old credentials are not
+  silently expanded. The narrower grant model remains available to other apps.
 - `spaces.channels` explicitly authorizes access to current/future channels of an
   approved space, still subject to chat scopes and membership. A directly selected
   child also requires parent membership. `groups.join` permits invitation metadata
@@ -105,7 +111,10 @@ Delegated Gravitas groups retain their internal UUIDs and membership records. Th
 - Standard chat messages and replies are separate `m.room.message` events, with
   `m.in_reply_to` and `cool.gravitas.river={version:1,kind:message|reply}`.
 - Posts and discussions are separate `cool.gravitas.river.post.v1` and
-  `cool.gravitas.river.discussion.v1` events with `version=1`, `title` and `body`.
+  `cool.gravitas.river.discussion.v1` events with `version=1`, canonical Matrix `space_id`, `title` and `body`.
+  River uses `/app/v1/spaces/:id/entries` for their feeds and creation. Both delegated
+  and native Matrix writes reject these events in conversations and child rooms.
+  Existing immutable events stay in history; River entry views only show space content.
   Generic clients may ignore these custom types. No duplicate fallback event is sent.
 - Reactions are standard `m.reaction` with `m.annotation`, target event ID and key.
   Sticker keys use `sticker:<http-or-https-image-url>`; Gravitas validates these
@@ -206,6 +215,11 @@ renewals and immediate response retries share a bounded two-minute result cache 
 the current single-replica backend; successful clients persist the replacement so
 normal backend restarts do not end their sessions.
 Pending Android links are bounded and in memory; restart requires starting a new link.
+The Matrix SDK device session is saved after authenticated operations, including
+failed requests that refreshed credentials. Refreshes wake a pending sync so an
+idle device also saves its replacement tokens. A temporary secure-storage failure
+retains the rotated session in memory for retry while the app remains open; logout
+discards it. Reconnecting preserves the device's encrypted store and keys.
 
 ## Deploy
 

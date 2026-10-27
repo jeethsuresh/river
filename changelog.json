@@ -1,12 +1,12 @@
 {
   "schemaVersion": 1,
-  "version": "0.7.2",
-  "versionCode": 12,
+  "version": "0.8.0",
+  "versionCode": 13,
   "changes": [
-    "Android returns to River after device linking and Matrix approval, and resumes pending sign-in if the app restarts.",
-    "Fix accepting conversation invitations and removing members through Matrix; use each person's full Matrix identity.",
-    "Open newly created rooms after their Matrix state arrives, without mixing messages from the previous room.",
-    "Keep separate drafts and pending attachments for each conversation, and retry failed sends without duplicating messages.",
-    "Reconnect the saved Matrix device after an offline restore and keep messages visible when the member list is unavailable."
+    "Posts and discussions belong to spaces. Conversations and space channels contain chat only.",
+    "Space posts and discussions use custom Matrix events that identify their owning space.",
+    "River requests full access to your current and future Matrix spaces and conversations at sign-in. Existing accounts must approve the new permission.",
+    "Open existing direct conversations when your role cannot change encryption settings. Preserve encrypted conversations and require encryption for new direct conversations.",
+    "Save refreshed Matrix credentials after authenticated operations so reconnecting keeps the same device and encryption keys. Retry temporary storage failures without losing rotated credentials."
   ]
 }

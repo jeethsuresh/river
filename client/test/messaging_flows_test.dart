@@ -88,6 +88,12 @@ class FlowTransport extends FakeMatrixTransport {
           {...r, if (r['room_id'] == payload['room']) 'membership': 'join'},
       ];
     }
+    if (payload['action'] == 'encrypt') {
+      roomList = [
+        for (final r in roomList)
+          {...r, if (r['room_id'] == payload['room']) 'encrypted': true},
+      ];
+    }
     return {};
   }
 }
@@ -100,6 +106,8 @@ Json room(String id, String wire) => {
   'membership': 'join',
   'members': <Json>[],
   'parents': [],
+  'encrypted': false,
+  'can_encrypt': true,
 };
 
 Future<MatrixMessaging> device(FlowTransport engine) async {

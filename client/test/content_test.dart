@@ -216,6 +216,7 @@ void main() {
             return response({'groups': [], 'recent': []});
           }),
         )..user = person;
+        api.groups = [group];
         await tester.pumpWidget(
           MaterialApp(
             home: Scaffold(

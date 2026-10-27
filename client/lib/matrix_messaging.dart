@@ -54,6 +54,80 @@ abstract interface class MatrixTransport {
 typedef MatrixFactory =
     Future<MatrixTransport> Function(MatrixJson configuration);
 
+// Any authenticated SDK request can refresh its session, including a request
+// that subsequently fails. Complete the durable save before returning to UI.
+class _DurableMatrixTransport implements MatrixTransport {
+  _DurableMatrixTransport(this.inner, this.persist);
+  final MatrixTransport inner;
+  final Future<void> Function() persist;
+  Future<T> _run<T>(Future<T> Function() operation) async {
+    try {
+      return await operation();
+    } finally {
+      await persist();
+    }
+  }
+
+  @override
+  Future<String> credentials() => inner.credentials();
+  @override
+  Future<MatrixJson> login(String token) => _run(() => inner.login(token));
+  @override
+  Future<MatrixJson> sync() => _run(inner.sync);
+  @override
+  Future<MatrixJson> rooms() => _run(inner.rooms);
+  @override
+  Future<MatrixJson> history(String room, String? cursor) =>
+      _run(() => inner.history(room, cursor));
+  @override
+  Future<MatrixJson> thread(String room, String event, String? cursor) =>
+      _run(() => inner.thread(room, event, cursor));
+  @override
+  Future<MatrixJson> members(String room) => _run(() => inner.members(room));
+  @override
+  Future<MatrixJson> send(
+    String room,
+    String type,
+    MatrixJson content,
+    String txn,
+  ) => _run(() => inner.send(room, type, content, txn));
+  @override
+  Future<MatrixJson> sendAttachment(
+    String room,
+    String name,
+    String mime,
+    Uint8List bytes,
+    String txn,
+  ) => _run(() => inner.sendAttachment(room, name, mime, bytes, txn));
+  @override
+  Future<Uint8List> downloadAttachment(MatrixJson content) =>
+      _run(() => inner.downloadAttachment(content));
+  @override
+  Future<MatrixJson> action(MatrixJson payload) =>
+      _run(() => inner.action(payload));
+  @override
+  Future<MatrixJson> security() => _run(inner.security);
+  @override
+  Future<MatrixJson> setupRecovery(MatrixJson? authentication) =>
+      _run(() => inner.setupRecovery(authentication));
+  @override
+  Future<MatrixJson> recover(String key) => _run(() => inner.recover(key));
+  @override
+  Future<MatrixJson> requestVerification(String device) =>
+      _run(() => inner.requestVerification(device));
+  @override
+  Future<MatrixJson> verificationAction(String flow, String action) =>
+      _run(() => inner.verificationAction(flow, action));
+  @override
+  Future<MatrixJson> verificationQr(String flow) =>
+      _run(() => inner.verificationQr(flow));
+  @override
+  Future<MatrixJson> scanVerificationImage(String flow, Uint8List bytes) =>
+      _run(() => inner.scanVerificationImage(flow, bytes));
+  @override
+  Future<void> close(bool logout) => inner.close(logout);
+}
+
 class RustMatrixTransport implements MatrixTransport {
   RustMatrixTransport(this.engine);
   final MatrixConnection engine;
@@ -221,6 +295,8 @@ class MatrixMessaging extends ChangeNotifier {
   final bool syncEnabled;
   MatrixTransport? _transport;
   MatrixJson? _profile, _configuration;
+  Object? _credentialOwner;
+  final _unsavedSessions = <String, MatrixJson>{};
   List<MatrixJson> roomList = [];
   String? error;
   bool connecting = false, _active = true, _disposed = false;
@@ -268,6 +344,16 @@ class MatrixMessaging extends ChangeNotifier {
     var finishingLink = false;
     final sessionKey = _sessionKey;
     try {
+      // A failed secure-storage write must not discard a token already rotated
+      // by the server. Retry that write before reopening the saved device.
+      await _serializeStorage(() async {
+        _guard(generation);
+        final unsaved = _unsavedSessions[account];
+        if (unsaved == null) return;
+        await storage.write(sessionKey, jsonEncode(unsaved));
+        _guard(generation);
+        _unsavedSessions.remove(account);
+      });
       final saved = await storage.read(sessionKey);
       _guard(generation);
       if (saved != null) {
@@ -276,32 +362,27 @@ class MatrixMessaging extends ChangeNotifier {
             config['homeserver'] != profile['issuer']) {
           throw StateError('Stored Matrix session belongs to another account');
         }
-        final engine = await factory(config);
+        final raw = await factory(config);
         if (generation != _generation || _disposed) {
-          await engine.close(false);
+          await raw.close(generation < _revokeBefore);
           return;
         }
+        _configuration = config;
+        final engine = _durable(raw, generation);
         try {
           final snapshot = await engine.sync();
           _guard(generation);
-          // Reconnecting can rotate the Matrix refresh token immediately.
-          // Save it before publishing the restored device, including when
-          // background sync is disabled or the app closes after this read.
-          config['session'] = await engine.credentials();
-          _guard(generation);
-          await _serializeStorage(() async {
-            _guard(generation);
-            await storage.write(sessionKey, jsonEncode(config));
-          });
-          _guard(generation);
           _transport = engine;
-          _configuration = config;
           roomList = (snapshot['rooms'] as List).cast<MatrixJson>();
           notifyListeners();
           changed();
           _startSync();
         } catch (_) {
-          await engine.close(false);
+          if (generation == _generation) {
+            _configuration = null;
+            _credentialOwner = null;
+          }
+          await engine.close(generation < _revokeBefore);
           rethrow;
         }
       } else {
@@ -330,7 +411,7 @@ class MatrixMessaging extends ChangeNotifier {
   }
 
   Future<void> connect() async {
-    if (_profile == null || connecting) return;
+    if (_profile == null || connected || connecting) return;
     final generation = _generation;
     connecting = true;
     error = null;
@@ -417,27 +498,27 @@ class MatrixMessaging extends ChangeNotifier {
         config['session'] = await engine.credentials();
         _guard(generation);
         final sessionKey = _sessionKey, pendingKey = _pendingKey;
+        final account = accountKey!;
         // Persist the encrypted store credentials before exposing this device.
         // Losing this write must not leave a seemingly connected, unrecoverable device.
         await _serializeStorage(() async {
           _guard(generation);
           await storage.write(sessionKey, jsonEncode(config));
+          _unsavedSessions.remove(account);
         });
         persisted = true;
         _guard(generation);
+        _configuration = config;
+        engine = _durable(engine, generation);
         final snapshot = await engine.sync();
-        _guard(generation);
-        config['session'] = await engine.credentials();
         _guard(generation);
         await _serializeStorage(() async {
           _guard(generation);
-          await storage.write(sessionKey, jsonEncode(config));
           await storage.delete(pendingKey);
         });
         _guard(generation);
         _transport = engine;
         engine = null;
-        _configuration = config;
         roomList = (snapshot['rooms'] as List).cast<MatrixJson>();
         changed();
         error = null;
@@ -447,6 +528,8 @@ class MatrixMessaging extends ChangeNotifier {
       throw StateError('Matrix sign-in expired');
     } catch (_) {
       if (generation == _generation) {
+        _configuration = null;
+        _credentialOwner = null;
         error = 'Matrix sign-in did not finish. Please start again.';
       }
     } finally {
@@ -462,16 +545,35 @@ class MatrixMessaging extends ChangeNotifier {
     }
   }
 
-  Future<void> _persist(int generation) async {
-    final config = _configuration;
-    if (config == null) return;
-    _guard(generation);
-    final key = _sessionKey;
-    final encoded = jsonEncode(config);
-    await _serializeStorage(() async {
+  MatrixTransport _durable(MatrixTransport engine, int generation) {
+    final owner = Object(), account = accountKey!, sessionKey = _sessionKey;
+    _credentialOwner = owner;
+    void guard() {
       _guard(generation);
-      await storage.write(key, encoded);
-    });
+      if (!identical(_credentialOwner, owner)) {
+        throw StateError('Matrix device changed');
+      }
+    }
+
+    return _DurableMatrixTransport(
+      engine,
+      () => _serializeStorage(() async {
+        guard();
+        // Read inside the same queue as the write: a delayed read must not
+        // overwrite a newer rotation saved by a concurrent operation.
+        final session = await engine.credentials();
+        guard();
+        final config = _configuration!;
+        if (session == config['session']) return;
+        final updated = {...config, 'session': session};
+        _unsavedSessions[account] = updated;
+        await storage.write(sessionKey, jsonEncode(updated));
+        guard();
+        _unsavedSessions.remove(account);
+        // Advance the durable snapshot only after the write succeeds.
+        _configuration = updated;
+      }),
+    );
   }
 
   Future<void> syncNow() async {
@@ -504,13 +606,6 @@ class MatrixMessaging extends ChangeNotifier {
     operation = (() async {
       try {
         final snapshot = await engine.sync();
-        _guard(generation);
-        final credentials = await engine.credentials();
-        _guard(generation);
-        if (credentials != _configuration?['session']) {
-          _configuration!['session'] = credentials;
-          await _persist(generation);
-        }
         _guard(generation);
         roomList = (snapshot['rooms'] as List).cast<MatrixJson>();
         notifyListeners();
@@ -554,7 +649,8 @@ class MatrixMessaging extends ChangeNotifier {
           error = null;
           backoff = 1;
           notifyListeners();
-          if ((snapshot['changed'] as List? ?? []).isNotEmpty ||
+          if (snapshot['credentials_changed'] == true ||
+              (snapshot['changed'] as List? ?? []).isNotEmpty ||
               roomList.any((room) => room['encrypted'] == true)) {
             changed();
           }
@@ -563,6 +659,7 @@ class MatrixMessaging extends ChangeNotifier {
           if ('$e'.contains('RIVER_MATRIX_SESSION_EXPIRED')) {
             final old = _transport;
             _transport = null;
+            _credentialOwner = null;
             error =
                 'This Matrix device session expired. Connect and verify this device again.';
             try {
@@ -587,11 +684,13 @@ class MatrixMessaging extends ChangeNotifier {
     _syncRequest = null;
     final sessionKey = _profile == null ? null : _sessionKey;
     final pendingKey = _profile == null ? null : _pendingKey;
+    if (logout) _unsavedSessions.remove(accountKey);
     _generation++;
     if (logout) _revokeBefore = _generation;
     final old = _transport;
     _transport = null;
     _configuration = null;
+    _credentialOwner = null;
     _profile = null;
     roomList = [];
     connecting = false;
@@ -629,6 +728,7 @@ class MatrixMessaging extends ChangeNotifier {
   @override
   void dispose() {
     _disposed = true;
+    _unsavedSessions.clear();
     unawaited(disconnect());
     super.dispose();
   }

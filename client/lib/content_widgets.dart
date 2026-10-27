@@ -934,7 +934,7 @@ class _EntryFeedState extends State<EntryFeed> {
     setState(() => loading = true);
     try {
       final r = await widget.app.request(
-        '/api/groups/${widget.room}/entries?kind=${widget.kind}${more && cursor != null ? '&before=${Uri.encodeQueryComponent(cursor!)}' : ''}',
+        '/api/spaces/${widget.room}/entries?kind=${widget.kind}${more && cursor != null ? '&before=${Uri.encodeQueryComponent(cursor!)}' : ''}',
       );
       if (!mounted) return;
       setState(() {

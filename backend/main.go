@@ -41,7 +41,7 @@ var uuidPattern = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]
 var eventPattern = regexp.MustCompile(`^\$[a-zA-Z0-9_.:-]{1,511}$`)
 var txnPattern = regexp.MustCompile(`^[a-zA-Z0-9_-]{1,128}$`)
 
-const scopes = "profile.name chats.list chats.read chats.write groups.create groups.manage groups.join spaces.channels contacts.read contacts.manage calls.read calls.join posts.publish"
+const scopes = "profile.name matrix.full chats.list chats.read chats.write groups.create groups.manage groups.join spaces.channels contacts.read contacts.manage calls.read calls.join posts.publish"
 
 func env(k, def string) string {
 	if v := os.Getenv(k); v != "" {
@@ -303,6 +303,14 @@ func publicRoute(r *http.Request) (string, bool) {
 }
 func proxyRoute(r *http.Request) (string, bool) {
 	parts := strings.Split(strings.Trim(r.URL.Path, "/"), "/")
+	if len(parts) >= 4 && parts[0] == "api" && parts[1] == "spaces" && uuidPattern.MatchString(parts[2]) {
+		if len(parts) == 4 && ((parts[3] == "entries" && r.Method == "GET") || (parts[3] == "entry" && r.Method == "POST")) {
+			return "/app/v1/spaces/" + parts[2] + "/" + parts[3], true
+		}
+		if len(parts) == 6 && parts[3] == "entries" && r.Method == "PUT" && txnPattern.MatchString(parts[5]) && (parts[4] == "cool.gravitas.river.post.v1" || parts[4] == "cool.gravitas.river.discussion.v1") {
+			return "/app/v1/spaces/" + parts[2] + "/entries/" + parts[4] + "/" + parts[5], true
+		}
+	}
 	if len(parts) == 4 && parts[0] == "api" && parts[1] == "posts" && eventPattern.MatchString(parts[2]) && (parts[3] == "comment" || parts[3] == "reactions") && r.Method == "POST" {
 		return "/app/v1/posts/" + url.PathEscape(parts[2]) + "/" + parts[3], true
 	}
