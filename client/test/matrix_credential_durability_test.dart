@@ -51,6 +51,18 @@ class RotatingDevice extends FakeMatrixTransport {
       action({'action': 'history'});
 }
 
+class FailingSessionStorage extends MemoryMatrixStorage {
+  int sessionWrites = 0;
+  int? failAt;
+  @override
+  Future<void> write(String key, String value) async {
+    if (key.contains('.session.') && ++sessionWrites == failAt) {
+      throw StateError('storage temporarily unavailable');
+    }
+    await super.write(key, value);
+  }
+}
+
 final sessionKey =
     'river_matrix.session.${sha256.convert(utf8.encode('https://example.org|alice'))}';
 Future<MatrixMessaging> restore(
@@ -85,6 +97,97 @@ Future<MatrixMessaging> restore(
 }
 
 void main() {
+  for (final phase in ['restore', 'link']) {
+    test(
+      '$phase retries a rotated first sync after storage recovers',
+      () async {
+        final storage = FailingSessionStorage()
+          ..failAt = phase == 'restore' ? 1 : 2;
+        final device = RotatingDevice()..failSyncAfterRotation = true;
+        String? restoredSession;
+        if (phase == 'restore') {
+          storage.values[sessionKey] = jsonEncode({
+            'homeserver': matrixProfile['issuer'],
+            'user_id': matrixProfile['user_id'],
+            'store': 'same-private-store',
+            'store_key': 'same-private-key',
+            'session': device.session,
+          });
+        }
+        final matrix = MatrixMessaging(
+          request: (path, {method = 'GET', body}) async =>
+              path == '/api/matrix/link'
+              ? {
+                  'id': 'flow',
+                  'url': 'https://river.example/link',
+                  'expires_at':
+                      DateTime.now().millisecondsSinceEpoch ~/ 1000 + 300,
+                  'homeserver': matrixProfile['issuer'],
+                  'user_id': matrixProfile['user_id'],
+                }
+              : {
+                  'login_token': 'one-use',
+                  'homeserver': matrixProfile['issuer'],
+                  'user_id': matrixProfile['user_id'],
+                },
+          changed: () {},
+          storage: storage,
+          factory: (config) async {
+            if (config['session'] is String) {
+              device.session = restoredSession = config['session'] as String;
+            }
+            return device;
+          },
+          syncEnabled: false,
+          launch: (_) async {},
+          storeLocation: (name) async => name,
+        );
+        await matrix.bind(matrixProfile);
+        if (phase == 'link') await matrix.connect();
+        expect(matrix.connected, false);
+        final original = (jsonDecode(storage.values[sessionKey]!) as Map);
+        expect(original['session'], 'original-device-session');
+        storage.failAt = null;
+        device.failSyncAfterRotation = false;
+        await matrix.bind(matrixProfile);
+        expect(matrix.connected, true);
+        expect(restoredSession, 'rotated-before-sync-failure');
+        final saved = (jsonDecode(storage.values[sessionKey]!) as Map);
+        expect(saved['session'], 'rotated-before-sync-failure');
+        expect(saved['store'], original['store']);
+        expect(saved['store_key'], original['store_key']);
+        matrix.dispose();
+      },
+    );
+  }
+
+  test('connect does not replace an already connected device', () async {
+    final storage = MemoryMatrixStorage(), device = RotatingDevice();
+    final matrix = await restore(storage, device);
+    final original = storage.values[sessionKey];
+    await matrix.connect();
+    expect(matrix.connected, true);
+    expect(matrix.error, isNull);
+    expect(device.closed, isEmpty);
+    expect(storage.values[sessionKey], original);
+    matrix.dispose();
+  });
+
+  test(
+    'logout discards an unsaved rotated session before a later bind',
+    () async {
+      final storage = FailingSessionStorage()..failAt = 1;
+      final device = RotatingDevice()..failSyncAfterRotation = true;
+      final matrix = await restore(storage, device, connected: false);
+      storage.failAt = null;
+      await matrix.disconnect(logout: true);
+      await matrix.bind(matrixProfile);
+      expect(matrix.connected, false);
+      expect(storage.values[sessionKey], isNull);
+      matrix.dispose();
+    },
+  );
+
   test(
     'failed initial restore sync keeps the rotated session for retry',
     () async {

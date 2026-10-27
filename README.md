@@ -215,6 +215,11 @@ renewals and immediate response retries share a bounded two-minute result cache 
 the current single-replica backend; successful clients persist the replacement so
 normal backend restarts do not end their sessions.
 Pending Android links are bounded and in memory; restart requires starting a new link.
+The Matrix SDK device session is saved after authenticated operations, including
+failed requests that refreshed credentials. Refreshes wake a pending sync so an
+idle device also saves its replacement tokens. A temporary secure-storage failure
+retains the rotated session in memory for retry while the app remains open; logout
+discards it. Reconnecting preserves the device's encrypted store and keys.
 
 ## Deploy
 

@@ -295,6 +295,8 @@ class MatrixMessaging extends ChangeNotifier {
   final bool syncEnabled;
   MatrixTransport? _transport;
   MatrixJson? _profile, _configuration;
+  Object? _credentialOwner;
+  final _unsavedSessions = <String, MatrixJson>{};
   List<MatrixJson> roomList = [];
   String? error;
   bool connecting = false, _active = true, _disposed = false;
@@ -342,6 +344,16 @@ class MatrixMessaging extends ChangeNotifier {
     var finishingLink = false;
     final sessionKey = _sessionKey;
     try {
+      // A failed secure-storage write must not discard a token already rotated
+      // by the server. Retry that write before reopening the saved device.
+      await _serializeStorage(() async {
+        _guard(generation);
+        final unsaved = _unsavedSessions[account];
+        if (unsaved == null) return;
+        await storage.write(sessionKey, jsonEncode(unsaved));
+        _guard(generation);
+        _unsavedSessions.remove(account);
+      });
       final saved = await storage.read(sessionKey);
       _guard(generation);
       if (saved != null) {
@@ -366,7 +378,10 @@ class MatrixMessaging extends ChangeNotifier {
           changed();
           _startSync();
         } catch (_) {
-          if (generation == _generation) _configuration = null;
+          if (generation == _generation) {
+            _configuration = null;
+            _credentialOwner = null;
+          }
           await engine.close(generation < _revokeBefore);
           rethrow;
         }
@@ -396,7 +411,7 @@ class MatrixMessaging extends ChangeNotifier {
   }
 
   Future<void> connect() async {
-    if (_profile == null || connecting) return;
+    if (_profile == null || connected || connecting) return;
     final generation = _generation;
     connecting = true;
     error = null;
@@ -483,11 +498,13 @@ class MatrixMessaging extends ChangeNotifier {
         config['session'] = await engine.credentials();
         _guard(generation);
         final sessionKey = _sessionKey, pendingKey = _pendingKey;
+        final account = accountKey!;
         // Persist the encrypted store credentials before exposing this device.
         // Losing this write must not leave a seemingly connected, unrecoverable device.
         await _serializeStorage(() async {
           _guard(generation);
           await storage.write(sessionKey, jsonEncode(config));
+          _unsavedSessions.remove(account);
         });
         persisted = true;
         _guard(generation);
@@ -512,6 +529,7 @@ class MatrixMessaging extends ChangeNotifier {
     } catch (_) {
       if (generation == _generation) {
         _configuration = null;
+        _credentialOwner = null;
         error = 'Matrix sign-in did not finish. Please start again.';
       }
     } finally {
@@ -527,27 +545,36 @@ class MatrixMessaging extends ChangeNotifier {
     }
   }
 
-  MatrixTransport _durable(
-    MatrixTransport engine,
-    int generation,
-  ) => _DurableMatrixTransport(
-    engine,
-    () => _serializeStorage(() async {
+  MatrixTransport _durable(MatrixTransport engine, int generation) {
+    final owner = Object(), account = accountKey!, sessionKey = _sessionKey;
+    _credentialOwner = owner;
+    void guard() {
       _guard(generation);
-      // Read inside the same queue as the write: a delayed read must not
-      // overwrite a newer rotation saved by a concurrent operation.
-      final session = await engine.credentials();
-      _guard(generation);
-      final config = _configuration!;
-      if (session == config['session']) return;
-      final updated = {...config, 'session': session};
-      await storage.write(_sessionKey, jsonEncode(updated));
-      _guard(generation);
-      // Keep the previous snapshot on write failure so the next operation
-      // retries saving rather than mistaking volatile credentials for durable.
-      _configuration = updated;
-    }),
-  );
+      if (!identical(_credentialOwner, owner)) {
+        throw StateError('Matrix device changed');
+      }
+    }
+
+    return _DurableMatrixTransport(
+      engine,
+      () => _serializeStorage(() async {
+        guard();
+        // Read inside the same queue as the write: a delayed read must not
+        // overwrite a newer rotation saved by a concurrent operation.
+        final session = await engine.credentials();
+        guard();
+        final config = _configuration!;
+        if (session == config['session']) return;
+        final updated = {...config, 'session': session};
+        _unsavedSessions[account] = updated;
+        await storage.write(sessionKey, jsonEncode(updated));
+        guard();
+        _unsavedSessions.remove(account);
+        // Advance the durable snapshot only after the write succeeds.
+        _configuration = updated;
+      }),
+    );
+  }
 
   Future<void> syncNow() async {
     await _syncOnce(_generation);
@@ -632,6 +659,7 @@ class MatrixMessaging extends ChangeNotifier {
           if ('$e'.contains('RIVER_MATRIX_SESSION_EXPIRED')) {
             final old = _transport;
             _transport = null;
+            _credentialOwner = null;
             error =
                 'This Matrix device session expired. Connect and verify this device again.';
             try {
@@ -656,11 +684,13 @@ class MatrixMessaging extends ChangeNotifier {
     _syncRequest = null;
     final sessionKey = _profile == null ? null : _sessionKey;
     final pendingKey = _profile == null ? null : _pendingKey;
+    if (logout) _unsavedSessions.remove(accountKey);
     _generation++;
     if (logout) _revokeBefore = _generation;
     final old = _transport;
     _transport = null;
     _configuration = null;
+    _credentialOwner = null;
     _profile = null;
     roomList = [];
     connecting = false;
@@ -698,6 +728,7 @@ class MatrixMessaging extends ChangeNotifier {
   @override
   void dispose() {
     _disposed = true;
+    _unsavedSessions.clear();
     unawaited(disconnect());
     super.dispose();
   }
