@@ -20,9 +20,11 @@ var ErrUnavailable = errors.New("Gravitas sign-in is temporarily unavailable")
 type Authorization struct {
 	AccessToken string `json:"-"`
 	Identity
-	CheckToken   string `json:"-"`
-	SessionID    string `json:"-"`
-	CheckExpires int64  `json:"-"`
+	CheckToken    string `json:"-"`
+	SessionID     string `json:"-"`
+	CheckExpires  int64  `json:"-"`
+	RefreshToken  string `json:"-"`
+	AccessExpires int64  `json:"-"`
 }
 type AppSession struct {
 	Authorization Authorization `json:"-"`
@@ -46,27 +48,42 @@ func (c *Client) SetSession(w http.ResponseWriter, auth Authorization) error {
 	return c.SetAppSession(w, SessionCookie, auth, "", time.Now().Add(SessionLifetime))
 }
 func (c *Client) SetAppSession(w http.ResponseWriter, name string, auth Authorization, localToken string, expires time.Time) error {
-	if !c.acceptsIssuer(auth.Issuer) || auth.Subject == "" || !validBinding(auth) {
-		return ErrLoginRequired
+	value, expires, err := c.encodeAppSession(auth, localToken, expires)
+	if err != nil {
+		return err
 	}
-	for _, limit := range []time.Time{time.Now().Add(SessionLifetime), time.Unix(auth.CheckExpires, 0)} {
+	age := max(1, int(time.Until(expires).Seconds()))
+	cookie(w, name, value, age)
+	return nil
+}
+
+func (c *Client) encodeAppSession(auth Authorization, localToken string, expires time.Time) (string, time.Time, error) {
+	if !c.acceptsIssuer(auth.Issuer) || auth.Subject == "" || !validBinding(auth) {
+		return "", expires, ErrLoginRequired
+	}
+	lifetime := SessionLifetime
+	if auth.RefreshToken != "" {
+		if len(auth.RefreshToken) > 256 || auth.AccessExpires <= time.Now().Unix() || auth.AccessExpires > time.Now().Add(SessionLifetime+time.Minute).Unix() {
+			return "", expires, ErrLoginRequired
+		}
+		lifetime = MaxFamilyLifetime
+	}
+	for _, limit := range []time.Time{time.Now().Add(lifetime), time.Unix(auth.CheckExpires, 0)} {
 		if limit.Before(expires) {
 			expires = limit
 		}
 	}
 	if !expires.After(time.Now()) {
-		return ErrLoginRequired
+		return "", expires, ErrLoginRequired
 	}
-	value, err := c.seal("session", session{Identity: auth.Identity, Expires: expires.Unix(), CheckToken: auth.CheckToken, SessionID: auth.SessionID, CheckExpires: auth.CheckExpires, LocalToken: localToken})
+	value, err := c.seal("session", session{Identity: auth.Identity, Expires: expires.Unix(), CheckToken: auth.CheckToken, SessionID: auth.SessionID, CheckExpires: auth.CheckExpires, LocalToken: localToken, RefreshToken: auth.RefreshToken, AccessExpires: auth.AccessExpires})
 	if err != nil {
-		return err
+		return "", expires, err
 	}
 	if len(value) > 3800 {
-		return errors.New("application session is too large")
+		return "", expires, errors.New("application session is too large")
 	}
-	age := max(1, int(time.Until(expires).Seconds()))
-	cookie(w, name, value, age)
-	return nil
+	return value, expires, nil
 }
 
 // DecodeAppSession authenticates the local envelope only. It is used for local
@@ -76,8 +93,12 @@ func (c *Client) DecodeAppSession(value string) (AppSession, error) {
 	if err := c.open("session", value, &s); err != nil {
 		return AppSession{}, ErrLoginRequired
 	}
-	got := AppSession{Authorization: Authorization{Identity: s.Identity, CheckToken: s.CheckToken, SessionID: s.SessionID, CheckExpires: s.CheckExpires}, LocalToken: s.LocalToken, ExpiresAt: time.Unix(s.Expires, 0)}
-	if s.Expires <= time.Now().Unix() || s.Expires > time.Now().Add(SessionLifetime+time.Minute).Unix() || !c.acceptsIssuer(s.Identity.Issuer) || s.Identity.Subject == "" || !validBinding(got.Authorization) {
+	got := AppSession{Authorization: Authorization{Identity: s.Identity, CheckToken: s.CheckToken, SessionID: s.SessionID, CheckExpires: s.CheckExpires, RefreshToken: s.RefreshToken, AccessExpires: s.AccessExpires}, LocalToken: s.LocalToken, ExpiresAt: time.Unix(s.Expires, 0)}
+	lifetime := SessionLifetime
+	if s.RefreshToken != "" {
+		lifetime = MaxFamilyLifetime
+	}
+	if s.Expires <= time.Now().Unix() || s.Expires > time.Now().Add(lifetime+time.Minute).Unix() || s.Expires > s.CheckExpires || !c.acceptsIssuer(s.Identity.Issuer) || s.Identity.Subject == "" || !validBinding(got.Authorization) {
 		return got, ErrLoginRequired
 	}
 	return got, nil
@@ -86,6 +107,9 @@ func (c *Client) AuthenticateValue(ctx context.Context, value string) (AppSessio
 	got, err := c.DecodeAppSession(value)
 	if err != nil {
 		return got, err
+	}
+	if got.Authorization.AccessExpires != 0 && got.Authorization.AccessExpires <= time.Now().Unix() {
+		return got, ErrLoginRequired
 	}
 	return got, c.Revalidate(ctx, got)
 }

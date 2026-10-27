@@ -140,7 +140,11 @@ func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			fail(w, 400, "Sign-in failed. Please start again.")
 			return
 		}
-		if err = s.auth.SetAppSession(w, gravitas.SessionCookie, a, a.AccessToken, time.Now().Add(time.Hour-time.Minute)); err != nil {
+		expires := time.Now().Add(time.Hour - time.Minute)
+		if a.RefreshToken != "" {
+			expires = time.Unix(a.CheckExpires, 0)
+		}
+		if err = s.auth.SetAppSession(w, gravitas.SessionCookie, a, a.AccessToken, expires); err != nil {
 			fail(w, 503, "Cannot establish session")
 			return
 		}
@@ -165,6 +169,9 @@ func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	case "/api/native/session":
 		s.nativeSession(w, r)
+		return
+	case "/api/session/refresh":
+		s.refreshSession(w, r)
 		return
 	}
 	if upstream, ok := publicRoute(r); ok {
@@ -489,6 +496,9 @@ func (s *server) nativeFinish(w http.ResponseWriter, r *http.Request) {
 	if r.Method == "POST" {
 		c, _ := r.Cookie(gravitas.SessionCookie)
 		p.Session = c.Value
+		// Transfer this login to the native app. A browser must obtain its own
+		// login family instead of racing the app's single-use refresh token.
+		s.auth.ClearSession(w)
 		respond(w, 200, map[string]bool{"linked": true})
 		return
 	}

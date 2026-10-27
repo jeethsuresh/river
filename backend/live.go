@@ -18,7 +18,11 @@ func (s *server) live(w http.ResponseWriter, r *http.Request, session gravitas.A
 		w.WriteHeader(405)
 		return
 	}
-	ctx, cancel := context.WithDeadline(r.Context(), session.ExpiresAt)
+	deadline := session.ExpiresAt
+	if exp := session.Authorization.AccessExpires; exp > 0 && time.Unix(exp, 0).Before(deadline) {
+		deadline = time.Unix(exp, 0)
+	}
+	ctx, cancel := context.WithDeadline(r.Context(), deadline)
 	defer cancel()
 	req, _ := http.NewRequestWithContext(ctx, "GET", s.upstream(ctx).Issuer+"/app/v1/live", nil)
 	req.Header.Set("Authorization", "Bearer "+session.LocalToken)

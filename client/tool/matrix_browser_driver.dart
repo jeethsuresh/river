@@ -111,10 +111,34 @@ Future<void> main(List<String> args) async {
     }
     exitCode = 1;
   } finally {
+    if (browser != null) {
+      try {
+        // SIGTERM can leave Chromium's profile-writing child processes alive
+        // after the launcher exits. Ask the browser to shut them down first.
+        socket?.add(jsonEncode({'id': ++sequence, 'method': 'Browser.close'}));
+        await browser.exitCode.timeout(const Duration(seconds: 5));
+      } catch (_) {
+        browser.kill();
+        try {
+          await browser.exitCode.timeout(const Duration(seconds: 5));
+        } on TimeoutException {
+          browser.kill(ProcessSignal.sigkill);
+          await browser.exitCode;
+        }
+      }
+    }
     await subscription?.cancel();
     await socket?.close();
-    browser?.kill();
-    if (browser != null) await browser.exitCode;
-    await directory.delete(recursive: true);
+    for (var attempt = 0; attempt < 20; attempt++) {
+      try {
+        if (await directory.exists()) await directory.delete(recursive: true);
+        break;
+      } on FileSystemException catch (error) {
+        // A final background write can briefly race recursive deletion on Linux.
+        // Keep persistent cleanup errors visible instead of hiding test failures.
+        if (error.osError?.errorCode != 39 || attempt == 19) rethrow;
+        await Future<void>.delayed(const Duration(milliseconds: 100));
+      }
+    }
   }
 }

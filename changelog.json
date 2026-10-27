@@ -1,11 +1,11 @@
 {
   "schemaVersion": 1,
-  "version": "0.7.0",
-  "versionCode": 10,
+  "version": "0.7.1",
+  "versionCode": 11,
   "changes": [
-    "Display linked GIFs, PNGs, JPEGs and other supported images in messages, replies, discussions and posts.",
-    "Make stickers from linked images or GIFs, save them on this device and reuse them from a separate sticker picker. Stickers keep their animation and have a white outline.",
-    "React with emoji or saved stickers. Public post and comment reactions require sign-in.",
-    "Correctly show and remove your Matrix reactions."
+    "Stay signed in as River automatically renews expiring access credentials within your Gravitas session.",
+    "Keep your linked Matrix device and encryption keys when River reconnects; save rotated device credentials immediately.",
+    "Temporary server outages keep saved credentials so River can reconnect when service returns.",
+    "After updating from an older version, sign in once to enable automatic renewal. Gravitas sign-out, revoked permissions and the central session expiry still require sign-in."
   ]
 }

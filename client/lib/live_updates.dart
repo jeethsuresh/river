@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+
 import 'package:http/http.dart' as http;
 
 /// A reconnect always refreshes the complete authorized read model. There is no
@@ -10,11 +11,13 @@ class LiveUpdates {
     required this.headers,
     required this.changed,
     required this.revoked,
+    this.prepare,
     http.Client? client,
   }) : _client = client ?? http.Client();
   final Uri url;
   final Map<String, String> Function() headers;
   final void Function() changed, revoked;
+  final Future<void> Function()? prepare;
   final http.Client _client;
   StreamSubscription<String>? _subscription;
   Timer? _retry, _debounce;
@@ -24,12 +27,19 @@ class LiveUpdates {
   Future<void> connect() async {
     if (_closed) return;
     try {
+      await prepare?.call();
+      if (_closed) return;
       final r = http.Request('GET', url)..headers.addAll(headers());
       final response = await _client
           .send(r)
           .timeout(const Duration(seconds: 20));
       if (_closed) return;
-      if (response.statusCode == 401 || response.statusCode == 403) {
+      if (response.statusCode == 401) {
+        unawaited(response.stream.drain<void>());
+        _reconnect();
+        return;
+      }
+      if (response.statusCode == 403) {
         revoked();
         close();
         return;
@@ -48,8 +58,10 @@ class LiveUpdates {
               }
               if (line == 'event: invalidate') _change();
               if (line == 'event: revoked') {
-                revoked();
-                close();
+                // An upstream access token can expire while streaming. The
+                // next connection revalidates/renews through the normal API.
+                unawaited(_subscription?.cancel());
+                _reconnect();
               }
             },
             onError: (_) => _reconnect(),
