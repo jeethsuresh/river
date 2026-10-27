@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "version": "0.8.0",
-  "versionCode": 12,
+  "versionCode": 13,
   "changes": [
     "Posts and discussions belong to spaces. Conversations and space channels contain chat only.",
     "Space posts and discussions use custom Matrix events that identify their owning space.",

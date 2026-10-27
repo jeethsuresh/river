@@ -1,4 +1,4 @@
-# River 0.8.0
+# River 0.8.0 (Android build 13)
 
 - Conversations are single Matrix rooms and show chat only. Posts and discussions belong to spaces, which can contain multiple conversation rooms.
 - Space posts and discussions use custom Matrix event objects with an explicit owning space ID. Conversation and channel targets are rejected by the server as well as the client.
