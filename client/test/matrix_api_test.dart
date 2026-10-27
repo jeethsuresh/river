@@ -125,6 +125,26 @@ Future<RiverApi> connected(
 
 void main() {
   test(
+    'connected Matrix uses space projections for entry threads and edits',
+    () async {
+      final requests = <http.Request>[];
+      final api = await connected(RoomTransport(), requests);
+      api.group('local')!['kind'] = 'space';
+      await api.thread('local', r'$discussion');
+      expect(requests.last.url.path, '/api/groups/local/thread');
+      await api.editEntry(
+        'local',
+        r'$discussion',
+        'Title',
+        'Body',
+        refreshAfter: false,
+      );
+      expect(requests.last.url.path, '/api/spaces/local/entry');
+      api.dispose();
+    },
+  );
+
+  test(
     'Matrix-only sync invalidates open views while active and pauses in background',
     () async {
       final api = await connected(RoomTransport(), []);

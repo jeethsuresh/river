@@ -926,7 +926,7 @@ class _RiverShellState extends State<RiverShell> {
       );
     }
     final viewFilter =
-        g['kind'] == 'channel' ||
+        g['kind'] != 'space' ||
             g['matrix_only'] == true ||
             g['encrypted'] == true
         ? 'Chat'
@@ -1216,7 +1216,7 @@ class _RiverShellState extends State<RiverShell> {
                   ),
                 ),
               const SizedBox(height: 12),
-              if (g['kind'] != 'channel' &&
+              if (g['kind'] == 'space' &&
                   g['matrix_only'] != true &&
                   g['encrypted'] != true)
                 SegmentedButton<String>(

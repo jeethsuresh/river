@@ -81,6 +81,12 @@ class RiverApi extends ChangeNotifier {
   String? matrixRoom(String id) => group(id)?['room_id'] as String?;
   bool encrypted(String id) => group(id)?['encrypted'] == true;
 
+  void requireSpace(String id) {
+    if (group(id)?['kind'] != 'space') {
+      throw StateError('Posts and discussions belong to a space.');
+    }
+  }
+
   List<Json> _matrixGroups(List<Json> delegated) {
     if (!matrixConnected) return delegated;
     final byWire = <String, Json>{
@@ -972,7 +978,9 @@ class RiverApi extends ChangeNotifier {
 
   Future<Json> thread(String room, String event, {String? before}) async {
     final wire = matrixRoom(room);
-    if (matrixConnected && wire != null) {
+    // Space entries and their authored edits are custom Matrix objects rendered
+    // by the space content API, alongside ordinary thread replies.
+    if (matrixConnected && wire != null && group(room)?['kind'] != 'space') {
       final result = await matrix.transport.thread(wire, event, before);
       final rendered = renderMatrixTimeline([
         result['root'] as Json,
@@ -1038,23 +1046,10 @@ class RiverApi extends ChangeNotifier {
     String body, {
     bool refreshAfter = true,
   }) async {
+    requireSpace(room);
     final key = 'edit:$room:$event:$title:$body';
-    final wire = matrixRoom(room);
-    if (matrixConnected && wire != null) {
-      await matrix.transport.action({
-        'action': 'edit',
-        'room': wire,
-        'event': event,
-        'title': title,
-        'body': body,
-        'transaction': _transactions.putIfAbsent(key, transactionId),
-      });
-      _transactions.remove(key);
-      if (refreshAfter) await refresh();
-      return;
-    }
     await request(
-      '/api/groups/$room/entry',
+      '/api/spaces/$room/entry',
       method: 'POST',
       body: {
         'event_id': event,
@@ -1191,6 +1186,10 @@ class RiverApi extends ChangeNotifier {
       'cool.gravitas.river.post.v1',
       'cool.gravitas.river.discussion.v1',
     ].contains(type);
+    if (delegatedContent) {
+      requireSpace(id);
+      content = {...content, if (wire != null) 'space_id': wire};
+    }
     if (delegatedContent && encrypted(id)) {
       throw StateError(
         'Public posts and discussions cannot be created in an encrypted room. Use encrypted chat instead.',
@@ -1222,7 +1221,9 @@ class RiverApi extends ChangeNotifier {
     final result = !delegatedContent && matrixConnected && wire != null
         ? await matrix.transport.send(wire, type, content, txn)
         : await request(
-            '/api/groups/$id/events/$type/$txn',
+            delegatedContent
+                ? '/api/spaces/$id/entries/$type/$txn'
+                : '/api/groups/$id/events/$type/$txn',
             method: 'PUT',
             body: {'content': content},
           );
