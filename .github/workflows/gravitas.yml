@@ -98,10 +98,15 @@ jobs:
         run: |
           export JAVA_HOME="$JAVA_HOME_17_X64"
           export PATH="$JAVA_HOME/bin:$ANDROID_HOME/cmdline-tools/latest/bin:$PATH"
+          cp client/build/app/outputs/flutter-apk/app-debug.apk "$RUNNER_TEMP/river-auth-return.apk"
+          ./client/android/gradlew --stop
+          # The installed APK is the tested artifact; compiler intermediates are
+          # no longer needed and otherwise compete with the emulator for disk.
+          rm -rf client/build
           sudo chown "$(id -u):$(id -g)" /dev/kvm
           sdkmanager 'platform-tools' 'emulator' 'system-images;android-35;google_apis;x86_64'
           printf 'no\n' | avdmanager create avd --force --name river-auth-return --package 'system-images;android-35;google_apis;x86_64'
-          python3 scripts/test-android-auth-return.py --apk client/build/app/outputs/flutter-apk/app-debug.apk --avd river-auth-return
+          python3 scripts/test-android-auth-return.py --apk "$RUNNER_TEMP/river-auth-return.apk" --avd river-auth-return
   image:
     needs: [android, matrix-platforms, matrix-interop]
     runs-on: ubuntu-24.04

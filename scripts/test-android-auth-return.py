@@ -52,7 +52,7 @@ def open_link(kind):
 with (output / 'emulator.log').open('w') as log:
     process = subprocess.Popen([emulator, '-avd', args.avd, '-port', '5554',
                                 '-no-window', '-no-audio', '-no-boot-anim',
-                                '-no-snapshot', '-gpu', 'swiftshader_indirect',
+                                '-no-snapshot', '-gpu', 'swiftshader',
                                 '-camera-back', 'none', '-camera-front', 'none'],
                                stdout=log, stderr=subprocess.STDOUT)
     try:
@@ -88,6 +88,15 @@ with (output / 'emulator.log').open('w') as log:
             'FATAL EXCEPTION', 'Could not navigate to initial route',
             'Failed to handle route',
         ]), 'River crashed or tried to navigate to an auth callback route'
+    except BaseException:
+        log.flush()
+        print('Android emulator diagnostics:', flush=True)
+        print('\n'.join((output / 'emulator.log').read_text().splitlines()[-100:]), flush=True)
+        try:
+            print(device('shell', 'dumpsys', 'activity', 'activities', check=False), flush=True)
+        except subprocess.TimeoutExpired:
+            pass
+        raise
     finally:
         device('emu', 'kill', check=False)
         try:
