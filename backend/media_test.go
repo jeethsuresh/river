@@ -49,6 +49,9 @@ func TestLinkedMediaRetainsGIFBytesAndNeverForwardsCredentials(t *testing.T) {
 		if r.Header.Get("Authorization") != "" || r.Header.Get("Cookie") != "" || r.Header.Get("Referer") != "" {
 			t.Fatal("credentials forwarded to image host")
 		}
+		if r.UserAgent() != "River (+https://github.com/jeethsuresh/river)" {
+			return &http.Response{StatusCode: http.StatusForbidden, Body: io.NopCloser(strings.NewReader("Identify your image client")), Header: http.Header{}}, nil
+		}
 		return &http.Response{StatusCode: 200, Body: io.NopCloser(bytes.NewReader(gif)), Header: http.Header{"Set-Cookie": {"tracker=yes"}}}, nil
 	})}
 	r := httptest.NewRequest("GET", "/api/public/media?url="+url.QueryEscape("https://example.com/a.gif"), nil)

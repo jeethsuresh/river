@@ -133,6 +133,8 @@ func serveLinkedMedia(w http.ResponseWriter, r *http.Request, client *http.Clien
 		return
 	}
 	req.Header.Set("Accept", "image/avif,image/webp,image/png,image/jpeg,image/gif,image/bmp")
+	// Identify this anonymous relay to image hosts that reject generic clients.
+	req.Header.Set("User-Agent", "River (+https://github.com/jeethsuresh/river)")
 	response, err := client.Do(req)
 	if err != nil {
 		fail(w, 502, "Unable to load image")
