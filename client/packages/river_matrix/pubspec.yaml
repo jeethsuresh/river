@@ -27,6 +27,8 @@ flutter:
   plugin:
     platforms:
       android:
+        package: com.flutter_rust_bridge.river_matrix
+        pluginClass: RiverMatrixPlugin
         ffiPlugin: true
       ios:
         ffiPlugin: true

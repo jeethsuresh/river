@@ -10,6 +10,7 @@ import time
 parser = argparse.ArgumentParser()
 parser.add_argument('--apk', required=True, type=Path)
 parser.add_argument('--avd', required=True)
+parser.add_argument('--matrix-apk', required=True, type=Path)
 args = parser.parse_args()
 sdk = Path(os.environ['ANDROID_HOME'])
 adb = str(sdk / 'platform-tools/adb')
@@ -88,6 +89,31 @@ with (output / 'emulator.log').open('w') as log:
             'FATAL EXCEPTION', 'Could not navigate to initial route',
             'Failed to handle route',
         ]), 'River crashed or tried to navigate to an auth callback route'
+        from android_matrix_fixture import Fixture
+        with Fixture() as fixture:
+            device('shell', 'am', 'force-stop', package)
+            device('install', '-r', str(args.matrix_apk.resolve()), timeout=120)
+            device('shell', 'pm', 'clear', package)  # Disposable emulator only.
+            for port in [8448, 8449]:
+                device('reverse', f'tcp:{port}', f'tcp:{port}')
+            for marker in ['RIVER_ANDROID_MATRIX_AUTH_SAVED', 'RIVER_ANDROID_MATRIX_AUTH_PASS']:
+                device('logcat', '-c')
+                device('shell', 'am', 'start', '-W', '-n', component)
+                deadline = time.monotonic() + 150
+                while time.monotonic() < deadline:
+                    logs = device('logcat', '-d')
+                    assert 'RIVER_ANDROID_MATRIX_AUTH_FAIL' not in logs, logs
+                    assert 'FATAL EXCEPTION' not in logs, logs
+                    if marker in logs:
+                        break
+                    time.sleep(.5)
+                else:
+                    raise AssertionError('Matrix Android authentication timed out: ' + logs)
+                print('ANDROID MATRIX PASS ' + marker, flush=True)
+                # A new process must recover secure credentials and the SQLite
+                # device, without repeating the consumed browser login token.
+                device('shell', 'am', 'force-stop', package)
+            fixture.verify()
     except BaseException:
         log.flush()
         print('Android emulator diagnostics:', flush=True)
