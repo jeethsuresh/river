@@ -1,5 +1,7 @@
-# River 0.9.1 (Android build 15)
+# River 0.10.0 (Android build 16)
 
-Fix Matrix messaging sign-in on Android after browser approval. Android can now complete its secure Matrix connection and reopen the saved device after restarting River.
+Previously viewed rooms, chat history and threads are available without a network connection. Room drafts, attachment references and retry details survive restarting River in the existing encrypted device store.
 
-Update the existing River installation, then connect Matrix messaging again. Saved River sessions and local Matrix device data are preserved.
+A network unavailable banner appears in the header when River cannot connect. Saved conversations refresh when connectivity returns. Sending messages requires connectivity; only history already loaded on this device is available offline.
+
+Linked images and GIFs are cached beside peer attachments for offline viewing. Web clients can also reload the cached app while offline after an online visit to this version.

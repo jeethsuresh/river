@@ -300,6 +300,8 @@ class MatrixMessaging extends ChangeNotifier {
   List<MatrixJson> roomList = [];
   String? error;
   bool connecting = false, _active = true, _disposed = false;
+  bool networkUnavailable = false;
+  Future<void> _localQueue = Future.value();
   bool get connected => _transport != null;
   int _generation = 0, _revokeBefore = -1;
   bool _syncing = false;
@@ -333,7 +335,7 @@ class MatrixMessaging extends ChangeNotifier {
     if (!_disposed) super.notifyListeners();
   }
 
-  Future<void> bind(MatrixJson profile) async {
+  Future<void> bind(MatrixJson profile, {bool synchronize = true}) async {
     final account = '${profile['issuer']}|${profile['sub']}';
     if (accountKey == account && (connected || connecting)) return;
     await disconnect();
@@ -370,15 +372,23 @@ class MatrixMessaging extends ChangeNotifier {
         _configuration = config;
         final engine = _durable(raw, generation);
         try {
-          final snapshot = await engine.sync();
+          final snapshot = await engine.rooms();
           _guard(generation);
           _transport = engine;
           roomList = (snapshot['rooms'] as List).cast<MatrixJson>();
           notifyListeners();
+          if (synchronize) {
+            try {
+              await _syncOnce(generation);
+            } catch (e) {
+              if (!matrixNetworkFailure(e)) rethrow;
+            }
+          }
           changed();
-          _startSync();
+          if (synchronize) _startSync();
         } catch (_) {
           if (generation == _generation) {
+            _transport = null;
             _configuration = null;
             _credentialOwner = null;
           }
@@ -607,14 +617,67 @@ class MatrixMessaging extends ChangeNotifier {
       try {
         final snapshot = await engine.sync();
         _guard(generation);
+        networkUnavailable = false;
         roomList = (snapshot['rooms'] as List).cast<MatrixJson>();
         notifyListeners();
         return snapshot;
+      } catch (e) {
+        if (generation == _generation && matrixNetworkFailure(e)) {
+          networkUnavailable = true;
+          notifyListeners();
+        }
+        rethrow;
       } finally {
         if (identical(_syncRequest, operation)) _syncRequest = null;
       }
     })();
     return _syncRequest = operation;
+  }
+
+  Future<MatrixJson?> readLocal(
+    String scope, {
+    String? room,
+    String? event,
+  }) async {
+    // Capture the device before waiting: a delayed read must never cross an account change.
+    final generation = _generation, engine = transport;
+    await _localQueue;
+    _guard(generation);
+    final result = await engine.action({
+      'action': 'local_read',
+      'scope': scope,
+      if (room != null) 'room': room,
+      if (event != null) 'event': event,
+    });
+    _guard(generation);
+    return (result['value'] as Map?)?.cast<String, dynamic>();
+  }
+
+  Future<void> writeLocal(
+    String scope,
+    MatrixJson? value, {
+    String? room,
+    String? event,
+  }) {
+    final generation = _generation, engine = transport;
+    // Snapshot mutable UI objects before enqueuing the database write.
+    final snapshot = jsonDecode(jsonEncode(value));
+    final result = _localQueue.catchError((Object _) {}).then((_) async {
+      _guard(generation);
+      await engine.action({
+        'action': 'local_write',
+        'scope': scope,
+        'value': snapshot,
+        if (room != null) 'room': room,
+        if (event != null) 'event': event,
+      });
+      _guard(generation);
+    });
+    _localQueue = result.then<void>(
+      (_) {},
+      onError: (Object _, StackTrace _) {},
+    );
+    return result;
   }
 
   Future<void> refreshRooms() async {
@@ -660,6 +723,7 @@ class MatrixMessaging extends ChangeNotifier {
             final old = _transport;
             _transport = null;
             _credentialOwner = null;
+            networkUnavailable = false;
             error =
                 'This Matrix device session expired. Connect and verify this device again.';
             try {
@@ -695,6 +759,7 @@ class MatrixMessaging extends ChangeNotifier {
     roomList = [];
     connecting = false;
     error = null;
+    networkUnavailable = false;
     try {
       if (logout) {
         await _serializeStorage(() async {
@@ -732,4 +797,14 @@ class MatrixMessaging extends ChangeNotifier {
     unawaited(disconnect());
     super.dispose();
   }
+}
+
+/// Only transport failures enable offline mode; authorization and disk failures
+/// remain errors and must never be mistaken for an unavailable network.
+bool matrixNetworkFailure(Object error) {
+  final message = '$error';
+  return message.contains('RIVER_NETWORK_UNAVAILABLE') ||
+      message.contains('error sending request') ||
+      message.contains('connection error') ||
+      message.contains('operation timed out');
 }

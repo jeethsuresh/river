@@ -1,4 +1,6 @@
+import 'dart:async';
 import 'dart:convert';
+import 'dart:ui' as ui;
 import 'dart:typed_data';
 import 'package:crypto/crypto.dart';
 import 'package:http/http.dart' as http;
@@ -172,6 +174,114 @@ class StickerLibrary {
       utf8.encode(jsonEncode(items.map((s) => s.url).toList())),
     ),
   );
+}
+
+/// Public linked images use the same platform byte store as peer attachments.
+/// They have a separate index/budget so loading images cannot evict files that
+/// this device is advertising to peers. URL identities and bytes are verified.
+class LinkedImageCache {
+  LinkedImageCache(this.store, {this.budget = 128 * 1024 * 1024});
+  final platform.ByteStore store;
+  static Future<LinkedImageCache>? _public;
+  static Future<Uint8List> loadPublic(String url) async {
+    LinkedImageCache cache;
+    try {
+      cache = await (_public ??= platform
+          .createStore('public-linked-images-v1')
+          .then((store) => LinkedImageCache(store)));
+    } catch (_) {
+      _public = null;
+      return downloadMedia(url);
+    }
+    return cache.load(url);
+  }
+
+  final int budget;
+  final _index = <String, Map<String, dynamic>>{};
+  final _pending = <String, Future<Uint8List>>{};
+  Future<void>? _ready;
+  Future<void> _queue = Future.value();
+
+  Future<void> _initialize() => _ready ??= (() async {
+    await store.initialize();
+    final bytes = await store.get('linked-images.json');
+    if (bytes == null) return;
+    final data = jsonDecode(utf8.decode(bytes)) as Map;
+    for (final entry in data.entries) {
+      final record = (entry.value as Map).cast<String, dynamic>();
+      if (RegExp(r'^image-[a-f0-9]{64}$').hasMatch(entry.key as String) &&
+          record['size'] is int &&
+          record['size'] > 0 &&
+          record['size'] <= maxMediaBytes &&
+          record['sha256'] is String &&
+          record['saved_at'] is int) {
+        _index[entry.key as String] = record;
+      }
+    }
+  })();
+
+  Future<Uint8List> load(String url, {http.Client? client}) {
+    if (mediaUri(url) == null) {
+      return Future.error(StateError('Unsupported image link'));
+    }
+    return _pending.putIfAbsent(url, () async {
+      try {
+        final key = 'image-${sha256.convert(utf8.encode(url))}';
+        var usable = true;
+        try {
+          await _initialize();
+          final record = _index[key], bytes = await store.get(key);
+          if (record != null &&
+              bytes != null &&
+              bytes.length == record['size'] &&
+              sha256.convert(bytes).toString() == record['sha256']) {
+            return bytes;
+          }
+        } catch (_) {
+          usable = false;
+        }
+        final bytes = await downloadMedia(url, client: client);
+        final codec = await ui.instantiateImageCodec(bytes);
+        codec.dispose();
+        if (usable && bytes.length <= budget) {
+          final next = _queue.catchError((Object _) {}).then((_) async {
+            var used = _index.entries
+                .where((e) => e.key != key)
+                .fold(0, (int n, e) => n + (e.value['size'] as int));
+            final oldest = _index.keys.where((k) => k != key).toList()
+              ..sort(
+                (a, b) => (_index[a]!['saved_at'] as int).compareTo(
+                  _index[b]!['saved_at'] as int,
+                ),
+              );
+            for (final old in oldest) {
+              if (used + bytes.length <= budget) break;
+              await store.remove(old);
+              used -= _index.remove(old)!['size'] as int;
+            }
+            await store.put(key, bytes);
+            _index[key] = {
+              'size': bytes.length,
+              'sha256': sha256.convert(bytes).toString(),
+              'saved_at': DateTime.now().millisecondsSinceEpoch,
+            };
+            await store.put(
+              'linked-images.json',
+              Uint8List.fromList(utf8.encode(jsonEncode(_index))),
+            );
+          });
+          _queue = next;
+          // An unavailable disk must not hide an image fetched successfully.
+          try {
+            await next;
+          } catch (_) {}
+        }
+        return bytes;
+      } finally {
+        _pending.remove(url);
+      }
+    });
+  }
 }
 
 Future<Uint8List> downloadMedia(String url, {http.Client? client}) async {

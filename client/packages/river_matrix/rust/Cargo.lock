@@ -2836,6 +2836,7 @@ dependencies = [
  "jni",
  "matrix-sdk",
  "matrix-sdk-common",
+ "matrix-sdk-store-encryption",
  "mime",
  "quircs",
  "rustls",
@@ -2845,6 +2846,7 @@ dependencies = [
  "tokio",
  "url",
  "uuid",
+ "zeroize",
 ]
 
 [[package]]

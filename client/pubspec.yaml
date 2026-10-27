@@ -1,7 +1,7 @@
 name: river
 publish_to: none
 description: River — Gravitas spaces and conversations.
-version: 0.9.1+15
+version: 0.10.0+16
 environment:
   sdk: ^3.10.0
 dependencies:

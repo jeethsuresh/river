@@ -154,11 +154,44 @@ Future<void> main() async {
       'Homeserver received plaintext',
     );
     await sync(first, firstSession);
+    final cachedHistory = jsonDecode(await first.history(room: room)) as Json;
+    for (final scope in ['history', 'draft']) {
+      await first.action(
+        payload: jsonEncode({
+          'action': 'local_write',
+          'scope': scope,
+          'room': room,
+          'value': scope == 'history'
+              ? cachedHistory
+              : {'text': 'durable browser draft', 'txn': 'retry-browser'},
+        }),
+      );
+    }
     progress('encrypted IndexedDB reopen');
     final saved = jsonDecode(await first.credentials()) as Json;
     await first.close(logout: false);
     first.dispose();
     first = await open(saved, 'A');
+    // No sync or history HTTP call is allowed before checking restored UI data.
+    for (final scope in ['history', 'draft']) {
+      final record =
+          jsonDecode(
+                await first.action(
+                  payload: jsonEncode({
+                    'action': 'local_read',
+                    'scope': scope,
+                    'room': room,
+                  }),
+                ),
+              )
+              as Json;
+      await verify(
+        scope == 'history'
+            ? jsonEncode(record['value']).contains('browser history before QR')
+            : record['value']['text'] == 'durable browser draft',
+        'IndexedDB $scope was not restored offline',
+      );
+    }
     await sync(first, saved);
     await verify(
       await hasBody(first, room),

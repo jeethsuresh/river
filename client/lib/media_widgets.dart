@@ -1,3 +1,5 @@
+import 'dart:async';
+import 'dart:typed_data';
 import 'dart:math' as math;
 import 'dart:ui' as ui;
 import 'package:file_picker/file_picker.dart';
@@ -47,6 +49,21 @@ class StickerImage extends StatelessWidget {
   );
 }
 
+class LinkedImageScope extends InheritedWidget {
+  const LinkedImageScope({
+    super.key,
+    required this.cache,
+    this.networkAvailable = true,
+    required super.child,
+  });
+  final LinkedImageCache? cache;
+  final bool networkAvailable;
+  @override
+  bool updateShouldNotify(LinkedImageScope oldWidget) =>
+      cache != oldWidget.cache ||
+      networkAvailable != oldWidget.networkAvailable;
+}
+
 class LinkedMedia extends StatefulWidget {
   const LinkedMedia({
     super.key,
@@ -62,10 +79,39 @@ class LinkedMedia extends StatefulWidget {
 
 class _LinkedMediaState extends State<LinkedMedia> {
   bool busy = false;
+  Future<Uint8List>? image;
+  LinkedImageCache? _cache;
+  bool _online = true;
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final scope = context
+        .dependOnInheritedWidgetOfExactType<LinkedImageScope>();
+    final cache = scope?.cache;
+    final online = scope?.networkAvailable ?? true;
+    if (image == null || cache != _cache || (!_online && online)) {
+      _cache = cache;
+      image =
+          cache?.load(widget.url) ?? LinkedImageCache.loadPublic(widget.url);
+    }
+    _online = online;
+  }
+
+  @override
+  void didUpdateWidget(LinkedMedia oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.url != widget.url) {
+      image =
+          _cache?.load(widget.url) ?? LinkedImageCache.loadPublic(widget.url);
+    }
+  }
+
   Future<void> save({bool convert = false}) async {
     setState(() => busy = true);
     try {
-      final bytes = await downloadMedia(widget.url);
+      final bytes =
+          await (_cache?.load(widget.url) ??
+              LinkedImageCache.loadPublic(widget.url));
       // Reject HTML error pages and unsupported image data before saving.
       final codec = await ui.instantiateImageCodec(bytes);
       codec.dispose();
@@ -112,20 +158,48 @@ class _LinkedMediaState extends State<LinkedMedia> {
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          if (widget.sticker)
-            StickerImage(image: NetworkImage(mediaFetchUrl(widget.url)))
-          else
-            ConstrainedBox(
-              constraints: const BoxConstraints(maxHeight: 300, maxWidth: 560),
-              child: Image.network(
-                mediaFetchUrl(widget.url),
-                fit: BoxFit.contain,
-                cacheWidth: 1000,
-                semanticLabel: widget.label,
-                errorBuilder: (_, _, _) =>
-                    const Text('Unable to display this image. Check the link.'),
-              ),
-            ),
+          FutureBuilder<Uint8List>(
+            key: ValueKey(widget.url),
+            future: image,
+            builder: (context, snapshot) {
+              final bytes = snapshot.data;
+              if (bytes == null) {
+                if (!snapshot.hasError) return const Text('Loading image…');
+                return Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text('Image unavailable. Connect to download it.'),
+                    TextButton(
+                      onPressed: () => setState(() {
+                        image =
+                            _cache?.load(widget.url) ??
+                            LinkedImageCache.loadPublic(widget.url);
+                      }),
+                      child: const Text('Retry image'),
+                    ),
+                  ],
+                );
+              }
+              if (widget.sticker) {
+                return StickerImage(image: MemoryImage(bytes));
+              }
+              return ConstrainedBox(
+                constraints: const BoxConstraints(
+                  maxHeight: 300,
+                  maxWidth: 560,
+                ),
+                child: Image.memory(
+                  bytes,
+                  fit: BoxFit.contain,
+                  cacheWidth: 1000,
+                  semanticLabel: widget.label,
+                  errorBuilder: (_, _, _) => const Text(
+                    'Unable to display this image. Check the link.',
+                  ),
+                ),
+              );
+            },
+          ),
           Wrap(
             spacing: 8,
             children: [

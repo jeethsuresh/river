@@ -25,6 +25,7 @@ COPY client/pubspec.yaml client/pubspec.lock ./
 COPY client/packages/river_matrix/pubspec.yaml client/packages/river_matrix/pubspec.lock packages/river_matrix/
 RUN flutter pub get --enforce-lockfile
 COPY client/ ./
+COPY scripts/build-river-web.sh /src/scripts/build-river-web.sh
 RUN cd packages/river_matrix && flutter pub get --enforce-lockfile \
     && cd cargokit/build_tool && dart pub get --enforce-lockfile
 
@@ -42,7 +43,7 @@ FROM flutter-sdk AS matrix-browser-interop-client
 RUN apt-get update && apt-get install -y --no-install-recommends chromium python3 openssl \
     && rm -rf /var/lib/apt/lists/*
 COPY --from=matrix-web-build /out/pkg /src/client/web/pkg
-RUN flutter build web --release --no-pub --no-web-resources-cdn \
+RUN bash /src/scripts/build-river-web.sh --release --no-pub --no-web-resources-cdn \
     --target tool/matrix_web_interop.dart --output /opt/river-matrix-browser
 COPY scripts/run-matrix-browser-interop.sh /opt/run-matrix-browser-interop.sh
 ENV DART_EXECUTABLE=/opt/flutter/bin/cache/dart-sdk/bin/dart
@@ -50,7 +51,7 @@ CMD ["bash", "/opt/run-matrix-browser-interop.sh"]
 
 FROM flutter-sdk AS frontend-build
 COPY --from=matrix-web-build /out/pkg /src/client/web/pkg
-RUN flutter build web --release --no-pub --no-web-resources-cdn
+RUN bash /src/scripts/build-river-web.sh --release --no-pub --no-web-resources-cdn
 
 FROM golang:1.25.2-bookworm AS backend-source
 WORKDIR /src/backend

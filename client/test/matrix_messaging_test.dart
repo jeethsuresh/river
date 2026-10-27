@@ -66,8 +66,22 @@ class FakeMatrixTransport implements MatrixTransport {
     return {'event_id': r'$encrypted'};
   }
 
+  final localValues = <String, MatrixJson>{};
   @override
-  Future<MatrixJson> action(MatrixJson payload) async => {};
+  Future<MatrixJson> action(MatrixJson payload) async {
+    final key = '${payload['scope']}:${payload['room']}:${payload['event']}';
+    if (payload['action'] == 'local_read') return {'value': localValues[key]};
+    if (payload['action'] == 'local_write') {
+      if (payload['value'] == null) {
+        localValues.remove(key);
+      } else {
+        localValues[key] =
+            jsonDecode(jsonEncode(payload['value'])) as MatrixJson;
+      }
+    }
+    return {};
+  }
+
   @override
   Future<MatrixJson> sendAttachment(
     String room,

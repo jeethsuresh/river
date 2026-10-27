@@ -28,7 +28,7 @@ class FlowTransport extends FakeMatrixTransport {
   Future<Json> sync() async {
     syncs++;
     await syncGate?.future;
-    if (offline) throw StateError('offline');
+    if (offline) throw StateError('RIVER_NETWORK_UNAVAILABLE');
     if (delayedPolls > 0) {
       delayedPolls--;
     } else if (nextRooms != null) {
@@ -37,6 +37,9 @@ class FlowTransport extends FakeMatrixTransport {
     }
     return {'rooms': roomList, 'changed': []};
   }
+
+  @override
+  Future<Json> rooms() async => {'rooms': roomList};
 
   @override
   Future<Json> history(String room, String? cursor) async => {
@@ -81,6 +84,9 @@ class FlowTransport extends FakeMatrixTransport {
 
   @override
   Future<Json> action(Json payload) async {
+    if ((payload['action'] as String).startsWith('local_')) {
+      return super.action(payload);
+    }
     actions.add(payload);
     if (payload['action'] == 'join') {
       roomList = [
@@ -263,9 +269,10 @@ void main() {
       final engine = FlowTransport()..offline = true;
       final matrix = await device(engine);
       await matrix.bind(matrixProfile);
-      expect(matrix.connected, false);
+      expect(matrix.connected, true);
+      expect(matrix.networkUnavailable, true);
       engine.offline = false;
-      await matrix.bind(matrixProfile);
+      await matrix.syncNow();
       expect(matrix.connected, true);
       expect(engine.syncs, 2);
       matrix.dispose();
