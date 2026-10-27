@@ -19,6 +19,10 @@ rootProject.allprojects {
     repositories {
         google()
         mavenCentral()
+        maven {
+            url 'https://raw.githubusercontent.com/rustls/rustls-platform-verifier/maven-archive/android-release-support/maven/'
+            content { includeGroup 'org.rustls' }
+        }
     }
 }
 
@@ -46,7 +50,18 @@ android {
 
     defaultConfig {
         minSdkVersion 19
+        consumerProguardFiles 'consumer-rules.pro'
     }
+}
+
+// The Kotlin verifier must match the Rust dependency, including after upgrades.
+def verifierLock = file('../rust/Cargo.lock').getText('UTF-8')
+def verifierVersion = (verifierLock =~ /(?m)^name = "rustls-platform-verifier-android"\r?\nversion = "([^"]+)"/)
+if (!verifierVersion.find()) {
+    throw new GradleException('Android certificate verifier is missing from Cargo.lock')
+}
+dependencies {
+    implementation "org.rustls:rustls-platform-verifier:${verifierVersion.group(1)}"
 }
 
 apply from: "../cargokit/gradle/plugin.gradle"

@@ -1,10 +1,8 @@
 {
   "schemaVersion": 1,
-  "version": "0.9.0",
-  "versionCode": 14,
+  "version": "0.9.1",
+  "versionCode": 15,
   "changes": [
-    "Start conversations with selected members of a space or group, even when they are not contacts.",
-    "Explore the groups and subgroups that contain a conversation's current participants.",
-    "Conversations follow their participant subgroup as people join or leave, while their visibility and history keep their existing permissions."
+    "Fix Android Matrix messaging sign-in after browser approval by initializing Android certificate verification."
   ]
 }

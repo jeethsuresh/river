@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Check the release's signature, immutable certificate, package and source version."""
-import argparse, hashlib, os, pathlib, re, subprocess
+import argparse, hashlib, os, pathlib, re, subprocess, zipfile
 
 root = pathlib.Path(__file__).resolve().parents[1]
 p = argparse.ArgumentParser()
@@ -25,5 +25,17 @@ if not minimum or minimum[1] != '24':
     raise SystemExit('Unexpected minimum Android version.')
 if re.search(r"application-debuggable", metadata):
     raise SystemExit('Store APK must not be debuggable.')
+with zipfile.ZipFile(apk) as archive:
+    names = archive.namelist()
+    if any('river_matrix_test' in name for name in names):
+        raise SystemExit('Store APK must not contain the debug Matrix test trust anchor.')
+    dex = b''.join(archive.read(name) for name in names if re.fullmatch(r'classes\d*\.dex', name))
+    for component in (b'Lorg/rustls/platformverifier/CertificateVerifier;',
+                      b'Lcom/flutter_rust_bridge/river_matrix/RiverMatrixPlugin;'):
+        if component not in dex:
+            raise SystemExit('Store APK is missing Android Matrix certificate verification.')
+    native = [name for name in names if name.startswith('lib/') and name.endswith('/libriver_matrix_core.so')]
+    if not native or any(b'Java_com_flutter_1rust_1bridge_river_1matrix_RiverMatrixPlugin_initialize' not in archive.read(name) for name in native):
+        raise SystemExit('Store APK is missing the Android Matrix initialization entry point.')
 print('Verified River', source[1], '/ code', source[2], '/ permanent certificate', expected)
 print('APK SHA256:', hashlib.sha256(apk.read_bytes()).hexdigest())

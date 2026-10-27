@@ -10,6 +10,7 @@ import time
 parser = argparse.ArgumentParser()
 parser.add_argument('--apk', required=True, type=Path)
 parser.add_argument('--avd', required=True)
+parser.add_argument('--matrix-apk', required=True, type=Path)
 args = parser.parse_args()
 sdk = Path(os.environ['ANDROID_HOME'])
 adb = str(sdk / 'platform-tools/adb')
@@ -34,7 +35,7 @@ def resumed():
 
 
 def wait_resumed():
-    for _ in range(40):
+    for _ in range(120):
         activity = resumed()
         if activity:
             return activity
@@ -42,11 +43,29 @@ def wait_resumed():
     raise AssertionError('River did not become the resumed Android activity')
 
 
+def background():
+    # HOME key injection can return before the launcher transition completes,
+    # letting a queued HOME event hide a just-opened browser callback.
+    device('shell', 'am', 'start', '-W', '-a', 'android.intent.action.MAIN',
+           '-c', 'android.intent.category.HOME')
+    for _ in range(120):
+        if resumed() is None:
+            time.sleep(.25)
+            if resumed() is None:
+                return
+        time.sleep(.25)
+    raise AssertionError('River did not finish moving to the background')
+
+
 def open_link(kind):
     result = device('shell', 'am', 'start', '-W', '-a', 'android.intent.action.VIEW',
                     '-c', 'android.intent.category.BROWSABLE', '-d', 'river://auth/' + kind)
     assert 'Error:' not in result and 'Status: ok' in result, result
-    return wait_resumed()
+    try:
+        return wait_resumed()
+    except AssertionError:
+        print('Android browser return launch result: ' + result, flush=True)
+        raise
 
 
 with (output / 'emulator.log').open('w') as log:
@@ -68,12 +87,58 @@ with (output / 'emulator.log').open('w') as log:
         else:
             raise AssertionError('Android emulator boot timed out')
         device('shell', 'input', 'keyevent', '82')
+        from android_matrix_fixture import Fixture, FIXTURE
+        with Fixture() as fixture:
+            device('shell', 'am', 'force-stop', package)
+            # The verifier uses AndroidCAStore directly, rather than app XML
+            # trust overrides. Install one CA only in this disposable emulator.
+            device('root')
+            device('wait-for-device')
+            assert device('shell', 'id', '-u').strip() == '0'
+            ca = FIXTURE / 'trusted-ca.pem'
+            name = subprocess.check_output([
+                'openssl', 'x509', '-in', str(ca), '-subject_hash_old', '-noout',
+            ], text=True).strip() + '.0'
+            # Android sets the per-user directory at app startup. Retain the
+            # Conscrypt default location too for system/older runtime peers.
+            for directory in ['/data/misc/user/0/cacerts-added', '/data/misc/keychain/cacerts-added']:
+                device('shell', 'mkdir', '-p', directory)
+                device('push', str(ca), directory + '/' + name)
+                device('shell', 'chmod', '0755', directory)
+                device('shell', 'chmod', '0644', directory + '/' + name)
+                device('shell', 'chown', '-R', 'system:system', directory)
+                device('shell', 'restorecon', '-RF', directory)
+            device('install', '-r', str(args.matrix_apk.resolve()), timeout=120)
+            device('shell', 'pm', 'clear', package)  # Disposable emulator only.
+            for port in [8448, 8449]:
+                device('reverse', f'tcp:{port}', f'tcp:{port}')
+            for marker in ['RIVER_ANDROID_MATRIX_AUTH_SAVED', 'RIVER_ANDROID_MATRIX_AUTH_PASS']:
+                device('logcat', '-c')
+                device('shell', 'am', 'start', '-W', '-n', component)
+                app_pid = device('shell', 'pidof', package).strip()
+                assert app_pid, 'Matrix test app exited during startup'
+                deadline = time.monotonic() + 150
+                while time.monotonic() < deadline:
+                    logs = device('logcat', '-d', '--pid=' + app_pid)
+                    assert 'RIVER_ANDROID_MATRIX_AUTH_FAIL' not in logs, logs
+                    assert 'FATAL EXCEPTION' not in logs, logs
+                    if marker in logs:
+                        break
+                    time.sleep(.5)
+                else:
+                    raise AssertionError('Matrix Android authentication timed out: ' + logs)
+                print('ANDROID MATRIX PASS ' + marker, flush=True)
+                # A new process must recover secure credentials and the SQLite
+                # device, without repeating the consumed browser login token.
+                device('shell', 'am', 'force-stop', package)
+            fixture.verify()
+        # Also exercise browser returns in the normal River application.
         device('install', '-r', str(args.apk.resolve()), timeout=120)
         device('logcat', '-c')
         device('shell', 'am', 'start', '-W', '-n', component)
         original = wait_resumed()
         for kind in ['native', 'matrix']:
-            device('shell', 'input', 'keyevent', '3')
+            background()
             assert open_link(kind) == original, 'Warm return created a second River activity'
             print('ANDROID AUTH RETURN PASS warm ' + kind, flush=True)
         for kind in ['native', 'matrix']:
@@ -90,6 +155,12 @@ with (output / 'emulator.log').open('w') as log:
         ]), 'River crashed or tried to navigate to an auth callback route'
     except BaseException:
         log.flush()
+        try:
+            app_pid = device('shell', 'pidof', package, check=False).strip()
+            if app_pid:
+                print(device('logcat', '-d', '--pid=' + app_pid), flush=True)
+        except subprocess.TimeoutExpired:
+            pass
         print('Android emulator diagnostics:', flush=True)
         print('\n'.join((output / 'emulator.log').read_text().splitlines()[-100:]), flush=True)
         try:

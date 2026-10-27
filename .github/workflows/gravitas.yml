@@ -83,6 +83,8 @@ jobs:
           test "$(git -C "$RUNNER_TEMP/river-flutter" rev-parse HEAD)" = abaf9c523780a608bd46686fd5e53740a07077f8
       - name: Install pinned Rust
         run: bash scripts/matrix-toolchain.sh
+      - name: Prepare isolated Android HTTPS authentication fixture
+        run: python3 scripts/android_matrix_fixture.py
       - name: Build shared Android client
         working-directory: client
         env:
@@ -93,7 +95,10 @@ jobs:
           flutter config --no-analytics
           flutter pub get --enforce-lockfile
           flutter build apk --debug --no-pub
-      - name: Verify warm and cold Android authentication returns
+          cp build/app/outputs/flutter-apk/app-debug.apk "$RUNNER_TEMP/river-auth-return.apk"
+          flutter build apk --debug --no-pub --target tool/matrix_android_auth_smoke.dart
+          cp build/app/outputs/flutter-apk/app-debug.apk "$RUNNER_TEMP/river-matrix-auth.apk"
+      - name: Verify Android auth returns and Matrix login across a cold restart
         timeout-minutes: 12
         run: |
           export JAVA_HOME="$JAVA_HOME_17_X64"
@@ -101,7 +106,6 @@ jobs:
           export ANDROID_USER_HOME="$RUNNER_TEMP/river-android-user"
           export ANDROID_AVD_HOME="$ANDROID_USER_HOME/avd"
           mkdir -p "$ANDROID_AVD_HOME"
-          cp client/build/app/outputs/flutter-apk/app-debug.apk "$RUNNER_TEMP/river-auth-return.apk"
           ./client/android/gradlew --stop
           # The installed APK is the tested artifact; compiler intermediates are
           # no longer needed and otherwise compete with the emulator for disk.
@@ -113,7 +117,7 @@ jobs:
           # Keep emulator discovery independent of the command-line tools'
           # default preferences directory, which differs between SDK releases.
           printf 'avd.ini.encoding=UTF-8\npath=%s\ntarget=android-35\n' "$ANDROID_AVD_HOME/river-auth-return.avd" > "$ANDROID_AVD_HOME/river-auth-return.ini"
-          python3 scripts/test-android-auth-return.py --apk "$RUNNER_TEMP/river-auth-return.apk" --avd river-auth-return
+          python3 scripts/test-android-auth-return.py --apk "$RUNNER_TEMP/river-auth-return.apk" --matrix-apk "$RUNNER_TEMP/river-matrix-auth.apk" --avd river-auth-return
   image:
     needs: [android, matrix-platforms, matrix-interop]
     runs-on: ubuntu-24.04
