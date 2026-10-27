@@ -16,5 +16,12 @@
     "apk",
     "--release"
   ],
-  "release_notes": "docs/RELEASE_NOTES.md"
+  "release_notes": "docs/RELEASE_NOTES.md",
+  "additional_verification": [
+    [
+      "python3",
+      "scripts/verify-android.py",
+      "client/build/app/outputs/flutter-apk/app-release.apk"
+    ]
+  ]
 }
