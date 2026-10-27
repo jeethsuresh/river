@@ -65,7 +65,9 @@ void main() {
         for (final id in ['a', 'b']) {'id': id, 'membership': 'join'},
       ];
       final first = api.open('a');
+      await Future<void>.delayed(Duration.zero);
       final second = api.open('b');
+      await Future<void>.delayed(Duration.zero);
       final current = api.open('a');
       await Future<void>.delayed(Duration.zero);
       http.Response page(String id) => http.Response(

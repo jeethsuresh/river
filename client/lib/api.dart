@@ -627,8 +627,9 @@ class RiverApi extends ChangeNotifier {
       if (matrixEnabled) {
         unawaited(
           matrix.bind(next).then((_) {
-            if (accountKey == "${next['issuer']}|${next['sub']}")
+            if (accountKey == "${next['issuer']}|${next['sub']}") {
               matrix.active = active;
+            }
           }),
         );
       }
@@ -822,8 +823,9 @@ class RiverApi extends ChangeNotifier {
       notifyListeners();
       if (account == accountKey &&
           selectedId == selected &&
-          selectionRevision == _selectionRevision)
+          selectionRevision == _selectionRevision) {
         await _saveHistory(selectedId);
+      }
       if (roster && matrixConnected && wire != null) {
         unawaited(_loadRoster(selectedId, wire, account, selectionRevision));
       }
@@ -853,7 +855,7 @@ class RiverApi extends ChangeNotifier {
       RiverPerformance.measure('conversation.open', () => _open(id));
 
   Future<void> _open(String? id) async {
-    _selectionRevision++;
+    final revision = ++_selectionRevision;
     _historyRevision++;
     selected = id;
     _matrixEvents = [];
@@ -869,7 +871,11 @@ class RiverApi extends ChangeNotifier {
         cacheError = 'Some saved messages could not be opened on this device.';
       }
     }
-    if (account != accountKey || id != selected) return;
+    if (account != accountKey ||
+        id != selected ||
+        revision != _selectionRevision) {
+      return;
+    }
     notifyListeners();
     try {
       // New groups need their delegated metadata once. Known conversations can
