@@ -102,13 +102,11 @@ mod tests {
         .await
     }
 
-    #[tokio::test]
-    async fn encrypted_history_and_drafts_survive_sqlite_reopen_without_network() -> Result<()> {
+    async fn exercise_sqlite_reopen(path: &std::path::Path) -> Result<()> {
         let _ = rustls::crypto::ring::default_provider().install_default();
-        let path = std::env::temp_dir().join(format!("river-local-{}", uuid::Uuid::new_v4()));
         let seed = Client::builder()
             .homeserver_url("https://offline.invalid")
-            .sqlite_store(&path, Some(PASSPHRASE))
+            .sqlite_store(path, Some(PASSPHRASE))
             .build()
             .await?;
         let room = room_id!("!cached:offline.invalid");
@@ -118,7 +116,7 @@ mod tests {
             .insert(room.to_owned(), RoomInfo::new(room, RoomState::Joined));
         seed.state_store().save_changes(&changes).await?;
         drop(seed);
-        let core = open(&path).await?;
+        let core = open(path).await.context("Open seeded SQLite store")?;
         let history = json!({"events":[{"event_id":"$old","content":{"body":"distinct-private-history-9dcac9"}}],"next_cursor":"older"});
         let draft = json!({"text":"distinct-private-draft-f25c2b","txn":"stable-retry-id"});
         for (scope, value) in [("history", history.clone()), ("draft", draft.clone())] {
@@ -129,7 +127,7 @@ mod tests {
         }
         core.close(false).await?;
         drop(core);
-        let restored = open(&path).await?;
+        let restored = open(path).await.context("Reopen cached SQLite store")?;
         for (scope, expected) in [("history", history), ("draft", draft)] {
             let result: Value = serde_json::from_str(
                 &restored
@@ -161,10 +159,23 @@ mod tests {
         );
         restored.close(false).await?;
         drop(restored);
-        for file in std::fs::read_dir(&path)? {
+        Ok(())
+    }
+
+    #[test]
+    fn encrypted_history_and_drafts_survive_sqlite_reopen_without_network() -> Result<()> {
+        let path = std::env::temp_dir().join(format!("river-local-{}", uuid::Uuid::new_v4()));
+        {
+            // SDK background tasks can retain SQLite pool handles until their
+            // runtime stops. Drain them before inspecting/removing the fixture;
+            // Windows correctly rejects deletion while those handles are open.
+            let runtime = tokio::runtime::Runtime::new()?;
+            runtime.block_on(exercise_sqlite_reopen(&path))?;
+        }
+        for file in std::fs::read_dir(&path).context("Inspect SQLite fixture directory")? {
             let file = file?.path();
             if file.is_file() {
-                let bytes = std::fs::read(&file)?;
+                let bytes = std::fs::read(&file).context("Inspect SQLite fixture file")?;
                 for secret in [
                     b"distinct-private-history-9dcac9".as_slice(),
                     b"distinct-private-draft-f25c2b".as_slice(),
@@ -176,7 +187,7 @@ mod tests {
                 }
             }
         }
-        std::fs::remove_dir_all(path)?;
+        std::fs::remove_dir_all(path).context("Remove closed SQLite fixture")?;
         Ok(())
     }
 }
