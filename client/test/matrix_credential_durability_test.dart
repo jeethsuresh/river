@@ -68,7 +68,7 @@ final sessionKey =
 Future<MatrixMessaging> restore(
   MemoryMatrixStorage storage,
   RotatingDevice device, {
-  bool connected = true,
+  bool failedFirstSync = false,
 }) async {
   storage.values.putIfAbsent(
     sessionKey,
@@ -92,11 +92,43 @@ Future<MatrixMessaging> restore(
     syncEnabled: false,
   );
   await matrix.bind(matrixProfile);
-  expect(matrix.connected, connected);
+  if (failedFirstSync) {
+    // Restore now publishes local state before starting the remote poll. Exercise
+    // that first poll explicitly, then simulate the device being reopened.
+    await expectLater(matrix.syncNow(), throwsStateError);
+  }
+  expect(matrix.connected, true);
   return matrix;
 }
 
 void main() {
+  test(
+    'restoring a local device does not wait for its first remote poll',
+    () async {
+      final storage = MemoryMatrixStorage();
+      final device = RotatingDevice()..pendingSync = Completer<void>();
+      storage.values[sessionKey] = jsonEncode({
+        'homeserver': matrixProfile['issuer'],
+        'user_id': matrixProfile['user_id'],
+        'store': 'same-private-store',
+        'store_key': 'same-private-key',
+        'session': device.session,
+      });
+      final matrix = MatrixMessaging(
+        request: (_, {method = 'GET', body}) async => {},
+        changed: () {},
+        storage: storage,
+        factory: (_) async => device,
+      );
+      await matrix.bind(matrixProfile).timeout(const Duration(seconds: 1));
+      expect(matrix.connected, true);
+      expect(device.pendingSync!.isCompleted, false);
+      matrix.dispose();
+      device.pendingSync!.complete();
+      await Future<void>.delayed(Duration.zero);
+    },
+  );
+
   for (final phase in ['restore', 'link']) {
     test(
       '$phase retries a rotated first sync after storage recovers',
@@ -143,7 +175,13 @@ void main() {
           storeLocation: (name) async => name,
         );
         await matrix.bind(matrixProfile);
-        if (phase == 'link') await matrix.connect();
+        if (phase == 'link') {
+          await matrix.connect();
+        } else {
+          expect(matrix.connected, true);
+          await expectLater(matrix.syncNow(), throwsStateError);
+          await matrix.disconnect();
+        }
         expect(matrix.connected, false);
         final original = (jsonDecode(storage.values[sessionKey]!) as Map);
         expect(original['session'], 'original-device-session');
@@ -178,7 +216,7 @@ void main() {
     () async {
       final storage = FailingSessionStorage()..failAt = 1;
       final device = RotatingDevice()..failSyncAfterRotation = true;
-      final matrix = await restore(storage, device, connected: false);
+      final matrix = await restore(storage, device, failedFirstSync: true);
       storage.failAt = null;
       await matrix.disconnect(logout: true);
       await matrix.bind(matrixProfile);
@@ -193,7 +231,7 @@ void main() {
     () async {
       final storage = MemoryMatrixStorage();
       final device = RotatingDevice()..failSyncAfterRotation = true;
-      final matrix = await restore(storage, device, connected: false);
+      final matrix = await restore(storage, device, failedFirstSync: true);
       expect(
         (jsonDecode(storage.values[sessionKey]!) as Map)['session'],
         'rotated-before-sync-failure',

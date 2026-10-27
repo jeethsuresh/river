@@ -1,11 +1,10 @@
 {
   "schemaVersion": 1,
-  "version": "0.10.0",
-  "versionCode": 16,
+  "version": "0.10.1",
+  "versionCode": 17,
   "changes": [
-    "Open previously viewed rooms, chat history and threads without a network connection.",
-    "Keep room drafts and message retry details on this device after restarting River.",
-    "Show a network unavailable banner and refresh saved conversations when the connection returns.",
-    "Cache linked images and GIFs on this device beside peer attachments for offline viewing."
+    "Open conversations directly without waiting for unrelated account refreshes.",
+    "Show acknowledged messages immediately and restore the local Matrix device before network sync finishes.",
+    "Load the web app with compressed assets and cache revalidation; add local performance diagnostics."
   ]
 }
