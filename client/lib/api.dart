@@ -904,6 +904,7 @@ class RiverApi extends ChangeNotifier {
   }
 
   Future<void> messageFriend(String person) async {
+    final account = accountKey;
     if (matrixConnected &&
         !friends.any((f) => f['user_id'] == userId(person))) {
       final result = await matrix.transport.action({
@@ -912,6 +913,7 @@ class RiverApi extends ChangeNotifier {
       });
       await matrix.refreshRooms();
       await refresh();
+      if (account != accountKey) throw ApiException(409, 'session_changed');
       final room = groups
           .where((g) => g['room_id'] == result['room_id'])
           .firstOrNull;
@@ -927,11 +929,31 @@ class RiverApi extends ChangeNotifier {
     if (matrixConnected) {
       // The new local room must first arrive in the Matrix sync before use.
       await matrix.syncNow();
-      final wire = matrixRoom(result['id'] as String);
-      if (wire != null) {
+      final wire =
+          result['room_id'] as String? ?? matrixRoom(result['id'] as String);
+      if (wire == null) {
+        throw StateError(
+          'This conversation is still syncing. Try again in a moment.',
+        );
+      }
+      await matrix.ensureJoinedRoom(wire);
+      if (account != accountKey) throw ApiException(409, 'session_changed');
+      final room = matrix.roomList
+          .where((r) => r['room_id'] == wire)
+          .firstOrNull;
+      if (room?['encrypted'] is! bool || room?['can_encrypt'] is! bool) {
+        throw StateError(
+          'This conversation is still syncing. Try again in a moment.',
+        );
+      }
+      // Existing DMs retain their encryption policy and ACL. Only participants
+      // allowed by the SDK's synced power levels can enable encryption.
+      if (room!['encrypted'] == false && room['can_encrypt'] == true) {
         await matrix.transport.action({'action': 'encrypt', 'room': wire});
+        await matrix.refreshRooms();
       }
     }
+    if (account != accountKey) throw ApiException(409, 'session_changed');
     await open(result['id'] as String);
   }
 

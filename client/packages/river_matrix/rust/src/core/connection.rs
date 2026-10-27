@@ -412,11 +412,24 @@ impl MatrixCore {
             }
             "direct" => {
                 let user = UserId::parse(text("user")?)?;
-                let room = match self.client.get_dm_room(&user) {
-                    Some(room) => room,
-                    None => self.client.create_dm(&user).await.map_err(sdk_error)?,
+                let (room, created) = match self.client.get_dm_room(&user) {
+                    Some(room) => (room, false),
+                    None => (self.client.create_dm(&user).await.map_err(sdk_error)?, true),
                 };
-                room.enable_encryption().await.map_err(sdk_error)?;
+                room.request_encryption_state().await.map_err(sdk_error)?;
+                if created {
+                    // SDK create_dm sends encryption in initial_state. Never
+                    // accept a new plaintext room if the server omitted it.
+                    ensure!(
+                        room.encryption_state().is_encrypted(),
+                        "New direct rooms must be encrypted"
+                    );
+                } else if !room.encryption_state().is_encrypted() {
+                    let power = room.power_levels_or_default().await;
+                    if power.user_can_send_state(&self.own_user, StateEventType::RoomEncryption) {
+                        room.enable_encryption().await.map_err(sdk_error)?;
+                    }
+                }
                 return Ok(json!({"room_id": room.room_id()}).to_string());
             }
             "read" => {
