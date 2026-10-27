@@ -129,8 +129,7 @@ func (s *server) matrixCallback(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, s.auth.AppURL+"/?matrixLink="+url.QueryEscape(id), http.StatusSeeOther)
 		return
 	}
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	w.Write([]byte("<!doctype html><html><meta name=viewport content='width=device-width,initial-scale=1'><title>River sign-in</title><p>Matrix sign-in finished. Return to River to continue.</p></html>"))
+	returnToApp(w, "matrix", "Matrix sign-in finished")
 }
 
 func (s *server) matrixPoll(w http.ResponseWriter, r *http.Request, session gravitas.AppSession) {

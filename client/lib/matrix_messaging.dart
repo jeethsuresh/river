@@ -11,15 +11,12 @@ import 'package:url_launcher/url_launcher.dart';
 import 'matrix_store_location.dart';
 
 typedef MatrixJson = Map<String, dynamic>;
-typedef MatrixRequest = Future<MatrixJson> Function(
-  String path, {
-  String method,
-  MatrixJson? body,
-});
+typedef MatrixRequest =
+    Future<MatrixJson> Function(String path, {String method, MatrixJson? body});
 
-String _randomSecret() =>
-    base64UrlEncode(List.generate(32, (_) => Random.secure().nextInt(256)))
-        .replaceAll('=', '');
+String _randomSecret() => base64UrlEncode(
+  List.generate(32, (_) => Random.secure().nextInt(256)),
+).replaceAll('=', '');
 
 abstract interface class MatrixTransport {
   Future<MatrixJson> login(String token);
@@ -54,9 +51,8 @@ abstract interface class MatrixTransport {
   Future<void> close(bool logout);
 }
 
-typedef MatrixFactory = Future<MatrixTransport> Function(
-  MatrixJson configuration,
-);
+typedef MatrixFactory =
+    Future<MatrixTransport> Function(MatrixJson configuration);
 
 class RustMatrixTransport implements MatrixTransport {
   RustMatrixTransport(this.engine);
@@ -231,6 +227,7 @@ class MatrixMessaging extends ChangeNotifier {
   bool get connected => _transport != null;
   int _generation = 0, _revokeBefore = -1;
   bool _syncing = false;
+  Future<MatrixJson>? _syncRequest;
   Future<void> _storageQueue = Future.value();
 
   String? get accountKey =>
@@ -262,11 +259,13 @@ class MatrixMessaging extends ChangeNotifier {
 
   Future<void> bind(MatrixJson profile) async {
     final account = '${profile['issuer']}|${profile['sub']}';
-    if (accountKey == account) return;
+    if (accountKey == account && (connected || connecting)) return;
     await disconnect();
     _profile = Map.of(profile);
     final generation = _generation;
     if (profile['user_id'] is! String || profile['issuer'] is! String) return;
+    connecting = true;
+    var finishingLink = false;
     final sessionKey = _sessionKey;
     try {
       final saved = await storage.read(sessionKey);
@@ -311,6 +310,7 @@ class MatrixMessaging extends ChangeNotifier {
         if (pending != null) {
           final data = (jsonDecode(pending) as Map).cast<String, dynamic>();
           if (!kIsWeb || Uri.base.queryParameters['matrixLink'] == data['id']) {
+            finishingLink = true;
             unawaited(_finishLink(data, generation));
           }
         }
@@ -319,6 +319,11 @@ class MatrixMessaging extends ChangeNotifier {
       if (generation == _generation) {
         error =
             'Matrix messaging could not reconnect. Connect again to continue.';
+        notifyListeners();
+      }
+    } finally {
+      if (generation == _generation && !finishingLink) {
+        connecting = false;
         notifyListeners();
       }
     }
@@ -470,16 +475,51 @@ class MatrixMessaging extends ChangeNotifier {
   }
 
   Future<void> syncNow() async {
-    final generation = _generation;
-    await transport.sync();
-    _guard(generation);
-    final credentials = await transport.credentials();
-    _guard(generation);
-    if (_configuration != null) {
-      _configuration!['session'] = credentials;
-      await _persist(generation);
+    await _syncOnce(_generation);
+    changed();
+  }
+
+  Future<void> ensureJoinedRoom(String room) async {
+    bool joined() =>
+        roomList.any((r) => r['room_id'] == room && r['membership'] == 'join');
+    // An already-running poll can finish just before the create/join mutation.
+    // Allow the next poll to bring that room into the local SDK before using it.
+    for (var attempt = 0; attempt < 2 && !joined(); attempt++) {
+      await _syncOnce(_generation);
     }
-    await refreshRooms();
+    if (!joined()) {
+      throw StateError(
+        'This conversation is still syncing. Try again in a moment.',
+      );
+    }
+  }
+
+  // Foreground mutations share the current long poll instead of queuing a
+  // second full poll behind it. There is one credential write per result.
+  Future<MatrixJson> _syncOnce(int generation) {
+    final pending = _syncRequest;
+    if (pending != null) return pending;
+    final engine = transport;
+    late final Future<MatrixJson> operation;
+    operation = (() async {
+      try {
+        final snapshot = await engine.sync();
+        _guard(generation);
+        final credentials = await engine.credentials();
+        _guard(generation);
+        if (credentials != _configuration?['session']) {
+          _configuration!['session'] = credentials;
+          await _persist(generation);
+        }
+        _guard(generation);
+        roomList = (snapshot['rooms'] as List).cast<MatrixJson>();
+        notifyListeners();
+        return snapshot;
+      } finally {
+        if (identical(_syncRequest, operation)) _syncRequest = null;
+      }
+    })();
+    return _syncRequest = operation;
   }
 
   Future<void> refreshRooms() async {
@@ -510,15 +550,7 @@ class MatrixMessaging extends ChangeNotifier {
     try {
       while (!_disposed && _active && connected && generation == _generation) {
         try {
-          final snapshot = await transport.sync();
-          _guard(generation);
-          roomList = (snapshot['rooms'] as List).cast<MatrixJson>();
-          final credentials = await transport.credentials();
-          _guard(generation);
-          if (credentials != _configuration?['session']) {
-            _configuration!['session'] = credentials;
-            await _persist(generation);
-          }
+          final snapshot = await _syncOnce(generation);
           error = null;
           backoff = 1;
           notifyListeners();
@@ -531,7 +563,8 @@ class MatrixMessaging extends ChangeNotifier {
           if ('$e'.contains('RIVER_MATRIX_SESSION_EXPIRED')) {
             final old = _transport;
             _transport = null;
-            error = 'This Matrix device session expired. Connect and verify this device again.';
+            error =
+                'This Matrix device session expired. Connect and verify this device again.';
             try {
               await old?.close(false);
             } catch (_) {}
@@ -551,6 +584,7 @@ class MatrixMessaging extends ChangeNotifier {
   }
 
   Future<void> disconnect({bool logout = false}) async {
+    _syncRequest = null;
     final sessionKey = _profile == null ? null : _sessionKey;
     final pendingKey = _profile == null ? null : _pendingKey;
     _generation++;

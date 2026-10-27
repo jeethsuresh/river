@@ -50,6 +50,7 @@ class RiverApi extends ChangeNotifier {
     MatrixFactory? matrixFactory,
     MatrixStorage? matrixStorage,
     bool? matrixEnabled,
+    this.authLaunch,
   }) : client = client ?? http.Client(),
        liveEnabled = live ?? client == null,
        matrixEnabled = matrixEnabled ?? (live ?? client == null),
@@ -57,6 +58,9 @@ class RiverApi extends ChangeNotifier {
        _matrixStorage = matrixStorage;
   final bool liveEnabled;
   final bool matrixEnabled;
+  final Future<bool> Function(Uri)? authLaunch;
+  Future<void>? _nativeExchange;
+  bool _signingIn = false;
   final MatrixFactory? _matrixFactory;
   final MatrixStorage? _matrixStorage;
   MatrixMessaging? _matrix;
@@ -364,7 +368,19 @@ class RiverApi extends ChangeNotifier {
   }
 
   Future<void> boot() async {
-    if (!kIsWeb) token = await storage.read(key: 'river_session');
+    if (!kIsWeb) {
+      token = await storage.read(key: 'river_session');
+      final pending = await storage.read(key: 'river_native_pending');
+      if (pending != null) {
+        try {
+          await _exchangeNative(
+            (jsonDecode(pending) as Map).cast<String, dynamic>(),
+          );
+        } catch (e) {
+          error = '$e';
+        }
+      }
+    }
     try {
       final config = await request('/auth/gravitas/config');
       if (config['defaultDomain'] is String) {
@@ -407,7 +423,16 @@ class RiverApi extends ChangeNotifier {
     try {
       final result = await request('/api/overview');
       if (account != accountKey) return;
+      final selectedWire = selected == null ? null : matrixRoom(selected!);
       groups = _matrixGroups((result['groups'] as List).cast<Json>());
+      // A native Matrix room may subsequently acquire its delegated River ID.
+      // Keep the open conversation when that metadata arrives.
+      if (selectedWire != null) {
+        selected =
+            groups.where((g) => g['room_id'] == selectedWire).firstOrNull?['id']
+                as String? ??
+            selected;
+      }
       await files?.setScopes([
         for (final g in groups.where((g) => g['membership'] == 'join'))
           FileScope('room', g['id'] as String),
@@ -462,15 +487,12 @@ class RiverApi extends ChangeNotifier {
             (g) => g['id'] == selectedId && g['membership'] == 'join',
           )) {
         final wire = matrixRoom(selectedId);
+        if (matrixConnected && wire != null) {
+          await matrix.ensureJoinedRoom(wire);
+        }
         final data = matrixConnected && wire != null
             ? await matrix.transport.history(wire, null)
             : await request('/api/groups/$selectedId/events');
-        if (matrixConnected && wire != null) {
-          final roster = await matrix.transport.members(wire);
-          if (account == accountKey && selectedId == selected) {
-            group(selectedId)?['members'] = roster['members'];
-          }
-        }
         if (account == accountKey && selectedId == selected) {
           final latest = (data['events'] as List).cast<Json>();
           final initial = events.isEmpty;
@@ -481,6 +503,15 @@ class RiverApi extends ChangeNotifier {
           if (initial || (!overlap && latest.isNotEmpty)) {
             nextCursor = data['next_cursor'] as String?;
           }
+        }
+        if (matrixConnected && wire != null) {
+          // A roster failure must not discard a successfully fetched timeline.
+          try {
+            final roster = await matrix.transport.members(wire);
+            if (account == accountKey && selectedId == selected) {
+              group(selectedId)?['members'] = roster['members'];
+            }
+          } catch (_) {}
         }
       }
       if (liveEnabled) {
@@ -526,6 +557,20 @@ class RiverApi extends ChangeNotifier {
     String? username,
     bool register = false,
   }) async {
+    if (_signingIn) return;
+    _signingIn = true;
+    try {
+      await _login(next: next, username: username, register: register);
+    } finally {
+      _signingIn = false;
+    }
+  }
+
+  Future<void> _login({
+    String? next,
+    String? username,
+    required bool register,
+  }) async {
     if (!register) username ??= user?['user_id'] as String?;
     if (kIsWeb) {
       await launchUrl(
@@ -558,35 +603,124 @@ class RiverApi extends ChangeNotifier {
     );
     pairingLabel = pair['label'] as String;
     notifyListeners();
-    await launchUrl(
-      Uri.parse(pair['url'] as String),
-      mode: LaunchMode.externalApplication,
+    final pending = <String, dynamic>{
+      'id': pair['id'],
+      'verifier': proof,
+      'label': pair['label'],
+      'expires_at': DateTime.now()
+          .add(const Duration(minutes: 5))
+          .millisecondsSinceEpoch,
+    };
+    await _sessionStorage(
+      () => storage.write(
+        key: 'river_native_pending',
+        value: jsonEncode(pending),
+      ),
     );
     try {
-      for (var attempt = 0; attempt < 150; attempt++) {
-        await Future<void>.delayed(const Duration(seconds: 2));
-        final result = await request(
-          '/api/native/session',
-          method: 'POST',
-          body: {'id': pair['id'], 'verifier': proof},
+      final url = Uri.parse(pair['url'] as String);
+      final opened =
+          await (authLaunch?.call(url) ??
+              launchUrl(url, mode: LaunchMode.externalApplication));
+      if (!opened) {
+        await _sessionStorage(
+          () => storage.delete(key: 'river_native_pending'),
         );
-        if (result['session'] != null) {
-          token = result['session'] as String;
-          await storage.write(key: 'river_session', value: token);
-          await boot();
-          return;
-        }
+        throw StateError('Unable to open sign-in. Please try again.');
       }
-      throw Exception('Device link expired. Start sign-in again.');
+      await _exchangeNative(pending);
+      await boot();
     } finally {
       pairingLabel = null;
       notifyListeners();
     }
   }
 
+  Future<void> _exchangeNative(Json pending) {
+    return _nativeExchange ??= _pollNative(
+      pending,
+    ).whenComplete(() => _nativeExchange = null);
+  }
+
+  Future<void> _pollNative(Json pending) async {
+    final generation = _generation;
+    pairingLabel = pending['label'] as String?;
+    notifyListeners();
+    try {
+      while (DateTime.now().millisecondsSinceEpoch <
+          (pending['expires_at'] as int)) {
+        if (generation != _generation || _disposed) {
+          throw ApiException(409, 'session_changed');
+        }
+        final result = await request(
+          '/api/native/session',
+          method: 'POST',
+          body: {'id': pending['id'], 'verifier': pending['verifier']},
+        );
+        if (result['session'] is String) {
+          await _sessionStorage(() async {
+            if (generation != _generation || _disposed) {
+              throw ApiException(409, 'session_changed');
+            }
+            await storage.write(
+              key: 'river_session',
+              value: result['session'] as String,
+            );
+            if (generation != _generation || _disposed) {
+              throw ApiException(409, 'session_changed');
+            }
+            token = result['session'] as String;
+            await storage.delete(key: 'river_native_pending');
+          });
+          return;
+        }
+        await Future<void>.delayed(const Duration(seconds: 2));
+      }
+      await _sessionStorage(() => storage.delete(key: 'river_native_pending'));
+      throw StateError('Device link expired. Start sign-in again.');
+    } on ApiException catch (e) {
+      if (generation == _generation && (e.status == 400 || e.status == 403)) {
+        await _sessionStorage(
+          () => storage.delete(key: 'river_native_pending'),
+        );
+      }
+      rethrow;
+    } finally {
+      if (generation == _generation) {
+        pairingLabel = null;
+        notifyListeners();
+      }
+    }
+  }
+
+  Future<void> resumeAuthentication() async {
+    if (!kIsWeb && _nativeExchange == null) {
+      final pending = await storage.read(key: 'river_native_pending');
+      if (pending != null) {
+        try {
+          await _exchangeNative(
+            (jsonDecode(pending) as Map).cast<String, dynamic>(),
+          );
+          await boot();
+        } catch (e) {
+          error = '$e';
+          notifyListeners();
+        }
+      }
+    }
+    if (user == null) return;
+    if (matrixEnabled && !matrixConnected) {
+      await matrix.bind(user!);
+    }
+    await refresh();
+  }
+
   Future<void> logout() async {
     final renewal = _renewing;
     _generation++;
+    if (!kIsWeb) {
+      await _sessionStorage(() => storage.delete(key: 'river_native_pending'));
+    }
     // Browsers apply Set-Cookie before Dart sees the response. Clear the cookie
     // after an in-flight renewal finishes so it cannot undo an explicit logout.
     if (kIsWeb && renewal != null) {
@@ -622,10 +756,7 @@ class RiverApi extends ChangeNotifier {
     );
     _transactions.remove('create:$name:$kind');
     if (matrixConnected) await matrix.syncNow();
-    selected = result['id'] as String;
-    events = [];
-    nextCursor = null;
-    await refresh();
+    await open(result['id'] as String);
     if (kind == 'space') {
       final lobby = channels(
         selected!,
@@ -737,10 +868,7 @@ class RiverApi extends ChangeNotifier {
     );
     _transactions.remove(key);
     if (matrixConnected) await matrix.syncNow();
-    selected = result['id'] as String;
-    events = [];
-    nextCursor = null;
-    await refresh();
+    await open(result['id'] as String);
   }
 
   String userId(String value) {
@@ -802,6 +930,7 @@ class RiverApi extends ChangeNotifier {
   }
 
   Future<void> conversation(String name, List<String> members) async {
+    if (members.length == 1) return messageFriend(members.single);
     final key = 'conversation:$name:${members.join(',')}';
     final result = await request(
       '/api/conversations',
@@ -1015,13 +1144,18 @@ class RiverApi extends ChangeNotifier {
 
   Future<void> membership(String id, String action, [String? person]) async {
     final wire = matrixRoom(id);
+    final accepting = action == 'accept' || action == 'join';
     // A delegated local invitation also grants River access to calls/publishing.
     // Keep that explicit approval path for local invitations.
     if (matrixConnected &&
         wire != null &&
-        (action != 'join' || group(id)?['matrix_only'] == true)) {
+        (!accepting || group(id)?['matrix_only'] == true)) {
       await matrix.transport.action({
-        'action': action,
+        'action': switch (action) {
+          'accept' => 'join',
+          'remove' => 'kick',
+          _ => action,
+        },
         'room': wire,
         if (person != null) 'user': userId(person),
       });
@@ -1032,8 +1166,15 @@ class RiverApi extends ChangeNotifier {
     await request(
       '/api/groups/$id/membership',
       method: 'POST',
-      body: {'action': action, if (person != null) 'user_id': userId(person)},
+      body: {
+        'action': accepting ? 'accept' : action,
+        if (person != null) 'user_id': userId(person),
+      },
     );
+    if (matrixConnected) await matrix.syncNow();
+    if (matrixConnected && accepting && wire != null) {
+      await matrix.ensureJoinedRoom(wire);
+    }
     await refresh();
   }
 
@@ -1074,6 +1215,10 @@ class RiverApi extends ChangeNotifier {
         'Remove the pending legacy files and attach them again for encrypted delivery.',
       );
     }
+    if (!delegatedContent && matrixConnected && wire != null) {
+      await matrix.ensureJoinedRoom(wire);
+    }
+    if (account != accountKey) throw ApiException(409, 'session_changed');
     final result = !delegatedContent && matrixConnected && wire != null
         ? await matrix.transport.send(wire, type, content, txn)
         : await request(

@@ -45,7 +45,7 @@ class _RiverAppState extends State<RiverApp> with WidgetsBindingObserver {
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     app.active = state == AppLifecycleState.resumed;
-    if (app.active && app.user != null) unawaited(app.refresh());
+    if (app.active) unawaited(app.resumeAuthentication());
   }
 
   @override
@@ -150,6 +150,35 @@ class _RiverShellState extends State<RiverShell> {
   }
 
   String? retryTxn, retryPayload;
+  String? composerRoom;
+  final drafts =
+      <
+        String,
+        ({String text, List<Json> files, String? txn, String? payload})
+      >{};
+
+  void bindComposer() {
+    final id = app.selected;
+    final room = id == null ? null : app.matrixRoom(id) ?? id;
+    if (room == composerRoom) return;
+    if (composerRoom != null) {
+      drafts[composerRoom!] = (
+        text: draft.text,
+        files: List.of(attachments),
+        txn: retryTxn,
+        payload: retryPayload,
+      );
+    }
+    final saved = drafts.remove(room);
+    composerRoom = room;
+    draft.text = saved?.text ?? '';
+    attachments
+      ..clear()
+      ..addAll(saved?.files ?? []);
+    retryTxn = saved?.txn;
+    retryPayload = saved?.payload;
+  }
+
   final scaffold = GlobalKey<ScaffoldState>();
   bool sending = false;
   @override
@@ -176,9 +205,6 @@ class _RiverShellState extends State<RiverShell> {
     setState(() {
       section = 'Home';
       filter = 'Chat';
-      retryTxn = null;
-      draft.clear();
-      attachments.clear();
     });
     unawaited(app.open(id));
   }
@@ -229,7 +255,6 @@ class _RiverShellState extends State<RiverShell> {
         setState(() {
           section = 'Home';
           filter = 'Chat';
-          draft.clear();
         });
       }
       return;
@@ -244,7 +269,6 @@ class _RiverShellState extends State<RiverShell> {
         setState(() {
           section = 'Home';
           filter = 'Chat';
-          draft.clear();
         });
       }
     }
@@ -253,6 +277,7 @@ class _RiverShellState extends State<RiverShell> {
   @override
   Widget build(BuildContext context) {
     if (app.user == null) return welcome();
+    bindComposer();
     final group = app.groups.where((g) => g['id'] == app.selected).firstOrNull;
     return LayoutBuilder(
       builder: (context, box) {
@@ -313,7 +338,6 @@ class _RiverShellState extends State<RiverShell> {
                       onConversation: () => setState(() {
                         section = 'Home';
                         filter = 'Chat';
-                        draft.clear();
                       }),
                     )
                   : home(),
@@ -841,7 +865,10 @@ class _RiverShellState extends State<RiverShell> {
                   trailing:
                       g['owner'] == true &&
                           g['kind'] != 'channel' &&
-                          m['principal_id'] != app.user?['sub']
+                          (m['user_id'] == null ||
+                              m['user_id'] != app.user?['user_id']) &&
+                          (m['principal_id'] == null ||
+                              m['principal_id'] != app.user?['sub'])
                       ? IconButton(
                           tooltip: 'Remove ${m['username']}',
                           icon: const Icon(Icons.person_remove_outlined),
@@ -851,7 +878,8 @@ class _RiverShellState extends State<RiverShell> {
                               () => app.membership(
                                 g['id'] as String,
                                 'remove',
-                                app.userId(m['username'] as String),
+                                m['user_id'] as String? ??
+                                    app.userId(m['username'] as String),
                               ),
                             );
                           },
@@ -1371,6 +1399,7 @@ class _RiverShellState extends State<RiverShell> {
   );
 
   Future<void> send(Json g) async {
+    final room = composerRoom;
     final body = draft.text.trim();
     if ((body.isEmpty && attachments.isEmpty) || sending) return;
     const type = 'm.room.message';
@@ -1397,16 +1426,31 @@ class _RiverShellState extends State<RiverShell> {
               <Json>[]) {
         await app.files?.publish(f);
       }
-      if (mounted && app.selected == g['id'] && draft.text.trim() == body) {
+      if (mounted && composerRoom == room && draft.text.trim() == body) {
         draft.clear();
         attachments.clear();
         retryTxn = null;
+      } else if (drafts[room]?.payload == payload &&
+          drafts[room]?.text.trim() == body) {
+        // A completed send must also clear its saved draft if navigation moved
+        // to another conversation while the request was in flight.
+        drafts.remove(room);
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text('$e · Your draft is kept.')));
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('$e · Your draft is kept.'),
+            action: SnackBarAction(
+              label: 'Retry',
+              onPressed: () {
+                if (app.selected == g['id'] && draft.text.trim() == body) {
+                  unawaited(send(g));
+                }
+              },
+            ),
+          ),
+        );
       }
     } finally {
       if (mounted) setState(() => sending = false);

@@ -1,11 +1,12 @@
 {
   "schemaVersion": 1,
-  "version": "0.7.1",
-  "versionCode": 11,
+  "version": "0.7.2",
+  "versionCode": 12,
   "changes": [
-    "Stay signed in as River automatically renews expiring access credentials within your Gravitas session.",
-    "Keep your linked Matrix device and encryption keys when River reconnects; save rotated device credentials immediately.",
-    "Temporary server outages keep saved credentials so River can reconnect when service returns.",
-    "After updating from an older version, sign in once to enable automatic renewal. Gravitas sign-out, revoked permissions and the central session expiry still require sign-in."
+    "Android returns to River after device linking and Matrix approval, and resumes pending sign-in if the app restarts.",
+    "Fix accepting conversation invitations and removing members through Matrix; use each person's full Matrix identity.",
+    "Open newly created rooms after their Matrix state arrives, without mixing messages from the previous room.",
+    "Keep separate drafts and pending attachments for each conversation, and retry failed sends without duplicating messages.",
+    "Reconnect the saved Matrix device after an offline restore and keep messages visible when the member list is unavailable."
   ]
 }

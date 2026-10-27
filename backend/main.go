@@ -167,6 +167,13 @@ func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case "/device/link":
 		s.nativeFinish(w, r)
 		return
+	case "/auth/native/return":
+		if r.Method != http.MethodGet {
+			w.WriteHeader(http.StatusMethodNotAllowed)
+			return
+		}
+		returnToApp(w, "native", "River device linked")
+		return
 	case "/api/native/session":
 		s.nativeSession(w, r)
 		return
@@ -503,7 +510,7 @@ func (s *server) nativeFinish(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	_, _ = fmt.Fprintf(w, `<!doctype html><html><meta name="viewport" content="width=device-width,initial-scale=1"><title>Link River</title><body style="font:18px system-ui;max-width:36rem;margin:10vh auto;padding:24px;background:#f3f7ff;color:#142744"><h1>Link your River app</h1><p>Only continue if your River app shows <strong>%s</strong>.</p><p>This device will use the group and chat permissions you approved.</p><button id="link" style="padding:16px;background:#185adb;color:white;border:0;border-radius:12px">Link this River device</button><p id="result"></p><script>document.getElementById('link').onclick=async()=>{let r=await fetch('/device/link?id=%s',{method:'POST',headers:{'X-Gravitas-CSRF':'1'}});document.getElementById('result').textContent=r.ok?'Linked. Return to River.':'Request failed. Start again.';document.getElementById('link').disabled=r.ok}</script></body></html>`, p.Label, id)
+	_, _ = fmt.Fprintf(w, `<!doctype html><html><meta name="viewport" content="width=device-width,initial-scale=1"><title>Link River</title><body style="font:18px system-ui;max-width:36rem;margin:10vh auto;padding:24px;background:#f3f7ff;color:#142744"><h1>Link your River app</h1><p>Only continue if your River app shows <strong>%s</strong>.</p><p>This device will use the group and chat permissions you approved.</p><button id="link" style="padding:16px;background:#185adb;color:white;border:0;border-radius:12px">Link this River device</button><p id="result"></p><script>document.getElementById('link').onclick=async()=>{const button=document.getElementById('link');button.disabled=true;try{const r=await fetch('/device/link?id=%s',{method:'POST',headers:{'X-Gravitas-CSRF':'1'}});if(!r.ok)throw Error();window.location.replace('/auth/native/return')}catch(e){document.getElementById('result').textContent='Request failed. Try again or restart sign-in.';button.disabled=false}}</script></body></html>`, p.Label, id)
 }
 func (s *server) nativeSession(w http.ResponseWriter, r *http.Request) {
 	if r.Method != "POST" {
