@@ -117,9 +117,11 @@ with (output / 'emulator.log').open('w') as log:
             for marker in ['RIVER_ANDROID_MATRIX_AUTH_SAVED', 'RIVER_ANDROID_MATRIX_AUTH_PASS']:
                 device('logcat', '-c')
                 device('shell', 'am', 'start', '-W', '-n', component)
+                app_pid = device('shell', 'pidof', package).strip()
+                assert app_pid, 'Matrix test app exited during startup'
                 deadline = time.monotonic() + 150
                 while time.monotonic() < deadline:
-                    logs = device('logcat', '-d')
+                    logs = device('logcat', '-d', '--pid=' + app_pid)
                     assert 'RIVER_ANDROID_MATRIX_AUTH_FAIL' not in logs, logs
                     assert 'FATAL EXCEPTION' not in logs, logs
                     if marker in logs:
