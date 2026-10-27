@@ -25,7 +25,15 @@ Next.js River code; Git history retains that implementation.
 - Browser cookies are encrypted, Secure, HttpOnly, host-only and SameSite=Lax.
   Android stores the same encrypted app-session envelope in platform secure storage.
 - Android uses the system browser and an explicit device-link confirmation with a
-  verifier challenge and five-minute, single-use exchange. Matrix device sign-in uses the same browser approval model. Initial encryption setup may require a password, sent directly from the SDK to Gravitas.
+  verifier challenge and five-minute, single-use exchange. Both device linking and
+  Matrix approval return to the app automatically, with an Open River fallback
+  when the browser requires a tap. Return links contain no credentials. Android
+  retains the pending verifier in secure storage so a cold start can finish the
+  exchange. Matrix device sign-in uses the same browser approval model. Initial
+  encryption setup may require a password, sent directly from the SDK to Gravitas.
+- Conversation drafts and pending attachments stay with their room while navigating.
+  Failed sends retain their transaction ID and offer Retry, including when the
+  homeserver accepted a message but its response was lost.
 - Every protected request validates the central session proof; central logout and
   consent revocation deny subsequent access. IAM outages fail closed.
 
