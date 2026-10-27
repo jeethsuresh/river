@@ -93,6 +93,15 @@ jobs:
           flutter config --no-analytics
           flutter pub get --enforce-lockfile
           flutter build apk --debug --no-pub
+      - name: Verify warm and cold Android authentication returns
+        timeout-minutes: 12
+        run: |
+          export JAVA_HOME="$JAVA_HOME_17_X64"
+          export PATH="$JAVA_HOME/bin:$ANDROID_HOME/cmdline-tools/latest/bin:$PATH"
+          sudo chown "$(id -u):$(id -g)" /dev/kvm
+          sdkmanager 'platform-tools' 'emulator' 'system-images;android-35;google_apis;x86_64'
+          printf 'no\n' | avdmanager create avd --force --name river-auth-return --package 'system-images;android-35;google_apis;x86_64'
+          python3 scripts/test-android-auth-return.py --apk client/build/app/outputs/flutter-apk/app-debug.apk --avd river-auth-return
   image:
     needs: [android, matrix-platforms, matrix-interop]
     runs-on: ubuntu-24.04
