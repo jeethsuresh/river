@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:math';
 
 import 'live_updates.dart';
+import 'performance.dart';
 import 'matrix_messaging.dart';
 import 'matrix_timeline.dart';
 import 'calls.dart';
@@ -73,7 +74,25 @@ class RiverApi extends ChangeNotifier {
     changed: () {
       if (!_disposed && !_restoringLocal && user != null && active) {
         changes.add(null);
-        unawaited(refresh());
+        groups = _matrixGroups(groups);
+        if (selected != null &&
+            !groups.any(
+              (g) => g['id'] == selected && g['membership'] == 'join',
+            )) {
+          _selectionRevision++;
+          selected = null;
+          _matrixEvents = [];
+          _pendingEchoes.clear();
+          events = [];
+          nextCursor = null;
+        }
+        unawaited(
+          _loadSelected().catchError((Object e) {
+            error = '$e';
+            notifyListeners();
+          }),
+        );
+        notifyListeners();
       }
     },
   )..addListener(notifyListeners));
@@ -308,6 +327,7 @@ class RiverApi extends ChangeNotifier {
   String? get accountKey =>
       user == null ? null : "${user?['issuer']}|${user?['sub']}";
   List<Json> _matrixEvents = [];
+  final _pendingEchoes = <String>{};
   List<Json> groups = [],
       events = [],
       recent = [],
@@ -355,6 +375,7 @@ class RiverApi extends ChangeNotifier {
     online = {};
     groups = [];
     _matrixEvents = [];
+    _pendingEchoes.clear();
     events = [];
     recent = [];
     catchUp = [];
@@ -522,6 +543,15 @@ class RiverApi extends ChangeNotifier {
     String path, {
     String method = 'GET',
     Json? body,
+  }) => RiverPerformance.measure(
+    'http.$method.${Uri.parse(path).pathSegments.elementAtOrNull(1) ?? "root"}',
+    () => _sendUnprofiled(path, method: method, body: body),
+  );
+
+  Future<http.Response> _sendUnprofiled(
+    String path, {
+    String method = 'GET',
+    Json? body,
   }) async {
     final generation = _generation;
     final account = accountKey;
@@ -560,7 +590,18 @@ class RiverApi extends ChangeNotifier {
     return response;
   }
 
-  Future<void> boot() async {
+  Future<void> _loadLoginConfig() async {
+    try {
+      final config = await request('/auth/gravitas/config');
+      if (config['defaultDomain'] is String) {
+        defaultDomain = config['defaultDomain'] as String;
+      }
+    } catch (_) {}
+  }
+
+  Future<void> boot() => RiverPerformance.measure('app.boot', _boot);
+
+  Future<void> _boot() async {
     await _restoreLocal();
     if (!kIsWeb) {
       token = await storage.read(key: 'river_session');
@@ -575,12 +616,7 @@ class RiverApi extends ChangeNotifier {
         }
       }
     }
-    try {
-      final config = await request('/auth/gravitas/config');
-      if (config['defaultDomain'] is String) {
-        defaultDomain = config['defaultDomain'] as String;
-      }
-    } catch (_) {}
+    unawaited(_loadLoginConfig());
     try {
       final data = await request('/api/session');
       final next = data['user'] as Json;
@@ -589,8 +625,13 @@ class RiverApi extends ChangeNotifier {
       _offlineSession = false;
       await _rememberIdentity();
       if (matrixEnabled) {
-        await matrix.bind(next);
-        matrix.active = active;
+        unawaited(
+          matrix.bind(next).then((_) {
+            if (accountKey == "${next['issuer']}|${next['sub']}") {
+              matrix.active = active;
+            }
+          }),
+        );
       }
       await _initializeFiles();
       await refresh();
@@ -650,96 +691,85 @@ class RiverApi extends ChangeNotifier {
                 as String? ??
             selected;
       }
-      await files?.setScopes([
-        for (final g in groups.where((g) => g['membership'] == 'join'))
-          FileScope('room', g['id'] as String),
-      ], active: active);
       recent = (result['recent'] as List).cast<Json>();
-      if (liveEnabled) {
-        final home = await request('/api/home');
-        catchUp = ((home['catch_up'] as List?) ?? []).cast<Json>();
-        threads = ((home['threads'] as List?) ?? []).cast<Json>();
-        final entries = ((home['recent_entries'] as List?) ?? []).cast<Json>();
-        final entryIds = entries.map((e) => e['event_id']).toSet();
-        recent = [
-          ...entries,
-          ...recent.where((e) => !entryIds.contains(e['event_id'])),
-        ];
-        try {
-          activeCalls = ((await request('/api/calls'))['calls'] as List)
-              .cast<Json>();
-        } on ApiException {
-          activeCalls = [];
-        }
-      }
       if (selected != null && !groups.any((g) => g['id'] == selected)) {
         selected = null;
+        _selectionRevision++;
+        _matrixEvents = [];
         events = [];
         nextCursor = null;
       }
-      try {
-        final social = await request('/api/friends');
-        if (account != accountKey) return;
-        friends = (social['friends'] as List).cast<Json>();
-        otherContacts = ((social['other_contacts'] as List?) ?? [])
-            .cast<Json>();
-        requests = (social['requests'] as List).cast<Json>();
-        blocked = (social['blocked'] as List).cast<Json>();
-        friendsError = null;
-        friendsStatus = null;
-      } on ApiException catch (e) {
-        if (account != accountKey) return;
-        friendsError = '$e';
-        friendsStatus = e.status;
-        if (e.status == 403) {
-          friends = [];
-          otherContacts = [];
-          requests = [];
-          blocked = [];
-        }
-      }
-      final selectedId = selected;
-      if (selectedId != null &&
-          groups.any(
-            (g) => g['id'] == selectedId && g['membership'] == 'join',
-          )) {
-        final wire = matrixRoom(selectedId);
-        if (matrixConnected && wire != null) {
-          await matrix.ensureJoinedRoom(wire);
-        }
-        final data = matrixConnected && wire != null
-            ? await matrix.transport.history(wire, null)
-            : await request('/api/groups/$selectedId/events');
-        if (account == accountKey && selectedId == selected) {
-          final latest = (data['events'] as List).cast<Json>();
-          final initial = events.isEmpty;
-          final overlap = latest.any(
-            (e) => events.any((old) => old['event_id'] == e['event_id']),
-          );
-          _mergeEvents(latest);
-          if (initial || (!overlap && latest.isNotEmpty)) {
-            nextCursor = data['next_cursor'] as String?;
-          }
-          await _saveHistory(selectedId);
-        }
-        if (matrixConnected && wire != null) {
-          // A roster failure must not discard a successfully fetched timeline.
+      // Make the account shell usable as soon as its room list is available.
+      loading = false;
+      notifyListeners();
+      await Future.wait<void>([
+        _loadSelected(),
+        (() async {
+          await files?.setScopes([
+            for (final g in groups.where((g) => g['membership'] == 'join'))
+              FileScope('room', g['id'] as String),
+          ], active: active);
+        })(),
+        (() async {
           try {
-            final roster = await matrix.transport.members(wire);
-            if (account == accountKey && selectedId == selected) {
-              group(selectedId)?['members'] = roster['members'];
+            final social = await request('/api/friends');
+            if (account != accountKey) return;
+            friends = (social['friends'] as List).cast<Json>();
+            otherContacts = ((social['other_contacts'] as List?) ?? [])
+                .cast<Json>();
+            requests = (social['requests'] as List).cast<Json>();
+            blocked = (social['blocked'] as List).cast<Json>();
+            friendsError = null;
+            friendsStatus = null;
+          } on ApiException catch (e) {
+            if (account != accountKey) return;
+            friendsError = '$e';
+            friendsStatus = e.status;
+            if (e.status == 403) {
+              friends = [];
+              otherContacts = [];
+              requests = [];
+              blocked = [];
             }
-          } catch (_) {}
-        }
-      }
-      if (liveEnabled) {
-        try {
-          final presence = await request('/api/presence');
-          online = ((presence['online'] as List?) ?? []).cast<String>().toSet();
-        } on ApiException catch (e) {
-          if (e.status == 403) online = {};
-        }
-      }
+          }
+        })(),
+        if (liveEnabled) ...[
+          (() async {
+            final home = await request('/api/home');
+            if (account != accountKey) return;
+            catchUp = ((home['catch_up'] as List?) ?? []).cast<Json>();
+            threads = ((home['threads'] as List?) ?? []).cast<Json>();
+            final entries = ((home['recent_entries'] as List?) ?? [])
+                .cast<Json>();
+            final entryIds = entries.map((e) => e['event_id']).toSet();
+            recent = [
+              ...entries,
+              ...recent.where((e) => !entryIds.contains(e['event_id'])),
+            ];
+          })(),
+          (() async {
+            try {
+              final result = await request('/api/calls');
+              if (account != accountKey) return;
+              activeCalls = (result['calls'] as List).cast<Json>();
+            } on ApiException {
+              if (account == accountKey) activeCalls = [];
+            }
+          })(),
+          (() async {
+            try {
+              final presence = await request('/api/presence');
+              if (account != accountKey) return;
+              online = ((presence['online'] as List?) ?? [])
+                  .cast<String>()
+                  .toSet();
+            } on ApiException catch (e) {
+              if (account == accountKey && e.status == 403) online = {};
+            }
+          })(),
+        ],
+      ]);
+      if (account != accountKey) return;
       await _saveOverview();
       error = null;
     } catch (e) {
@@ -763,9 +793,73 @@ class RiverApi extends ChangeNotifier {
     }
   }
 
-  Future<void> open(String? id) async {
+  int _selectionRevision = 0;
+
+  Future<void> _loadSelected({bool roster = false}) async {
+    final account = accountKey;
+    final selectedId = selected;
+    final selectionRevision = _selectionRevision;
+    if (selectedId != null &&
+        groups.any((g) => g['id'] == selectedId && g['membership'] == 'join')) {
+      final wire = matrixRoom(selectedId);
+      if (matrixConnected && wire != null) {
+        await matrix.ensureJoinedRoom(wire);
+      }
+      final data = matrixConnected && wire != null
+          ? await matrix.transport.history(wire, null)
+          : await request('/api/groups/$selectedId/events');
+      if (account == accountKey &&
+          selectedId == selected &&
+          selectionRevision == _selectionRevision) {
+        final latest = (data['events'] as List).cast<Json>();
+        final initial = events.isEmpty;
+        final known = events.map((e) => e['event_id']).toSet();
+        final overlap = latest.any((e) => known.contains(e['event_id']));
+        _mergeEvents(latest);
+        if (initial || (!overlap && latest.isNotEmpty)) {
+          nextCursor = data['next_cursor'] as String?;
+        }
+      }
+      notifyListeners();
+      if (account == accountKey &&
+          selectedId == selected &&
+          selectionRevision == _selectionRevision) {
+        await _saveHistory(selectedId);
+      }
+      if (roster && matrixConnected && wire != null) {
+        unawaited(_loadRoster(selectedId, wire, account, selectionRevision));
+      }
+    }
+  }
+
+  Future<void> _loadRoster(
+    String id,
+    String wire,
+    String? account,
+    int revision,
+  ) async {
+    try {
+      final data = await matrix.transport.members(wire);
+      if (account == accountKey &&
+          selected == id &&
+          revision == _selectionRevision) {
+        group(id)?['members'] = data['members'];
+        notifyListeners();
+      }
+    } catch (_) {
+      // Timeline availability is independent of optional roster enrichment.
+    }
+  }
+
+  Future<void> open(String? id) =>
+      RiverPerformance.measure('conversation.open', () => _open(id));
+
+  Future<void> _open(String? id) async {
+    final revision = ++_selectionRevision;
+    _historyRevision++;
     selected = id;
     _matrixEvents = [];
+    _pendingEchoes.clear();
     events = [];
     nextCursor = null;
     final account = accountKey;
@@ -777,9 +871,23 @@ class RiverApi extends ChangeNotifier {
         cacheError = 'Some saved messages could not be opened on this device.';
       }
     }
-    if (account != accountKey || id != selected) return;
+    if (account != accountKey ||
+        id != selected ||
+        revision != _selectionRevision) {
+      return;
+    }
     notifyListeners();
-    await refresh();
+    try {
+      // New groups need their delegated metadata once. Known conversations can
+      // load directly even while a slow account refresh is in flight.
+      if (id != null && group(id) == null) await refresh();
+      await _loadSelected(roster: true);
+      error = null;
+    } catch (e) {
+      if (matrixNetworkFailure(e)) _apiUnavailable = true;
+      error = networkUnavailable ? null : '$e';
+    }
+    notifyListeners();
   }
 
   Future<void> login({
@@ -1005,9 +1113,16 @@ class RiverApi extends ChangeNotifier {
     _historyRevision++;
     if (matrixConnected) {
       final updates = {for (final e in incoming) e['event_id'] as String: e};
+      final confirmed = updates.keys.toSet();
       final previous = _matrixEvents
+          .where(
+            (e) =>
+                !_pendingEchoes.contains(e['event_id']) ||
+                !confirmed.contains(e['event_id']),
+          )
           .map((e) => updates[e['event_id']] ?? e)
           .toList();
+      _pendingEchoes.removeAll(confirmed);
       final known = previous.map((e) => e['event_id']).toSet();
       final added = incoming.where((e) => !known.contains(e['event_id']));
       // The homeserver/SDK supplies DAG order. Remote timestamps are untrusted.
@@ -1485,6 +1600,17 @@ class RiverApi extends ChangeNotifier {
     Json content,
     String txn, {
     bool refreshAfter = true,
+  }) => RiverPerformance.measure(
+    'message.send',
+    () => _sendMessage(id, type, content, txn, refreshAfter: refreshAfter),
+  );
+
+  Future<Json> _sendMessage(
+    String id,
+    String type,
+    Json content,
+    String txn, {
+    bool refreshAfter = true,
   }) async {
     requireNetwork();
     final account = accountKey;
@@ -1535,7 +1661,27 @@ class RiverApi extends ChangeNotifier {
             body: {'content': content},
           );
     if (account != accountKey) throw ApiException(409, 'session_changed');
-    if (refreshAfter) await refresh();
+    if (refreshAfter) {
+      if (!delegatedContent && selected == id && result['event_id'] is String) {
+        _mergeEvents([
+          {
+            'event_id': result['event_id'],
+            'room_id': wire ?? id,
+            'sender': user?['user_id'],
+            'type': type,
+            'content': content,
+            'origin_server_ts': DateTime.now().millisecondsSinceEpoch,
+            'river_encrypted': encrypted(id),
+          },
+        ]);
+        if (matrixConnected) {
+          _pendingEchoes.add(result['event_id'] as String);
+          unawaited(_saveHistory(id));
+        }
+        notifyListeners();
+      }
+      if (delegatedContent) await refresh();
+    }
     return result;
   }
 
@@ -1560,7 +1706,18 @@ class RiverApi extends ChangeNotifier {
     );
     if (account != accountKey) throw ApiException(409, 'session_changed');
     _transactions.remove(key);
-    await refresh();
+    if (selected == id) {
+      // Delivery is already acknowledged. A history outage must not turn a
+      // successful attachment into an apparent failure and invite duplicates.
+      unawaited(
+        _loadSelected().catchError((Object e) {
+          if (account == accountKey && selected == id) {
+            error = '$e';
+            notifyListeners();
+          }
+        }),
+      );
+    }
   }
 
   Future<Json> publicPost(String event, {String? before}) => request(

@@ -193,7 +193,9 @@ func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if strings.HasPrefix(r.URL.Path, "/api/") {
+		started := time.Now()
 		session, err := s.session(r)
+		w.Header().Add("Server-Timing", fmt.Sprintf("auth;dur=%.2f", float64(time.Since(started).Microseconds())/1000))
 		if err != nil {
 			status := 401
 			if errors.Is(err, gravitas.ErrUnavailable) {
@@ -275,7 +277,7 @@ func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	http.ServeFileFS(w, r, f.FS(), file)
+	serveStatic(w, r, f, file)
 }
 func (s *server) session(r *http.Request) (gravitas.AppSession, error) {
 	if raw := r.Header.Get("Authorization"); strings.HasPrefix(raw, "Bearer ") {
@@ -392,6 +394,7 @@ func proxyRoute(r *http.Request) (string, bool) {
 	return "", false
 }
 func (s *server) proxy(w http.ResponseWriter, r *http.Request, token, upstream string) {
+	started := time.Now()
 	raw, err := io.ReadAll(io.LimitReader(r.Body, 300001))
 	if err != nil || len(raw) > 300000 {
 		fail(w, 413, "Request is too large")
@@ -423,6 +426,10 @@ func (s *server) proxy(w http.ResponseWriter, r *http.Request, token, upstream s
 	if err != nil || len(body) > 2<<20 || !json.Valid(body) {
 		fail(w, 502, "Invalid Gravitas response")
 		return
+	}
+	w.Header().Add("Server-Timing", fmt.Sprintf("upstream;dur=%.2f", float64(time.Since(started).Microseconds())/1000))
+	if timing := resp.Header.Get("Server-Timing"); timing != "" {
+		w.Header().Add("Server-Timing", timing)
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(resp.StatusCode)

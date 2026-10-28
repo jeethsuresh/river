@@ -52,6 +52,8 @@ CMD ["bash", "/opt/run-matrix-browser-interop.sh"]
 FROM flutter-sdk AS frontend-build
 COPY --from=matrix-web-build /out/pkg /src/client/web/pkg
 RUN bash /src/scripts/build-river-web.sh --release --no-pub --no-web-resources-cdn
+COPY scripts/prepare-web-assets.sh /src/scripts/prepare-web-assets.sh
+RUN bash /src/scripts/prepare-web-assets.sh /src/client/build/web
 
 FROM golang:1.25.2-bookworm AS backend-source
 WORKDIR /src/backend

@@ -102,6 +102,9 @@ Future<void> run() async {
     'Restore replaced device',
   );
   await restored.syncNow();
+  // Restore publishes the local store without a remote poll. Exercise both the
+  // first restored poll and a subsequent incremental poll on the same device.
+  await restored.syncNow();
   await restored.disconnect(logout: true);
   restored.dispose();
 

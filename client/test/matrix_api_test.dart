@@ -93,6 +93,39 @@ class SpaceThreadTransport extends RoomTransport {
   }
 }
 
+class EchoTransport extends RoomTransport {
+  bool delivered = false, departed = false;
+  @override
+  Future<MatrixJson> sync() async {
+    final snapshot = await super.sync();
+    if (departed) (snapshot['rooms'] as List).single['membership'] = 'leave';
+    return snapshot;
+  }
+
+  @override
+  Future<MatrixJson> history(String room, String? cursor) async => {
+    'events': [
+      if (delivered) ...[
+        {
+          'event_id': r'$remote',
+          'sender': '@bob:remote',
+          'type': 'm.room.message',
+          'origin_server_ts': 9,
+          'content': {'body': 'Remote before own', 'msgtype': 'm.text'},
+        },
+        {
+          'event_id': r'$sent',
+          'sender': '@alice:example.org',
+          'type': 'm.room.message',
+          'origin_server_ts': 1,
+          'content': {'body': 'Canonical own', 'msgtype': 'm.text'},
+        },
+      ],
+    ],
+    'next_cursor': null,
+  };
+}
+
 Future<RiverApi> connected(
   RoomTransport engine,
   List<http.Request> requests,
@@ -141,6 +174,29 @@ Future<RiverApi> connected(
 }
 
 void main() {
+  test(
+    'acknowledged echoes reconcile in SDK order and departure clears the timeline',
+    () async {
+      final engine = EchoTransport();
+      final api = await connected(engine, []);
+      await api.open('local');
+      await api.send('local', 'm.room.message', {
+        'body': 'Own',
+        'msgtype': 'm.text',
+      }, 'txn');
+      expect(api.events.single['event_id'], r'$sent');
+      engine.delivered = true;
+      await api.refresh();
+      expect(api.events.map((e) => e['event_id']), [r'$remote', r'$sent']);
+      expect(api.events.last['content']['body'], 'Canonical own');
+      engine.departed = true;
+      await api.matrix.syncNow();
+      expect(api.selected, isNull);
+      expect(api.events, isEmpty);
+      api.dispose();
+    },
+  );
+
   test('Matrix-only space chat threads use the Matrix transport', () async {
     final engine = SpaceThreadTransport(), requests = <http.Request>[];
     final api = await connected(engine, requests);

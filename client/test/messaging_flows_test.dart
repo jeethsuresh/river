@@ -270,6 +270,7 @@ void main() {
       final matrix = await device(engine);
       await matrix.bind(matrixProfile);
       expect(matrix.connected, true);
+      await expectLater(matrix.syncNow(), throwsStateError);
       expect(matrix.networkUnavailable, true);
       engine.offline = false;
       await matrix.syncNow();
@@ -288,7 +289,11 @@ void main() {
       engine.syncGate = Completer<void>();
       final first = matrix.syncNow(), second = matrix.syncNow();
       await Future<void>.delayed(Duration.zero);
-      expect(engine.syncs, 2, reason: 'one restore and one shared poll');
+      expect(
+        engine.syncs,
+        1,
+        reason: 'local restore and one shared remote poll',
+      );
       engine.roomList = [room('new', '!new:example.org')];
       engine.syncGate!.complete();
       await Future.wait([first, second]);
@@ -306,7 +311,7 @@ void main() {
       engine.delayedPolls = 1;
       engine.nextRooms = [room('new', '!new:example.org')];
       await matrix.ensureJoinedRoom('!new:example.org');
-      expect(engine.syncs, 3);
+      expect(engine.syncs, 2);
       await expectLater(
         matrix.ensureJoinedRoom('!missing:example.org'),
         throwsStateError,

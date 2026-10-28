@@ -9,6 +9,7 @@ import 'package:river_matrix/river_matrix.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import 'matrix_store_location.dart';
+import 'performance.dart';
 
 typedef MatrixJson = Map<String, dynamic>;
 typedef MatrixRequest =
@@ -60,37 +61,40 @@ class _DurableMatrixTransport implements MatrixTransport {
   _DurableMatrixTransport(this.inner, this.persist);
   final MatrixTransport inner;
   final Future<void> Function() persist;
-  Future<T> _run<T>(Future<T> Function() operation) async {
-    try {
-      return await operation();
-    } finally {
-      await persist();
-    }
-  }
+  Future<T> _run<T>(String label, Future<T> Function() operation) =>
+      RiverPerformance.measure(label, () async {
+        try {
+          return await operation();
+        } finally {
+          await persist();
+        }
+      });
 
   @override
   Future<String> credentials() => inner.credentials();
   @override
-  Future<MatrixJson> login(String token) => _run(() => inner.login(token));
+  Future<MatrixJson> login(String token) =>
+      _run('matrix.login', () => inner.login(token));
   @override
-  Future<MatrixJson> sync() => _run(inner.sync);
+  Future<MatrixJson> sync() => _run('matrix.sync', inner.sync);
   @override
-  Future<MatrixJson> rooms() => _run(inner.rooms);
+  Future<MatrixJson> rooms() => _run('matrix.rooms', inner.rooms);
   @override
   Future<MatrixJson> history(String room, String? cursor) =>
-      _run(() => inner.history(room, cursor));
+      _run('matrix.history', () => inner.history(room, cursor));
   @override
   Future<MatrixJson> thread(String room, String event, String? cursor) =>
-      _run(() => inner.thread(room, event, cursor));
+      _run('matrix.thread', () => inner.thread(room, event, cursor));
   @override
-  Future<MatrixJson> members(String room) => _run(() => inner.members(room));
+  Future<MatrixJson> members(String room) =>
+      _run('matrix.members', () => inner.members(room));
   @override
   Future<MatrixJson> send(
     String room,
     String type,
     MatrixJson content,
     String txn,
-  ) => _run(() => inner.send(room, type, content, txn));
+  ) => _run('matrix.send', () => inner.send(room, type, content, txn));
   @override
   Future<MatrixJson> sendAttachment(
     String room,
@@ -98,32 +102,45 @@ class _DurableMatrixTransport implements MatrixTransport {
     String mime,
     Uint8List bytes,
     String txn,
-  ) => _run(() => inner.sendAttachment(room, name, mime, bytes, txn));
+  ) => _run(
+    'matrix.sendAttachment',
+    () => inner.sendAttachment(room, name, mime, bytes, txn),
+  );
   @override
-  Future<Uint8List> downloadAttachment(MatrixJson content) =>
-      _run(() => inner.downloadAttachment(content));
+  Future<Uint8List> downloadAttachment(MatrixJson content) => _run(
+    'matrix.downloadAttachment',
+    () => inner.downloadAttachment(content),
+  );
   @override
   Future<MatrixJson> action(MatrixJson payload) =>
-      _run(() => inner.action(payload));
+      _run('matrix.action', () => inner.action(payload));
   @override
-  Future<MatrixJson> security() => _run(inner.security);
+  Future<MatrixJson> security() => _run('matrix.security', inner.security);
   @override
   Future<MatrixJson> setupRecovery(MatrixJson? authentication) =>
-      _run(() => inner.setupRecovery(authentication));
+      _run('matrix.setupRecovery', () => inner.setupRecovery(authentication));
   @override
-  Future<MatrixJson> recover(String key) => _run(() => inner.recover(key));
+  Future<MatrixJson> recover(String key) =>
+      _run('matrix.recover', () => inner.recover(key));
   @override
-  Future<MatrixJson> requestVerification(String device) =>
-      _run(() => inner.requestVerification(device));
+  Future<MatrixJson> requestVerification(String device) => _run(
+    'matrix.requestVerification',
+    () => inner.requestVerification(device),
+  );
   @override
-  Future<MatrixJson> verificationAction(String flow, String action) =>
-      _run(() => inner.verificationAction(flow, action));
+  Future<MatrixJson> verificationAction(String flow, String action) => _run(
+    'matrix.verificationAction',
+    () => inner.verificationAction(flow, action),
+  );
   @override
   Future<MatrixJson> verificationQr(String flow) =>
-      _run(() => inner.verificationQr(flow));
+      _run('matrix.verificationQr', () => inner.verificationQr(flow));
   @override
   Future<MatrixJson> scanVerificationImage(String flow, Uint8List bytes) =>
-      _run(() => inner.scanVerificationImage(flow, bytes));
+      _run(
+        'matrix.scanVerificationImage',
+        () => inner.scanVerificationImage(flow, bytes),
+      );
   @override
   Future<void> close(bool logout) => inner.close(logout);
 }
@@ -377,13 +394,6 @@ class MatrixMessaging extends ChangeNotifier {
           _transport = engine;
           roomList = (snapshot['rooms'] as List).cast<MatrixJson>();
           notifyListeners();
-          if (synchronize) {
-            try {
-              await _syncOnce(generation);
-            } catch (e) {
-              if (!matrixNetworkFailure(e)) rethrow;
-            }
-          }
           changed();
           if (synchronize) _startSync();
         } catch (_) {

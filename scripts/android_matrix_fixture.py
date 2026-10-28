@@ -10,7 +10,7 @@ from pathlib import Path
 import ssl
 import subprocess
 import threading
-from urllib.parse import urlsplit
+from urllib.parse import parse_qs, urlsplit
 
 FIXTURE = Path(os.environ['RUNNER_TEMP']) / 'river-android-matrix-fixture'
 USER = '@alice:localhost:8448'
@@ -56,6 +56,7 @@ class Fixture:
         self.lock = threading.Lock()
         self.servers = []
         self.violations = []
+        self.sync_cursors = []
 
     def __enter__(self):
         fixture = self
@@ -96,6 +97,7 @@ class Fixture:
                 elif self.headers.get('Authorization') != 'Bearer ' + ACCESS:
                     status, data = 401, {'errcode': 'M_UNKNOWN_TOKEN', 'error': 'Not authenticated'}
                 elif path == '/_matrix/client/v3/sync':
+                    fixture.sync_cursors.append(parse_qs(urlsplit(self.path).query).get('since', [None])[0])
                     data = {'next_batch': str(fixture.counts[self.command, path]),
                             'rooms': {}, 'account_data': {'events': []},
                             'to_device': {'events': []},
@@ -133,6 +135,7 @@ class Fixture:
         assert not self.violations, self.violations
         assert self.counts['POST', '/_matrix/client/v3/login'] == 1, self.counts
         assert self.counts['GET', '/_matrix/client/v3/sync'] >= 3, self.counts
+        assert self.sync_cursors[-1] == str(len(self.sync_cursors) - 1), self.sync_cursors
         assert self.counts['POST', '/_matrix/client/v3/logout'] == 1, self.counts
         print('ANDROID MATRIX HTTPS PASS login, sync, persisted-device restore, logout', flush=True)
 
