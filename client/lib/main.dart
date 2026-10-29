@@ -9,6 +9,7 @@ import 'publishing_widgets.dart';
 import 'friends_view.dart';
 import 'content_widgets.dart';
 import 'workspace_widgets.dart';
+import 'home_widgets.dart';
 import 'attachment_widgets.dart';
 import 'matrix_attachment_widgets.dart';
 import 'call_widgets.dart';
@@ -120,6 +121,7 @@ class RiverShell extends StatefulWidget {
 class _RiverShellState extends State<RiverShell> {
   RiverApi get app => widget.app;
   String section = 'Home', filter = 'Chat', conversationQuery = '';
+  bool searchOpen = false, spaceChat = false;
   final draft = TextEditingController();
   final attachments = <Json>[];
   final timeline = ScrollController();
@@ -291,6 +293,7 @@ class _RiverShellState extends State<RiverShell> {
     setState(() {
       section = 'Home';
       filter = 'Chat';
+      spaceChat = false;
     });
     unawaited(app.open(id));
   }
@@ -392,7 +395,6 @@ class _RiverShellState extends State<RiverShell> {
                   ),
                 ],
               ),
-            RiverCallBar(api: app),
             if (app.matrixEnabled &&
                 !app.matrixConnected &&
                 section != 'Account')
@@ -454,7 +456,7 @@ class _RiverShellState extends State<RiverShell> {
         );
         return Scaffold(
           key: scaffold,
-          appBar: wide
+          appBar: wide || group?['membership'] == 'join'
               ? null
               : AppBar(
                   title: Text(
@@ -467,19 +469,6 @@ class _RiverShellState extends State<RiverShell> {
                       onPressed: () => app.refresh(),
                       icon: const Icon(Icons.refresh),
                     ),
-                    if (app.matrixConnected)
-                      IconButton(
-                        tooltip: 'Join Matrix room',
-                        icon: const Icon(Icons.add_link),
-                        onPressed: () => action(() async {
-                          final target = await ask(
-                            'Join a Matrix room',
-                            '#room:example.org or matrix.to link',
-                            maxLength: 1000,
-                          );
-                          if (target != null) await app.joinMatrixRoom(target);
-                        }),
-                      ),
                     IconButton(
                       tooltip: 'New space',
                       onPressed: () => create('space'),
@@ -558,133 +547,209 @@ class _RiverShellState extends State<RiverShell> {
       ),
     ),
   );
-  Widget navigation() => Material(
-    color: Colors.white,
-    child: Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        const Padding(
-          padding: EdgeInsets.fromLTRB(24, 30, 24, 24),
-          child: Row(
+  Future<void> settings() async {
+    scaffold.currentState?.closeDrawer();
+    await showDialog<void>(
+      context: context,
+      builder: (ctx) => Dialog(
+        child: SizedBox(
+          width: 620,
+          height: MediaQuery.sizeOf(ctx).height * .85,
+          child: Column(
             children: [
-              Icon(Icons.waves_rounded, color: blue, size: 32),
-              SizedBox(width: 10),
-              Text(
-                'river',
-                style: TextStyle(
-                  fontWeight: FontWeight.w800,
-                  fontSize: 30,
-                  letterSpacing: -1,
+              Row(
+                children: [
+                  const Expanded(
+                    child: Padding(
+                      padding: EdgeInsets.all(16),
+                      child: Text(
+                        'Settings',
+                        style: TextStyle(
+                          fontSize: 22,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ),
+                  ),
+                  IconButton(
+                    tooltip: 'Close settings',
+                    onPressed: () => Navigator.pop(ctx),
+                    icon: const Icon(Icons.close),
+                  ),
+                ],
+              ),
+              Expanded(
+                child: AccountPanel(
+                  app: app,
+                  onSignOut: () async {
+                    Navigator.pop(ctx);
+                    await action(app.logout);
+                  },
                 ),
               ),
             ],
           ),
         ),
-        for (final entry in [
-          ('Home', Icons.home_outlined),
-          ('Friends', Icons.people_outline),
-          ('Account', Icons.settings_outlined),
-        ])
+      ),
+    );
+  }
+
+  Widget navigation() => Material(
+    color: Colors.white,
+    child: ListTileTheme(
+      data: const ListTileThemeData(
+        dense: true,
+        minTileHeight: 34,
+        minLeadingWidth: 20,
+        horizontalTitleGap: 8,
+        contentPadding: EdgeInsets.symmetric(horizontal: 12),
+        visualDensity: VisualDensity.compact,
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          const Padding(
+            padding: EdgeInsets.fromLTRB(14, 16, 14, 10),
+            child: Row(
+              children: [
+                Icon(Icons.waves_rounded, color: blue, size: 26),
+                SizedBox(width: 8),
+                Text(
+                  'river',
+                  style: TextStyle(
+                    fontWeight: FontWeight.w800,
+                    fontSize: 26,
+                    letterSpacing: -1,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          Row(
+            children: [
+              Expanded(
+                child: ListTile(
+                  selected: app.selected == null && section == 'Home',
+                  leading: const Icon(Icons.home_outlined, size: 20),
+                  title: const Text('Home'),
+                  onTap: () {
+                    setState(() => section = 'Home');
+                    open(null);
+                  },
+                ),
+              ),
+              IconButton(
+                tooltip: searchOpen ? 'Close search' : 'Search',
+                icon: Icon(searchOpen ? Icons.close : Icons.search, size: 20),
+                onPressed: () => setState(() {
+                  searchOpen = !searchOpen;
+                  if (!searchOpen) conversationQuery = '';
+                }),
+              ),
+            ],
+          ),
+          if (searchOpen)
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+              child: TextField(
+                key: const ValueKey('conversation-search'),
+                autofocus: true,
+                decoration: const InputDecoration(
+                  hintText: 'Search spaces and conversations',
+                  isDense: true,
+                  prefixIcon: Icon(Icons.search, size: 18),
+                  contentPadding: EdgeInsets.all(10),
+                ),
+                onChanged: (v) =>
+                    setState(() => conversationQuery = v.trim().toLowerCase()),
+              ),
+            ),
           ListTile(
-            selected: app.selected == null && section == entry.$1,
-            selectedColor: blue,
-            leading: Icon(entry.$2),
-            title: Text(entry.$1),
-            trailing: entry.$1 == 'Friends' && app.incomingRequests > 0
+            selected: app.selected == null && section == 'Friends',
+            leading: const Icon(Icons.people_outline, size: 20),
+            title: const Text('Friends'),
+            trailing: app.incomingRequests > 0
                 ? Badge(label: Text('${app.incomingRequests}'))
                 : null,
             onTap: () {
-              scaffold.currentState?.closeDrawer();
-              setState(() => section = entry.$1);
-              unawaited(app.open(null));
+              setState(() => section = 'Friends');
+              open(null);
             },
           ),
-        const Divider(indent: 20, endIndent: 20),
-        Expanded(
-          child: ListView(
-            children: [
-              for (final kind in ['space', 'dm']) ...[
-                ListTile(
-                  dense: true,
-                  title: Text(
-                    kind == 'space' ? 'YOUR SPACES' : 'CONVERSATIONS',
-                    style: const TextStyle(
-                      fontSize: 11,
-                      fontWeight: FontWeight.w700,
-                      color: muted,
-                      letterSpacing: 1,
-                    ),
-                  ),
-                  trailing: IconButton(
-                    tooltip: kind == 'space' ? 'New space' : 'New conversation',
-                    icon: const Icon(Icons.add, size: 18),
-                    onPressed: () => create(kind),
-                  ),
-                ),
-                if (kind == 'dm')
-                  Padding(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 16,
-                      vertical: 4,
-                    ),
-                    child: TextField(
-                      key: const ValueKey('conversation-search'),
-                      decoration: const InputDecoration(
-                        labelText: 'Find a conversation',
-                        prefixIcon: Icon(Icons.search),
-                      ),
-                      onChanged: (value) => setState(
-                        () => conversationQuery = value.trim().toLowerCase(),
+          Expanded(
+            child: ListView(
+              padding: EdgeInsets.zero,
+              children: [
+                for (final kind in ['space', 'dm']) ...[
+                  ListTile(
+                    title: Text(
+                      kind == 'space' ? 'YOUR SPACES' : 'CONVERSATIONS',
+                      style: const TextStyle(
+                        fontSize: 10,
+                        fontWeight: FontWeight.w700,
+                        color: muted,
+                        letterSpacing: .7,
                       ),
                     ),
+                    trailing: IconButton(
+                      tooltip: kind == 'space'
+                          ? 'New space'
+                          : 'New conversation',
+                      constraints: const BoxConstraints.tightFor(
+                        width: 32,
+                        height: 32,
+                      ),
+                      padding: EdgeInsets.zero,
+                      icon: const Icon(Icons.add, size: 18),
+                      onPressed: () => create(kind),
+                    ),
                   ),
-                for (final g in app.groups.where(
-                  (g) => kind == 'dm'
-                      ? ['dm', 'group'].contains(g['kind']) &&
-                            conversationMatches(g, conversationQuery)
-                      : ![
-                          'dm',
-                          'group',
-                          'channel',
-                          'post_comments',
-                          'call_chat',
-                        ].contains(g['kind']),
-                ))
-                  navigationGroup(g, kind),
+                  for (final g in app.groups.where(
+                    (g) =>
+                        (kind == 'dm'
+                            ? ['dm', 'group'].contains(g['kind'])
+                            : g['kind'] == 'space') &&
+                        (conversationMatches(g, conversationQuery) ||
+                            (kind == 'space' &&
+                                app
+                                    .channels(g['id'] as String)
+                                    .any(
+                                      (c) => conversationMatches(
+                                        c,
+                                        conversationQuery,
+                                      ),
+                                    ))),
+                  ))
+                    navigationGroup(g, kind),
+                ],
               ],
-            ],
+            ),
           ),
-        ),
-        if (app.matrixConnected)
+          RiverCallBar(api: app),
           ListTile(
-            leading: const Icon(Icons.add_link),
-            title: const Text('Join Matrix room'),
-            onTap: () => action(() async {
-              scaffold.currentState?.closeDrawer();
-              final target = await ask(
-                'Join a Matrix room',
-                '#room:example.org or matrix.to link',
-                maxLength: 1000,
-              );
-              if (target != null) await app.joinMatrixRoom(target);
-            }),
+            leading: const CircleAvatar(
+              radius: 15,
+              backgroundColor: Color(0xffe8efff),
+              child: Icon(Icons.person_outline, color: blue, size: 19),
+            ),
+            title: Text(
+              app.displayName(
+                app.user?['user_id'] as String? ??
+                    app.user?['username'] as String? ??
+                    '',
+              ),
+              overflow: TextOverflow.ellipsis,
+            ),
+            trailing: IconButton(
+              tooltip: 'Settings',
+              icon: const Icon(Icons.settings_outlined, size: 19),
+              onPressed: settings,
+            ),
+            onTap: settings,
           ),
-        const Divider(),
-        ListTile(
-          leading: const CircleAvatar(
-            backgroundColor: Color(0xffe8efff),
-            child: Icon(Icons.person_outline, color: blue),
-          ),
-          title: Text(app.user?['username'] as String? ?? ''),
-          subtitle: const Text('Gravitas account'),
-          trailing: IconButton(
-            tooltip: 'Sign out',
-            icon: const Icon(Icons.logout, size: 19),
-            onPressed: () => action(app.logout),
-          ),
-        ),
-        const SizedBox(height: 12),
-      ],
+          const SizedBox(height: 4),
+        ],
+      ),
     ),
   );
   Widget navigationGroup(Json g, String kind) => Column(
@@ -708,6 +773,11 @@ class _RiverShellState extends State<RiverShell> {
               Badge(label: Text('${g['unread_count']}')),
             if (kind == 'space')
               IconButton(
+                constraints: const BoxConstraints.tightFor(
+                  width: 28,
+                  height: 28,
+                ),
+                padding: EdgeInsets.zero,
                 tooltip: collapsed.contains(g['id'])
                     ? 'Expand channels'
                     : 'Collapse channels',
@@ -781,167 +851,7 @@ class _RiverShellState extends State<RiverShell> {
     padding: const EdgeInsets.symmetric(vertical: 12),
     child: Text(text, style: const TextStyle(color: muted, height: 1.5)),
   );
-  Widget home() => LayoutBuilder(
-    builder: (context, box) => ListView(
-      padding: EdgeInsets.all(box.maxWidth < 600 ? 20 : 36),
-      children: [
-        const Text(
-          'A LITTLE CLOSER, WHEREVER YOU ARE',
-          style: TextStyle(
-            color: blue,
-            fontSize: 11,
-            fontWeight: FontWeight.w700,
-            letterSpacing: 1.5,
-          ),
-        ),
-        const SizedBox(height: 10),
-        Text(
-          'Welcome to your river, ${app.user?['username']}.',
-          style: TextStyle(
-            fontSize: box.maxWidth < 600 ? 29 : 38,
-            fontWeight: FontWeight.w800,
-            color: ink,
-            letterSpacing: -1,
-          ),
-        ),
-        const SizedBox(height: 10),
-        const Text(
-          'Catch up, find your people, or start something good.',
-          style: TextStyle(color: muted, fontSize: 16),
-        ),
-        const SizedBox(height: 24),
-        Wrap(
-          spacing: 12,
-          runSpacing: 12,
-          children: [
-            FilledButton.icon(
-              onPressed: () => create('dm'),
-              icon: const Icon(Icons.add),
-              label: const Text('New conversation'),
-            ),
-            OutlinedButton.icon(
-              onPressed: () => create('space'),
-              icon: const Icon(Icons.grid_view_outlined),
-              label: const Text('Create a space'),
-            ),
-          ],
-        ),
-        const SizedBox(height: 28),
-        CatchUpPanel(app: app),
-        const SizedBox(height: 18),
-        if (app.threads.isNotEmpty)
-          panel('Your recent threads', Icons.reply, [
-            for (final e in app.threads)
-              ListTile(
-                title: Text(
-                  rendered(e)['body'] as String? ?? 'Thread',
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                ),
-                subtitle: Text('${e['reply_count']} replies'),
-                onTap: () =>
-                    openRiverThread(context, app, e['group_id'] as String, e),
-              ),
-          ]),
-        const SizedBox(height: 18),
-        for (final kind in ['post', 'discussion'])
-          Padding(
-            padding: const EdgeInsets.only(bottom: 18),
-            child: panel(
-              kind == 'post' ? 'Recent posts' : 'Recent discussions',
-              kind == 'post' ? Icons.article_outlined : Icons.forum_outlined,
-              [
-                if (!app.recent.any(
-                  (e) => e['type'] == 'cool.gravitas.river.$kind.v1',
-                ))
-                  empty(
-                    'Nothing here yet. Share an idea in one of your spaces.',
-                  ),
-                for (final e
-                    in app.recent
-                        .where(
-                          (e) => e['type'] == 'cool.gravitas.river.$kind.v1',
-                        )
-                        .take(6))
-                  ListTile(
-                    contentPadding: EdgeInsets.zero,
-                    title: Text(rendered(e)['title'] as String),
-                    subtitle: Text('${e['group_name']} · ${e['sender']}'),
-                    trailing: const Icon(Icons.north_east, size: 18),
-                    onTap: () => openRiverThread(
-                      context,
-                      app,
-                      e['group_id'] as String,
-                      e,
-                    ),
-                  ),
-              ],
-            ),
-          ),
-        panel('Your people & spaces', Icons.chat_bubble_outline, [
-          if (app.groups.isEmpty)
-            empty(
-              'Bring your people together. Create your first space or conversation.',
-            ),
-          for (final g
-              in app.groups
-                  .where((g) => ['space', 'dm', 'group'].contains(g['kind']))
-                  .take(12))
-            ListTile(
-              contentPadding: EdgeInsets.zero,
-              leading: Icon(
-                g['kind'] == 'dm' ? Icons.chat_outlined : Icons.tag,
-                color: blue,
-              ),
-              title: Text(g['name'] as String),
-              subtitle: Text(
-                g['membership'] == 'invite'
-                    ? 'You have an invitation'
-                    : '${(g['members'] as List).length} members',
-              ),
-              trailing: const Icon(Icons.chevron_right),
-              onTap: () => open(g['id'] as String),
-            ),
-        ]),
-        const SizedBox(height: 18),
-        panel('Drop-in calls', Icons.graphic_eq, [
-          if (app.activeCalls.isEmpty)
-            empty(
-              'No one is in a call yet. Join a voice channel or start a call in a conversation.',
-            ),
-          for (final call in app.activeCalls)
-            ListTile(
-              leading: const Icon(Icons.graphic_eq, color: blue),
-              title: Text(call['name'] as String),
-              subtitle: Text(
-                ((call['participants'] as List).cast<Json>())
-                    .map((p) => p['user_id'])
-                    .join(', '),
-              ),
-              trailing: const Icon(Icons.call_outlined),
-              onTap: () {
-                final target = app.groups
-                    .where((g) => g['id'] == call['group_id'])
-                    .firstOrNull;
-                if (target != null) joinRiverCall(context, app, target);
-              },
-            ),
-          for (final channel in app.groups.where(
-            (g) =>
-                g['channel_kind'] == 'drop_in' &&
-                g['membership'] == 'join' &&
-                !app.activeCalls.any((c) => c['group_id'] == g['id']),
-          ))
-            ListTile(
-              leading: const Icon(Icons.headphones_outlined),
-              title: Text(channel['name'] as String),
-              subtitle: const Text('Join a voice room'),
-              onTap: () => joinRiverCall(context, app, channel),
-            ),
-        ]),
-      ],
-    ),
-  );
+  Widget home() => RiverHome(app: app, open: open, create: create);
   Future<void> members(Json g) async {
     await showModalBottomSheet<void>(
       context: context,
@@ -1039,6 +949,9 @@ class _RiverShellState extends State<RiverShell> {
             g['encrypted'] == true
         ? 'Chat'
         : filter;
+    final directory =
+        g['kind'] == 'space' && viewFilter == 'Chat' && !spaceChat;
+    final voiceRoom = g['channel_kind'] == 'drop_in';
     final items = app.events.where((e) {
       if (viewFilter == 'Chat') {
         final relation = (e['content'] as Json)['m.relates_to'] as Json?;
@@ -1051,7 +964,7 @@ class _RiverShellState extends State<RiverShell> {
       return e['type'] ==
           'cool.gravitas.river.${viewFilter == 'Posts' ? 'post' : 'discussion'}.v1';
     }).toList();
-    final listKey = '${g['id']}:$viewFilter';
+    final listKey = '${g['id']}:$viewFilter:$spaceChat';
     final last = items.lastOrNull?['event_id'] as String?;
     if (renderedList != listKey || renderedLast != last) {
       final stick =
@@ -1071,11 +984,17 @@ class _RiverShellState extends State<RiverShell> {
       children: [
         Container(
           color: Colors.white,
-          padding: const EdgeInsets.all(18),
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
           child: Column(
             children: [
               Row(
                 children: [
+                  if (MediaQuery.sizeOf(context).width < 1000)
+                    IconButton(
+                      tooltip: 'Open navigation menu',
+                      onPressed: () => scaffold.currentState?.openDrawer(),
+                      icon: const Icon(Icons.menu),
+                    ),
                   IconButton(
                     tooltip: 'Home',
                     onPressed: () => open(null),
@@ -1358,31 +1277,12 @@ class _RiverShellState extends State<RiverShell> {
                     label: const Text('Back to space'),
                   ),
                 ),
-              if (g['kind'] == 'space' &&
-                  app.channels(g['id'] as String).isNotEmpty)
-                SizedBox(
-                  height: 44,
-                  child: ListView(
-                    scrollDirection: Axis.horizontal,
-                    children: [
-                      for (final c in app.channels(g['id'] as String))
-                        Padding(
-                          padding: const EdgeInsets.only(right: 8),
-                          child: ActionChip(
-                            avatar: Icon(
-                              c['channel_kind'] == 'drop_in'
-                                  ? Icons.headphones_outlined
-                                  : Icons.tag,
-                              size: 16,
-                            ),
-                            label: Text(c['name'] as String),
-                            onPressed: () => open(c['id'] as String),
-                          ),
-                        ),
-                    ],
-                  ),
+              if (spaceChat && g['kind'] == 'space')
+                TextButton.icon(
+                  onPressed: () => setState(() => spaceChat = false),
+                  icon: const Icon(Icons.arrow_back, size: 16),
+                  label: const Text('Back to rooms'),
                 ),
-              const SizedBox(height: 12),
               if (g['kind'] == 'space' &&
                   g['matrix_only'] != true &&
                   g['encrypted'] != true)
@@ -1400,12 +1300,15 @@ class _RiverShellState extends State<RiverShell> {
                     ButtonSegment(value: 'Posts', label: Text('Posts')),
                   ],
                   selected: {filter},
-                  onSelectionChanged: (v) => setState(() => filter = v.first),
+                  onSelectionChanged: (v) => setState(() {
+                    filter = v.first;
+                    spaceChat = false;
+                  }),
                 ),
             ],
           ),
         ),
-        if (newMessages)
+        if (newMessages && !directory && !voiceRoom)
           TextButton.icon(
             onPressed: () {
               setState(() => newMessages = false);
@@ -1414,7 +1317,10 @@ class _RiverShellState extends State<RiverShell> {
             icon: const Icon(Icons.arrow_downward, size: 16),
             label: const Text('New messages'),
           ),
-        if (app.nextCursor != null)
+        if (app.nextCursor != null &&
+            !directory &&
+            !voiceRoom &&
+            viewFilter == 'Chat')
           TextButton.icon(
             onPressed: app.loadingOlder ? null : () => action(app.older),
             icon: const Icon(Icons.history, size: 16),
@@ -1422,18 +1328,27 @@ class _RiverShellState extends State<RiverShell> {
               app.loadingOlder ? 'Loading…' : 'Load earlier messages',
             ),
           ),
-        if (g['channel_kind'] == 'drop_in')
-          Padding(
-            padding: const EdgeInsets.all(12),
-            child: Text(
-              'Drop in to talk, turn on your camera or share your screen. Room chat stays here.',
-              style: TextStyle(
-                color: Theme.of(context).colorScheme.onSurfaceVariant,
-              ),
-            ),
-          ),
         Expanded(
-          child: viewFilter != 'Chat'
+          child: directory
+              ? ListView(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 8,
+                  ),
+                  children: [
+                    SpaceRoomList(
+                      app: app,
+                      space: g['id'] as String,
+                      open: open,
+                      openSpaceChat: () => setState(() => spaceChat = true),
+                    ),
+                  ],
+                )
+              : g['channel_kind'] == 'drop_in'
+              ? Center(
+                  child: VoiceRoomTile(app: app, channel: g),
+                )
+              : viewFilter != 'Chat'
               ? EntryFeed(
                   key: ValueKey('${g['id']}:$viewFilter'),
                   app: app,
@@ -1449,101 +1364,101 @@ class _RiverShellState extends State<RiverShell> {
                 )
               : ListView.builder(
                   controller: timeline,
-                  padding: const EdgeInsets.all(20),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 4,
+                  ),
                   itemCount: items.length,
                   itemBuilder: (context, index) => eventCard(items[index], g),
                 ),
         ),
-        SafeArea(
-          top: false,
-          child: Container(
-            color: Colors.white,
-            padding: const EdgeInsets.all(16),
-            child: Column(
-              children: [
-                if (attachments.isNotEmpty && viewFilter == 'Chat')
-                  PendingAttachments(
-                    files: attachments,
-                    remove: (f) => setState(() {
-                      attachments.remove(f);
-                      composerChanged();
-                    }),
-                  ),
-                if (viewFilter != 'Chat')
-                  FilledButton.icon(
-                    onPressed: () => showDialog<bool>(
-                      context: context,
-                      builder: (_) => EntryEditor(
-                        app: app,
-                        room: g['id'] as String,
-                        kind: viewFilter == 'Posts' ? 'post' : 'discussion',
-                      ),
+        if (!voiceRoom && !directory)
+          SafeArea(
+            top: false,
+            child: Container(
+              color: Colors.white,
+              padding: const EdgeInsets.all(8),
+              child: Column(
+                children: [
+                  if (attachments.isNotEmpty && viewFilter == 'Chat')
+                    PendingAttachments(
+                      files: attachments,
+                      remove: (f) => setState(() {
+                        attachments.remove(f);
+                        composerChanged();
+                      }),
                     ),
-                    icon: const Icon(Icons.edit_outlined),
-                    label: Text(
-                      viewFilter == 'Posts' ? 'New post' : 'New discussion',
-                    ),
-                  )
-                else
-                  Row(
-                    crossAxisAlignment: CrossAxisAlignment.end,
-                    children: [
-                      IconButton(
-                        tooltip: 'Attach files',
-                        onPressed:
-                            sending ||
-                                (!app.matrixConnected && app.files == null)
-                            ? null
-                            : () => action(() async {
-                                if (app.matrixConnected) {
-                                  await sendMatrixAttachment(
-                                    context,
-                                    app,
-                                    g['id'] as String,
-                                  );
-                                  return;
-                                }
-                                final picked = await app.files!.pick(
-                                  FileScope('room', g['id'] as String),
-                                  existing: attachments,
-                                );
-                                if (mounted && app.selected == g['id']) {
-                                  setState(() {
-                                    attachments.addAll(picked);
-                                    composerChanged();
-                                  });
-                                }
-                              }),
-                        icon: const Icon(Icons.attach_file),
-                      ),
-                      Expanded(
-                        child: RichComposer(
-                          controller: draft,
-                          label: 'Message',
-                          hint: 'Message ${g['name']}…',
-                          onSubmit: sending ? null : () => send(g),
+                  if (viewFilter != 'Chat')
+                    FilledButton.icon(
+                      onPressed: () => showDialog<bool>(
+                        context: context,
+                        builder: (_) => EntryEditor(
+                          app: app,
+                          room: g['id'] as String,
+                          kind: viewFilter == 'Posts' ? 'post' : 'discussion',
                         ),
                       ),
-                      const SizedBox(width: 10),
-                      IconButton.filled(
-                        tooltip: 'Send',
-                        onPressed: sending ? null : () => send(g),
-                        icon: Icon(
-                          sending ? Icons.hourglass_top : Icons.arrow_upward,
-                        ),
+                      icon: const Icon(Icons.edit_outlined),
+                      label: Text(
+                        viewFilter == 'Posts' ? 'New post' : 'New discussion',
                       ),
-                    ],
-                  ),
-              ],
+                    )
+                  else
+                    Row(
+                      crossAxisAlignment: CrossAxisAlignment.end,
+                      children: [
+                        Expanded(
+                          child: RichComposer(
+                            controller: draft,
+                            onAttach:
+                                sending ||
+                                    (!app.matrixConnected && app.files == null)
+                                ? null
+                                : () => action(() async {
+                                    if (app.matrixConnected) {
+                                      await sendMatrixAttachment(
+                                        context,
+                                        app,
+                                        g['id'] as String,
+                                      );
+                                      return;
+                                    }
+                                    final picked = await app.files!.pick(
+                                      FileScope('room', g['id'] as String),
+                                      existing: attachments,
+                                    );
+                                    if (mounted && app.selected == g['id']) {
+                                      setState(() {
+                                        attachments.addAll(picked);
+                                        composerChanged();
+                                      });
+                                    }
+                                  }),
+                            label: 'Message',
+                            hint: 'Message ${g['name']}…',
+                            onSubmit: sending ? null : () => send(g),
+                          ),
+                        ),
+                        const SizedBox(width: 10),
+                        IconButton.filled(
+                          tooltip: 'Send',
+                          onPressed: sending ? null : () => send(g),
+                          icon: Icon(
+                            sending ? Icons.hourglass_top : Icons.arrow_upward,
+                          ),
+                        ),
+                      ],
+                    ),
+                ],
+              ),
             ),
           ),
-        ),
       ],
     );
   }
 
   Widget eventCard(Json e, Json g) => Padding(
-    padding: const EdgeInsets.only(bottom: 14),
+    padding: const EdgeInsets.symmetric(vertical: 3),
     child: e['type'] == 'cool.gravitas.river.invitation.v1'
         ? InvitationCard(app: app, event: e)
         : ContentCard(

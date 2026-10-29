@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'api.dart';
+import 'comment_tree.dart';
 import 'content_widgets.dart';
 import 'rich_composer.dart';
 
@@ -199,7 +200,7 @@ class _PostScreenState extends State<PostScreen> {
                       ),
                       const SizedBox(height: 8),
                       Text(
-                        '${entry['sender']} · ${policy?['visibility'] == 'public' ? 'Public post' : 'Members only'}',
+                        '${widget.app.displayName(entry['sender'] as String)} · ${policy?['visibility'] == 'public' ? 'Public post' : 'Members only'}',
                       ),
                       const SizedBox(height: 20),
                       RichBody((entry['content'] as Json)['body'] as String),
@@ -265,42 +266,38 @@ class _PostScreenState extends State<PostScreen> {
                           onPressed: loading ? null : () => load(older: true),
                           child: const Text('Load older comments'),
                         ),
-                      for (final c in comments)
-                        Padding(
-                          padding: const EdgeInsets.symmetric(vertical: 6),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                c['audience'] == 'members'
-                                    ? 'Space members only'
-                                    : 'Public comment',
-                                style: Theme.of(context).textTheme.labelSmall,
-                              ),
-                              if (replyParent(c) != policy?['anchor_id'] &&
-                                  replyParent(c) != widget.event)
-                                Text(
-                                  replyLabel(c),
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: Theme.of(context).textTheme.labelSmall,
-                                ),
-                              ContentCard(
-                                app: widget.app,
-                                room: c['comment_room'] as String,
-                                event: c,
-                                publicPostId: widget.event,
-                                changed: load,
-                                reply: () => setState(() {
-                                  parent = c;
-                                  if (c['audience'] == 'members') {
-                                    draftAudience = 'members';
-                                  }
-                                }),
-                              ),
-                            ],
-                          ),
+                      CommentTree(
+                        events: comments,
+                        parentOf: replyParent,
+                        replyTarget: parent?['event_id'] as String?,
+                        composer: data?['can_comment'] == true
+                            ? replyComposer()
+                            : null,
+                        builder: (c) => Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
+                            Text(
+                              c['audience'] == 'members'
+                                  ? 'Space members only'
+                                  : 'Public comment',
+                              style: Theme.of(context).textTheme.labelSmall,
+                            ),
+                            ContentCard(
+                              app: widget.app,
+                              room: c['comment_room'] as String,
+                              event: c,
+                              publicPostId: widget.event,
+                              changed: load,
+                              reply: () => setState(() {
+                                parent = c;
+                                if (c['audience'] == 'members') {
+                                  draftAudience = 'members';
+                                }
+                              }),
+                            ),
+                          ],
                         ),
+                      ),
                       if (widget.app.user == null)
                         UsernameLogin(
                           defaultDomain: widget.app.defaultDomain,
@@ -320,47 +317,13 @@ class _PostScreenState extends State<PostScreen> {
               ),
             ),
           ),
-          if (data?['can_comment'] == true)
-            SafeArea(
-              top: false,
-              child: Padding(
-                padding: const EdgeInsets.all(12),
-                child: Column(
-                  children: [
-                    Row(
-                      children: [
-                        Expanded(
-                          child: Text(
-                            (draftAudience ?? commentAudience) == 'members'
-                                ? 'Your reply is visible to space members.'
-                                : 'Your reply is public.',
-                          ),
-                        ),
-                        if (parent != null)
-                          TextButton(
-                            onPressed: () => setState(() => parent = null),
-                            child: const Text('Cancel reply'),
-                          ),
-                      ],
-                    ),
-                    Row(
-                      crossAxisAlignment: CrossAxisAlignment.end,
-                      children: [
-                        Expanded(
-                          child: RichComposer(
-                            controller: draft,
-                            label: 'Write a comment',
-                            onSubmit: sending ? null : send,
-                          ),
-                        ),
-                        IconButton(
-                          tooltip: 'Send comment',
-                          onPressed: sending ? null : send,
-                          icon: const Icon(Icons.send),
-                        ),
-                      ],
-                    ),
-                  ],
+          if (data?['can_comment'] == true && parent == null)
+            Center(
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 850),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 20),
+                  child: replyComposer(),
                 ),
               ),
             ),
@@ -368,6 +331,50 @@ class _PostScreenState extends State<PostScreen> {
       ),
     );
   }
+
+  Widget replyComposer() => SafeArea(
+    top: false,
+    child: Padding(
+      padding: const EdgeInsets.symmetric(vertical: 8),
+      child: Column(
+        children: [
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  (draftAudience ?? commentAudience) == 'members'
+                      ? 'Your reply is visible to space members.'
+                      : 'Your reply is public.',
+                ),
+              ),
+              if (parent != null)
+                TextButton(
+                  onPressed: () => setState(() => parent = null),
+                  child: const Text('Cancel reply'),
+                ),
+            ],
+          ),
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: [
+              Expanded(
+                child: RichComposer(
+                  controller: draft,
+                  label: 'Write a comment',
+                  onSubmit: sending ? null : send,
+                ),
+              ),
+              IconButton(
+                tooltip: 'Send comment',
+                onPressed: sending ? null : send,
+                icon: const Icon(Icons.send),
+              ),
+            ],
+          ),
+        ],
+      ),
+    ),
+  );
 
   String get commentAudience =>
       parent?['audience'] == 'members' ||
@@ -543,7 +550,13 @@ class MarkdownShortcuts extends StatelessWidget {
 }
 
 class MarkdownToolbar extends StatelessWidget {
-  const MarkdownToolbar({super.key, required this.controller});
+  const MarkdownToolbar({
+    super.key,
+    required this.controller,
+    this.inline = false,
+    this.enabled = true,
+  });
+  final bool inline, enabled;
   final TextEditingController controller;
   void insert(String before, String after) {
     final s = controller.selection;
@@ -560,28 +573,29 @@ class MarkdownToolbar extends StatelessWidget {
   }
 
   @override
-  Widget build(BuildContext context) => SingleChildScrollView(
-    scrollDirection: Axis.horizontal,
-    child: Row(
+  Widget build(BuildContext context) {
+    final row = Row(
+      mainAxisSize: MainAxisSize.min,
       children: [
-        IconButton(
-          tooltip: 'Preview formatting',
-          icon: const Icon(Icons.visibility_outlined, size: 19),
-          onPressed: () => showDialog<void>(
-            context: context,
-            builder: (context) => AlertDialog(
-              title: const Text('Preview'),
-              scrollable: true,
-              content: SizedBox(width: 600, child: RichBody(controller.text)),
-              actions: [
-                TextButton(
-                  onPressed: () => Navigator.pop(context),
-                  child: const Text('Close'),
-                ),
-              ],
+        if (!inline)
+          IconButton(
+            tooltip: 'Preview formatting',
+            icon: const Icon(Icons.visibility_outlined, size: 19),
+            onPressed: () => showDialog<void>(
+              context: context,
+              builder: (context) => AlertDialog(
+                title: const Text('Preview'),
+                scrollable: true,
+                content: SizedBox(width: 600, child: RichBody(controller.text)),
+                actions: [
+                  TextButton(
+                    onPressed: () => Navigator.pop(context),
+                    child: const Text('Close'),
+                  ),
+                ],
+              ),
             ),
           ),
-        ),
         for (final item in <(String, IconData, String, String)>[
           ('Bold', Icons.format_bold, '**', '**'),
           ('Italic', Icons.format_italic, '_', '_'),
@@ -596,10 +610,13 @@ class MarkdownToolbar extends StatelessWidget {
         ])
           IconButton(
             tooltip: item.$1,
-            onPressed: () => insert(item.$3, item.$4),
+            onPressed: enabled ? () => insert(item.$3, item.$4) : null,
             icon: Icon(item.$2, size: 19),
           ),
       ],
-    ),
-  );
+    );
+    return inline
+        ? row
+        : SingleChildScrollView(scrollDirection: Axis.horizontal, child: row);
+  }
 }

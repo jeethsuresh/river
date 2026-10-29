@@ -175,6 +175,7 @@ void main() {
         expect(find.text('Network unavailable'), findsOneWidget);
         expect(find.text('Older in !one:example.org'), findsOneWidget);
         expect(find.text('Latest in !one:example.org'), findsOneWidget);
+        await tester.ensureVisible(find.text('Markdown'));
         await tester.tap(find.text('Markdown'));
         await tester.pumpAndSettle();
         expect(
@@ -363,6 +364,7 @@ void main() {
       fixture.engine.draftRead = Completer<void>();
       await tester.pumpWidget(RiverApp(api: api, boot: false));
       await tester.pump();
+      await tester.ensureVisible(find.text('Markdown'));
       await tester.tap(find.text('Markdown'));
       await tester.pump();
       await tester.enterText(find.byType(TextField).last, 'New typing');

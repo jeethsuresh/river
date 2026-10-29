@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_markdown_plus/flutter_markdown_plus.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'api.dart';
+import 'comment_tree.dart';
 import 'publishing_widgets.dart';
 import 'package:flutter/services.dart';
 import 'attachment_widgets.dart';
@@ -166,11 +167,13 @@ class _ReactionBarState extends State<ReactionBar> {
   @override
   Widget build(BuildContext context) => Wrap(
     spacing: 6,
-    runSpacing: 6,
+    runSpacing: 2,
     crossAxisAlignment: WrapCrossAlignment.center,
     children: [
       for (final r in widget.summary)
         FilterChip(
+          visualDensity: VisualDensity.compact,
+          materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
           label: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
@@ -191,6 +194,11 @@ class _ReactionBarState extends State<ReactionBar> {
               : (_) => react(r['key'] as String),
         ),
       IconButton(
+        style: IconButton.styleFrom(
+          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+        ),
+        constraints: const BoxConstraints.tightFor(width: 32, height: 28),
+        padding: EdgeInsets.zero,
         tooltip: widget.enabled ? 'Add reaction' : 'Sign in to react',
         onPressed: busy || !widget.enabled ? null : choose,
         icon: const Icon(Icons.add_reaction_outlined, size: 20),
@@ -229,142 +237,152 @@ class ContentCard extends StatelessWidget {
           'cool.gravitas.river.post.v1',
           'cool.gravitas.river.discussion.v1',
         ].contains(event['type']);
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(18),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                const CircleAvatar(
-                  radius: 15,
-                  child: Icon(Icons.person_outline, size: 18),
-                ),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: Text(
-                    event['sender'] as String,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
-                      fontWeight: FontWeight.w600,
-                      fontSize: 12,
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 8),
-                Text(
-                  '${t.hour.toString().padLeft(2, '0')}:${t.minute.toString().padLeft(2, '0')}${event['edited'] == true ? ' · edited' : ''}',
-                  style: const TextStyle(fontSize: 11),
-                ),
-              ],
-            ),
-            if (c['title'] != null)
-              Padding(
-                padding: const EdgeInsets.only(top: 16),
-                child: Text(
-                  c['title'] as String,
-                  style: const TextStyle(
-                    fontSize: 22,
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 2),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const CircleAvatar(
+                radius: 15,
+                child: Icon(Icons.person_outline, size: 18),
               ),
-            const SizedBox(height: 12),
-            if (event['type'] == 'm.room.encrypted')
-              const Text(
-                'Encrypted message · verify this device or restore your recovery key to read it.',
-              )
-            else if ((event['unsigned'] as Json?)?['redacted_because'] != null)
-              const Text('Message removed')
-            else if ([
-                  'm.file',
-                  'm.image',
-                  'm.audio',
-                  'm.video',
-                ].contains(c['msgtype']) ||
-                event['type'] == 'm.sticker')
-              MatrixAttachmentCard(
-                app: app,
-                content: c,
-                sticker: event['type'] == 'm.sticker',
-              )
-            else
-              RichBody(c['body'] as String? ?? ''),
-            for (final file
-                in ((c['cool.gravitas.river.attachments'] as List?) ?? [])
-                    .cast<Json>())
-              AttachmentCard(app: app, file: file),
-            const SizedBox(height: 10),
-            ReactionBar(
-              summary: summary,
-              enabled: app.user != null,
-              change: (emoji, active) async {
-                if (publicPostId != null ||
-                    event['type'] == 'cool.gravitas.river.post.v1') {
-                  await app.postReaction(
-                    publicPostId ?? event['event_id'] as String,
-                    emoji,
-                    active,
-                    target: publicPostId == null
-                        ? null
-                        : event['event_id'] as String,
-                  );
-                  if (changed == null) await app.refresh();
-                } else {
-                  await app.react(
-                    room,
-                    event['event_id'] as String,
-                    emoji,
-                    active,
-                  );
-                }
-                await changed?.call();
-              },
-            ),
-            Wrap(
-              spacing: 8,
-              children: [
-                TextButton.icon(
-                  onPressed: app.user == null ? null : reply,
-                  icon: const Icon(Icons.reply, size: 18),
-                  label: Text(
-                    replies == 0
-                        ? 'Reply'
-                        : replies == 1
-                        ? '1 reply'
-                        : '$replies replies',
-                  ),
-                ),
-                if (event['type'] == 'cool.gravitas.river.post.v1' &&
-                    (event['publication'] as Json?)?['visibility'] == 'public')
-                  TextButton.icon(
-                    onPressed: () => Clipboard.setData(
-                      ClipboardData(
-                        text: postLink(event['event_id'] as String),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      app.displayName(event['sender'] as String),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        fontWeight: FontWeight.w600,
+                        fontSize: 13,
                       ),
                     ),
-                    icon: const Icon(Icons.link, size: 17),
-                    label: const Text('Copy public link'),
-                  ),
-                if (canEdit)
-                  TextButton.icon(
-                    onPressed: () async {
-                      await showDialog<bool>(
-                        context: context,
-                        builder: (_) =>
-                            EntryEditor(app: app, room: room, entry: event),
-                      );
-                      await changed?.call();
-                    },
-                    icon: const Icon(Icons.edit_outlined, size: 17),
-                    label: const Text('Edit'),
-                  ),
-              ],
+                    Text(
+                      '${t.hour.toString().padLeft(2, '0')}:${t.minute.toString().padLeft(2, '0')}${event['edited'] == true ? ' · edited' : ''}',
+                      style: TextStyle(
+                        fontSize: 10,
+                        color: Theme.of(context).colorScheme.onSurfaceVariant,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          if (c['title'] != null)
+            Padding(
+              padding: const EdgeInsets.only(top: 6),
+              child: Text(
+                c['title'] as String,
+                style: const TextStyle(
+                  fontSize: 22,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
             ),
-          ],
-        ),
+          const SizedBox(height: 3),
+          if (event['type'] == 'm.room.encrypted')
+            const Text(
+              'Encrypted message · verify this device or restore your recovery key to read it.',
+            )
+          else if ((event['unsigned'] as Json?)?['redacted_because'] != null)
+            const Text('Message removed')
+          else if ([
+                'm.file',
+                'm.image',
+                'm.audio',
+                'm.video',
+              ].contains(c['msgtype']) ||
+              event['type'] == 'm.sticker')
+            MatrixAttachmentCard(
+              app: app,
+              content: c,
+              sticker: event['type'] == 'm.sticker',
+            )
+          else
+            RichBody(c['body'] as String? ?? ''),
+          for (final file
+              in ((c['cool.gravitas.river.attachments'] as List?) ?? [])
+                  .cast<Json>())
+            AttachmentCard(app: app, file: file),
+          const SizedBox(height: 2),
+          Wrap(
+            spacing: 8,
+            children: [
+              TextButton.icon(
+                style: TextButton.styleFrom(
+                  visualDensity: VisualDensity.compact,
+                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  padding: const EdgeInsets.symmetric(horizontal: 4),
+                  minimumSize: const Size(0, 28),
+                ),
+                onPressed: app.user == null ? null : reply,
+                icon: const Icon(Icons.reply, size: 18),
+                label: Text(
+                  replies == 0
+                      ? 'Reply'
+                      : replies == 1
+                      ? '1 reply'
+                      : '$replies replies',
+                ),
+              ),
+              ReactionBar(
+                summary: summary,
+                enabled: app.user != null,
+                change: (emoji, active) async {
+                  if (publicPostId != null ||
+                      event['type'] == 'cool.gravitas.river.post.v1') {
+                    await app.postReaction(
+                      publicPostId ?? event['event_id'] as String,
+                      emoji,
+                      active,
+                      target: publicPostId == null
+                          ? null
+                          : event['event_id'] as String,
+                    );
+                    if (changed == null) await app.refresh();
+                  } else {
+                    await app.react(
+                      room,
+                      event['event_id'] as String,
+                      emoji,
+                      active,
+                    );
+                  }
+                  await changed?.call();
+                },
+              ),
+              if (event['type'] == 'cool.gravitas.river.post.v1' &&
+                  (event['publication'] as Json?)?['visibility'] == 'public')
+                TextButton.icon(
+                  onPressed: () => Clipboard.setData(
+                    ClipboardData(text: postLink(event['event_id'] as String)),
+                  ),
+                  icon: const Icon(Icons.link, size: 17),
+                  label: const Text('Copy public link'),
+                ),
+              if (canEdit)
+                TextButton.icon(
+                  onPressed: () async {
+                    await showDialog<bool>(
+                      context: context,
+                      builder: (_) =>
+                          EntryEditor(app: app, room: room, entry: event),
+                    );
+                    await changed?.call();
+                  },
+                  icon: const Icon(Icons.edit_outlined, size: 17),
+                  label: const Text('Edit'),
+                ),
+            ],
+          ),
+        ],
       ),
     );
   }
@@ -791,7 +809,7 @@ class _ThreadScreenState extends State<ThreadScreen> {
         Expanded(
           child: ListView(
             controller: scroll,
-            padding: const EdgeInsets.all(20),
+            padding: const EdgeInsets.all(12),
             children: [
               if (root != null)
                 ContentCard(
@@ -812,83 +830,74 @@ class _ThreadScreenState extends State<ThreadScreen> {
                   padding: EdgeInsets.all(20),
                   child: Text('Start the thread.'),
                 ),
-              for (final e in events)
-                Padding(
-                  padding: const EdgeInsets.only(bottom: 12),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      if (getReplyParent(e) != root?['event_id'])
-                        Padding(
-                          padding: const EdgeInsets.only(left: 12, bottom: 6),
-                          child: Text(
-                            '↳ Reply to ${events.where((p) => p['event_id'] == getReplyParent(e)).firstOrNull?['sender'] ?? 'an earlier reply'}',
-                            style: Theme.of(context).textTheme.bodySmall,
-                          ),
-                        ),
-                      ContentCard(
-                        app: widget.app,
-                        room: widget.room,
-                        event: e,
-                        reply: () => setState(() => parent = e),
-                        changed: () => load(),
-                      ),
-                    ],
-                  ),
+              CommentTree(
+                events: events,
+                parentOf: getReplyParent,
+                replyTarget: parent?['event_id'] as String?,
+                composer: replyComposer(),
+                builder: (e) => ContentCard(
+                  app: widget.app,
+                  room: widget.room,
+                  event: e,
+                  reply: () => setState(() => parent = e),
+                  changed: () => load(),
                 ),
+              ),
             ],
           ),
         ),
-        if (root != null)
-          SafeArea(
-            top: false,
-            child: Padding(
-              padding: const EdgeInsets.all(16),
-              child: Column(
-                children: [
-                  if (parent != null)
-                    Row(
-                      children: [
-                        Expanded(
-                          child: Text(
-                            'Replying to ${parent!['sender']}',
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                        ),
-                        IconButton(
-                          tooltip: 'Cancel quoted reply',
-                          onPressed: () => setState(() => parent = null),
-                          icon: const Icon(Icons.close),
-                        ),
-                      ],
-                    ),
-                  Row(
-                    crossAxisAlignment: CrossAxisAlignment.end,
-                    children: [
-                      Expanded(
-                        child: RichComposer(
-                          controller: draft,
-                          label: 'Reply',
-                          hint: 'Write a reply…',
-                          onSubmit: sending ? null : send,
-                        ),
-                      ),
-                      const SizedBox(width: 10),
-                      IconButton.filled(
-                        tooltip: 'Send reply',
-                        onPressed: sending ? null : send,
-                        icon: Icon(
-                          sending ? Icons.hourglass_top : Icons.arrow_upward,
-                        ),
-                      ),
-                    ],
-                  ),
-                ],
-              ),
-            ),
+        if (root != null && parent == null)
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 12),
+            child: replyComposer(),
           ),
       ],
+    ),
+  );
+  Widget replyComposer() => SafeArea(
+    top: false,
+    child: Padding(
+      padding: const EdgeInsets.symmetric(vertical: 8),
+      child: Column(
+        children: [
+          if (parent != null)
+            Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    'Replying to ${widget.app.displayName(parent!['sender'] as String)}',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+                IconButton(
+                  tooltip: 'Cancel quoted reply',
+                  onPressed: () => setState(() => parent = null),
+                  icon: const Icon(Icons.close),
+                ),
+              ],
+            ),
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: [
+              Expanded(
+                child: RichComposer(
+                  controller: draft,
+                  label: 'Reply',
+                  hint: 'Write a reply…',
+                  onSubmit: sending ? null : send,
+                ),
+              ),
+              const SizedBox(width: 10),
+              IconButton.filled(
+                tooltip: 'Send reply',
+                onPressed: sending ? null : send,
+                icon: Icon(sending ? Icons.hourglass_top : Icons.arrow_upward),
+              ),
+            ],
+          ),
+        ],
+      ),
     ),
   );
 }

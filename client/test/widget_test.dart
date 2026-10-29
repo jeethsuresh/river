@@ -28,7 +28,7 @@ void main() {
         ];
         await tester.pumpWidget(RiverApp(api: api, boot: false));
         await tester.pumpAndSettle();
-        expect(find.text('Welcome to your river, Alice.'), findsOneWidget);
+        expect(find.text('Welcome, Alice.'), findsOneWidget);
         expect(tester.takeException(), isNull);
         api.selected = 'space';
         api.notifyListeners();
@@ -67,7 +67,7 @@ void main() {
       {
         'id': 'one',
         'name': 'Private space',
-        'kind': 'space',
+        'kind': 'group',
         'membership': 'join',
         'owner': true,
         'members': <Json>[],
@@ -76,6 +76,7 @@ void main() {
     api.selected = 'one';
     await tester.pumpWidget(RiverApp(api: api, boot: false));
     await tester.pumpAndSettle();
+    await tester.ensureVisible(find.text('Markdown'));
     await tester.tap(find.text('Markdown'));
     await tester.pumpAndSettle();
     await tester.enterText(find.byType(TextField).last, 'Private unsent draft');
@@ -116,6 +117,6 @@ void main() {
     api.notifyListeners();
     await tester.pumpAndSettle();
     expect(find.text('private-member'), findsNothing);
-    expect(find.text('Welcome to your river, bob.'), findsOneWidget);
+    expect(find.text('Welcome, bob.'), findsOneWidget);
   });
 }

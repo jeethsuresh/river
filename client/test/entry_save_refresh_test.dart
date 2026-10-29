@@ -63,6 +63,12 @@ void main() {
       find.widgetWithText(TextFormField, 'Title'),
       'New post',
     );
+    await tester.ensureVisible(
+      find.descendant(
+        of: find.byType(RichComposer),
+        matching: find.text('Markdown'),
+      ),
+    );
     await tester.tap(
       find.descendant(
         of: find.byType(RichComposer),
@@ -152,6 +158,12 @@ void main() {
       await tester.enterText(
         find.widgetWithText(TextFormField, 'Title'),
         'Kept draft',
+      );
+      await tester.ensureVisible(
+        find.descendant(
+          of: find.byType(RichComposer),
+          matching: find.text('Markdown'),
+        ),
       );
       await tester.tap(
         find.descendant(

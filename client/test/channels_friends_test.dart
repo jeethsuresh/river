@@ -227,6 +227,7 @@ void main() {
       expect(api.selected, childId);
       expect(find.text('Back to space'), findsOneWidget);
       expect(find.byType(Drawer), findsNothing);
+      await tester.ensureVisible(find.text('Markdown'));
       await tester.tap(find.text('Markdown'));
       await tester.pumpAndSettle();
       await tester.enterText(find.byType(TextField).last, 'Meet tomorrow');

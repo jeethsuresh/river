@@ -93,7 +93,9 @@ class RiverCalls extends ChangeNotifier {
         return;
       }
       identity = result['identity'] as String;
-      chat = result['call_chat_id'] as String?;
+      chat = next['channel_kind'] == 'drop_in'
+          ? null
+          : result['call_chat_id'] as String?;
       if (android) await service();
       final media = Room(
         roomOptions: RoomOptions(
@@ -296,6 +298,9 @@ class RiverCalls extends ChangeNotifier {
     chat = null;
     heartbeat?.cancel();
     heartbeat = null;
+    // Reflect the ended call immediately while native tracks and the server
+    // lease are being released. Joining another call still awaits this cleanup.
+    notifyListeners();
     await listener?.dispose();
     listener = null;
     previous?.removeListener(changed);

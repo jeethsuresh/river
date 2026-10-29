@@ -26,6 +26,7 @@ class RichComposer extends StatefulWidget {
     this.enabled = true,
     this.compact = true,
     this.onSubmit,
+    this.onAttach,
     this.onChanged,
     this.validator,
   });
@@ -34,7 +35,7 @@ class RichComposer extends StatefulWidget {
   final int maxLength;
   final double minHeight, maxHeight;
   final bool enabled, compact;
-  final VoidCallback? onSubmit;
+  final VoidCallback? onSubmit, onAttach;
   final ValueChanged<String>? onChanged;
   final FormFieldValidator<String>? validator;
 
@@ -54,8 +55,8 @@ class _RichComposerState extends State<RichComposer> {
   );
   late q.QuillController editor;
   StreamSubscription<q.DocChange>? subscription;
-  String mode = 'Write', loaded = '';
-  bool syncing = false, extended = false, toolsOpen = false;
+  String mode = 'Write', loaded = '', editMode = 'Write';
+  bool syncing = false, extended = false;
 
   @override
   void initState() {
@@ -205,6 +206,7 @@ class _RichComposerState extends State<RichComposer> {
       syncing = false;
     }
     setState(() {
+      if (next == 'Preview' && mode != 'Preview') editMode = mode;
       mode = next;
       extended = needsSource(widget.controller.text);
     });
@@ -323,6 +325,49 @@ class _RichComposerState extends State<RichComposer> {
     child: buildEditor(context),
   );
 
+  List<Widget> visualTools() => [
+    for (final item in <(String, IconData, q.Attribute)>[
+      ('Bold', Icons.format_bold, q.Attribute.bold),
+      ('Italic', Icons.format_italic, q.Attribute.italic),
+      ('Strikethrough', Icons.format_strikethrough, q.Attribute.strikeThrough),
+      ('Heading', Icons.title, q.Attribute.h2),
+      ('Bullet list', Icons.format_list_bulleted, q.Attribute.ul),
+      ('Numbered list', Icons.format_list_numbered, q.Attribute.ol),
+      ('Quote', Icons.format_quote, q.Attribute.blockQuote),
+      ('Code', Icons.code, q.Attribute.inlineCode),
+      ('Code block', Icons.data_object, q.Attribute.codeBlock),
+    ])
+      IconButton(
+        tooltip: item.$1,
+        isSelected:
+            editor.getSelectionStyle().attributes[item.$3.key]?.value ==
+            item.$3.value,
+        onPressed: widget.enabled && mode != 'Preview'
+            ? () => format(item.$3)
+            : null,
+        icon: Icon(item.$2, size: 18),
+      ),
+    IconButton(
+      tooltip: 'Insert link',
+      onPressed: widget.enabled && mode != 'Preview' ? link : null,
+      icon: const Icon(Icons.link, size: 18),
+    ),
+    IconButton(
+      tooltip: 'Undo',
+      onPressed: widget.enabled && mode != 'Preview' && editor.hasUndo
+          ? editor.undo
+          : null,
+      icon: const Icon(Icons.undo, size: 18),
+    ),
+    IconButton(
+      tooltip: 'Redo',
+      onPressed: widget.enabled && mode != 'Preview' && editor.hasRedo
+          ? editor.redo
+          : null,
+      icon: const Icon(Icons.redo, size: 18),
+    ),
+  ];
+
   Widget buildEditor(BuildContext context) => FormField<String>(
     key: field,
     initialValue: widget.controller.text,
@@ -331,107 +376,97 @@ class _RichComposerState extends State<RichComposer> {
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        SingleChildScrollView(
-          scrollDirection: Axis.horizontal,
-          child: Row(
-            children: [
-              if (widget.compact && mode != 'Preview')
-                IconButton(
-                  tooltip: 'Formatting tools',
-                  onPressed: () => setState(() => toolsOpen = !toolsOpen),
-                  icon: const Icon(Icons.text_format),
+        IconButtonTheme(
+          data: IconButtonThemeData(
+            style: IconButton.styleFrom(
+              minimumSize: const Size(32, 32),
+              padding: const EdgeInsets.all(4),
+              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+              visualDensity: VisualDensity.compact,
+            ),
+          ),
+          child: SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                if (mode == 'Markdown' ||
+                    mode == 'Preview' && editMode == 'Markdown')
+                  MarkdownToolbar(
+                    controller: widget.controller,
+                    inline: true,
+                    enabled: widget.enabled && mode != 'Preview',
+                  )
+                else
+                  ...visualTools(),
+                const Padding(
+                  padding: EdgeInsets.symmetric(horizontal: 4),
+                  child: Text('|'),
                 ),
-              for (final item in ['Write', 'Markdown', 'Preview'])
+                IconButton(
+                  tooltip: 'Attach files',
+                  onPressed: widget.enabled && mode != 'Preview'
+                      ? widget.onAttach
+                      : null,
+                  icon: const Icon(Icons.attach_file, size: 18),
+                ),
+                IconButton(
+                  tooltip: 'Insert image or GIF',
+                  onPressed: widget.enabled && mode != 'Preview'
+                      ? insertMedia
+                      : null,
+                  icon: const Icon(Icons.gif_box_outlined, size: 18),
+                ),
+                IconButton(
+                  tooltip: 'Insert sticker',
+                  onPressed: widget.enabled && mode != 'Preview'
+                      ? () => insertMedia(sticker: true)
+                      : null,
+                  icon: const Icon(Icons.auto_awesome_outlined, size: 18),
+                ),
+                const Padding(
+                  padding: EdgeInsets.symmetric(horizontal: 4),
+                  child: Text('|'),
+                ),
                 TextButton(
-                  onPressed: () => changeMode(item),
+                  onPressed: widget.enabled
+                      ? () => changeMode(
+                          mode == 'Markdown' ? 'Write' : 'Markdown',
+                        )
+                      : null,
                   style: TextButton.styleFrom(
-                    foregroundColor: mode == item
+                    foregroundColor: mode == 'Markdown'
                         ? Theme.of(context).colorScheme.primary
                         : Theme.of(context).colorScheme.onSurfaceVariant,
                   ),
-                  child: Text(item),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(
+                        mode == 'Markdown'
+                            ? Icons.check_box_outlined
+                            : Icons.check_box_outline_blank,
+                        size: 16,
+                      ),
+                      const SizedBox(width: 4),
+                      const Text('Markdown'),
+                    ],
+                  ),
                 ),
-            ],
+                TextButton(
+                  onPressed: () =>
+                      changeMode(mode == 'Preview' ? editMode : 'Preview'),
+                  child: const Text('Preview'),
+                ),
+              ],
+            ),
           ),
-        ),
-        Wrap(
-          children: [
-            IconButton(
-              tooltip: 'Insert image or GIF',
-              onPressed: widget.enabled ? insertMedia : null,
-              icon: const Icon(Icons.gif_box_outlined),
-            ),
-            IconButton(
-              tooltip: 'Insert sticker',
-              onPressed: widget.enabled
-                  ? () => insertMedia(sticker: true)
-                  : null,
-              icon: const Icon(Icons.auto_awesome_outlined),
-            ),
-          ],
         ),
         if (extended && mode == 'Markdown')
           const Text(
             'This draft uses extended Markdown. Edit its source to preserve all formatting.',
           ),
         if (mode == 'Write') ...[
-          if (!widget.compact || toolsOpen)
-            SingleChildScrollView(
-              scrollDirection: Axis.horizontal,
-              child: Row(
-                children: [
-                  for (final item in <(String, IconData, q.Attribute)>[
-                    ('Bold', Icons.format_bold, q.Attribute.bold),
-                    ('Italic', Icons.format_italic, q.Attribute.italic),
-                    (
-                      'Strikethrough',
-                      Icons.format_strikethrough,
-                      q.Attribute.strikeThrough,
-                    ),
-                    ('Heading', Icons.title, q.Attribute.h2),
-                    ('Bullet list', Icons.format_list_bulleted, q.Attribute.ul),
-                    (
-                      'Numbered list',
-                      Icons.format_list_numbered,
-                      q.Attribute.ol,
-                    ),
-                    ('Quote', Icons.format_quote, q.Attribute.blockQuote),
-                    ('Code', Icons.code, q.Attribute.inlineCode),
-                    ('Code block', Icons.data_object, q.Attribute.codeBlock),
-                  ])
-                    IconButton(
-                      tooltip: item.$1,
-                      isSelected:
-                          editor
-                              .getSelectionStyle()
-                              .attributes[item.$3.key]
-                              ?.value ==
-                          item.$3.value,
-                      onPressed: widget.enabled ? () => format(item.$3) : null,
-                      icon: Icon(item.$2, size: 18),
-                    ),
-                  IconButton(
-                    tooltip: 'Insert link',
-                    onPressed: widget.enabled ? link : null,
-                    icon: const Icon(Icons.link, size: 18),
-                  ),
-                  IconButton(
-                    tooltip: 'Undo',
-                    onPressed: widget.enabled && editor.hasUndo
-                        ? editor.undo
-                        : null,
-                    icon: const Icon(Icons.undo, size: 18),
-                  ),
-                  IconButton(
-                    tooltip: 'Redo',
-                    onPressed: widget.enabled && editor.hasRedo
-                        ? editor.redo
-                        : null,
-                    icon: const Icon(Icons.redo, size: 18),
-                  ),
-                ],
-              ),
-            ),
           Semantics(
             label: widget.label,
             textField: true,
@@ -477,7 +512,10 @@ class _RichComposerState extends State<RichComposer> {
                   config: q.QuillEditorConfig(
                     minHeight: widget.minHeight,
                     maxHeight: widget.maxHeight,
-                    padding: const EdgeInsets.all(12),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 6,
+                      vertical: 8,
+                    ),
                     placeholder: widget.hint,
                     onLaunchUrl: (value) => openContentLink(context, value),
                   ),
@@ -486,8 +524,6 @@ class _RichComposerState extends State<RichComposer> {
             ),
           ),
         ] else if (mode == 'Markdown') ...[
-          if (!widget.compact || toolsOpen)
-            MarkdownToolbar(controller: widget.controller),
           MarkdownShortcuts(
             controller: widget.controller,
             onSubmit: widget.onSubmit,

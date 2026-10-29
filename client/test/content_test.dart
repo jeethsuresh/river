@@ -94,7 +94,9 @@ void main() {
             )
             ..user = person
             ..loading = false
-            ..groups = [group]
+            ..groups = [
+              {...group, 'kind': 'group'},
+            ]
             ..selected = roomId
             ..events = [root, first];
       await tester.pumpWidget(RiverApp(api: api, boot: false));
@@ -113,6 +115,7 @@ void main() {
         find.descendant(of: firstCard, matching: find.text('Reply')),
       );
       await tester.pumpAndSettle();
+      await tester.ensureVisible(find.text('Markdown').last);
       await tester.tap(find.text('Markdown').last);
       await tester.pumpAndSettle();
       await tester.enterText(find.byType(TextField).last, 'Nested reply');

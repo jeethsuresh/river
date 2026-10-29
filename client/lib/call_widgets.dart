@@ -62,36 +62,71 @@ class RiverCallBar extends StatelessWidget {
     builder: (_, _) => !api.calls.active
         ? const SizedBox.shrink()
         : Material(
-            color: const Color(0xffdfeaff),
-            child: SafeArea(
-              top: false,
-              bottom: false,
-              child: ListTile(
-                dense: true,
-                leading: const Icon(Icons.graphic_eq),
-                title: Text(
-                  api.calls.target?['name'] as String? ?? 'In a call',
-                ),
-                subtitle: Text(api.calls.error ?? 'Connected'),
-                onTap: () => Navigator.of(context).push<void>(
-                  MaterialPageRoute(builder: (_) => RiverCallScreen(api: api)),
-                ),
-                trailing: Wrap(
-                  children: [
-                    IconButton(
-                      tooltip: api.calls.muted
-                          ? 'Unmute microphone'
-                          : 'Mute microphone',
-                      onPressed: api.calls.toggleMute,
-                      icon: Icon(api.calls.muted ? Icons.mic_off : Icons.mic),
+            color: const Color(0xffedf3ff),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: InkWell(
+                      onTap: () => Navigator.of(context).push<void>(
+                        MaterialPageRoute(
+                          builder: (_) => RiverCallScreen(api: api),
+                        ),
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            api.calls.target?['name'] as String? ?? 'In a call',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                          Text(
+                            api.calls.error ??
+                                (api.calls.busy ? 'Connecting…' : 'Connected'),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(fontSize: 10),
+                          ),
+                        ],
+                      ),
                     ),
-                    IconButton(
-                      tooltip: 'Leave call',
-                      onPressed: api.calls.leave,
-                      icon: const Icon(Icons.call_end, color: Colors.red),
+                  ),
+                  IconButton(
+                    tooltip: api.calls.muted
+                        ? 'Unmute microphone'
+                        : 'Mute microphone',
+                    onPressed: api.calls.busy ? null : api.calls.toggleMute,
+                    constraints: const BoxConstraints.tightFor(
+                      width: 36,
+                      height: 40,
                     ),
-                  ],
-                ),
+                    padding: EdgeInsets.zero,
+                    icon: Icon(
+                      api.calls.muted ? Icons.mic_off : Icons.mic,
+                      size: 19,
+                    ),
+                  ),
+                  IconButton(
+                    tooltip: 'Leave call',
+                    onPressed: api.calls.leave,
+                    constraints: const BoxConstraints.tightFor(
+                      width: 36,
+                      height: 40,
+                    ),
+                    padding: EdgeInsets.zero,
+                    icon: const Icon(
+                      Icons.call_end,
+                      color: Colors.red,
+                      size: 19,
+                    ),
+                  ),
+                ],
               ),
             ),
           ),
@@ -155,19 +190,20 @@ class RiverCallScreen extends StatelessWidget {
           appBar: AppBar(
             title: Text(calls.target?['name'] as String? ?? 'Call'),
             actions: [
-              IconButton(
-                tooltip: 'Call chat',
-                onPressed: calls.chat == null
-                    ? null
-                    : () => Navigator.push<void>(
-                        context,
-                        MaterialPageRoute(
-                          builder: (_) =>
-                              CallChatScreen(api: api, room: calls.chat!),
+              if (calls.target?['channel_kind'] != 'drop_in')
+                IconButton(
+                  tooltip: 'Call chat',
+                  onPressed: calls.chat == null
+                      ? null
+                      : () => Navigator.push<void>(
+                          context,
+                          MaterialPageRoute(
+                            builder: (_) =>
+                                CallChatScreen(api: api, room: calls.chat!),
+                          ),
                         ),
-                      ),
-                icon: const Icon(Icons.chat_bubble_outline),
-              ),
+                  icon: const Icon(Icons.chat_bubble_outline),
+                ),
             ],
           ),
           body: !calls.active
