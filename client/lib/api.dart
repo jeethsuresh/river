@@ -201,7 +201,10 @@ class RiverApi extends ChangeNotifier {
     final revision = _historyRevision;
     if (!matrixConnected ||
         wire == null ||
-        group(id)?['membership'] != 'join') {
+        group(id)?['membership'] != 'join' ||
+        !matrix.roomList.any(
+          (room) => room['room_id'] == wire && room['membership'] == 'join',
+        )) {
       return;
     }
     final cached = await matrix.readLocal('history', room: wire);
