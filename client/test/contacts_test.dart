@@ -68,7 +68,7 @@ void main() {
     (tester) async {
       for (final width in [320.0, 768.0, 1440.0]) {
         await tester.binding.setSurfaceSize(Size(width, 1200));
-        final api = RiverApi()
+        final api = RiverApi(matrixEnabled: false)
           ..user = {'sub': 'alice'}
           ..loading = false
           ..friends = [bob]
@@ -103,7 +103,7 @@ void main() {
   testWidgets(
     'expired contact consent keeps shared lists private and offers reconnect',
     (tester) async {
-      final api = RiverApi()
+      final api = RiverApi(matrixEnabled: false)
         ..user = {'sub': 'alice'}
         ..loading = false
         ..friendsStatus = 403

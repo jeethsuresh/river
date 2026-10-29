@@ -52,13 +52,15 @@ class RiverApi extends ChangeNotifier {
     bool? live,
     MatrixFactory? matrixFactory,
     MatrixStorage? matrixStorage,
+    Future<String> Function(String)? matrixStoreLocation,
     bool? matrixEnabled,
     this.authLaunch,
   }) : client = client ?? http.Client(),
        liveEnabled = live ?? client == null,
        matrixEnabled = matrixEnabled ?? (live ?? client == null),
        _matrixFactory = matrixFactory,
-       _matrixStorage = matrixStorage;
+       _matrixStorage = matrixStorage,
+       _matrixStoreLocation = matrixStoreLocation;
   final bool liveEnabled;
   final bool matrixEnabled;
   final Future<bool> Function(Uri)? authLaunch;
@@ -66,11 +68,20 @@ class RiverApi extends ChangeNotifier {
   bool _signingIn = false;
   final MatrixFactory? _matrixFactory;
   final MatrixStorage? _matrixStorage;
+  final Future<String> Function(String)? _matrixStoreLocation;
   MatrixMessaging? _matrix;
   MatrixMessaging get matrix => _matrix ??= (MatrixMessaging(
     request: request,
     factory: _matrixFactory,
     storage: _matrixStorage,
+    storeLocation: _matrixStoreLocation,
+    launch: authLaunch == null
+        ? null
+        : (url) async {
+            if (!await authLaunch!(url)) {
+              throw StateError('Unable to open Matrix sign-in');
+            }
+          },
     syncEnabled: liveEnabled,
     changed: () {
       if (!_disposed && !_restoringLocal && user != null && active) {
@@ -259,6 +270,7 @@ class RiverApi extends ChangeNotifier {
       }
       user = profile;
       _offlineSession = true;
+      await loadMessagingPreferences();
       await matrix.bind(profile, synchronize: false);
       if (!matrixConnected) {
         user = null;
@@ -289,6 +301,46 @@ class RiverApi extends ChangeNotifier {
   }
 
   bool get matrixConnected => _matrix?.connected ?? false;
+  bool get requiresMatrixSetup =>
+      user != null && matrixEnabled && !matrixConnected;
+
+  Future<void> connectMessaging() async {
+    final profile = user;
+    if (profile == null || !matrixEnabled) return;
+    final account = accountKey;
+    final generation = _generation;
+    await matrix.bind(profile);
+    if (account != accountKey || generation != _generation || _disposed) return;
+    await matrix.connect();
+    if (account == accountKey && generation == _generation && matrixConnected) {
+      await refresh();
+    }
+  }
+
+  bool enterSendsMessages = true;
+  String get _enterSendsKey =>
+      'river.enter_sends.${sha256.convert(utf8.encode(accountKey ?? ''))}';
+
+  Future<void> loadMessagingPreferences() async {
+    final account = accountKey;
+    try {
+      final value = await _identity.read(_enterSendsKey);
+      if (account == accountKey) enterSendsMessages = value != '0';
+    } catch (_) {
+      // A preference read failure must not prevent sign-in or offline access.
+    }
+  }
+
+  Future<void> setEnterSendsMessages(bool enabled) async {
+    final account = accountKey;
+    if (account == null) return;
+    await _identity.write(_enterSendsKey, enabled ? '1' : '0');
+    if (account == accountKey && !_disposed) {
+      enterSendsMessages = enabled;
+      notifyListeners();
+    }
+  }
+
   Json? group(String id) => groups.where((g) => g['id'] == id).firstOrNull;
   String displayName(String id) {
     final people = <Json>[
@@ -434,6 +486,7 @@ class RiverApi extends ChangeNotifier {
   int get incomingRequests =>
       requests.where((r) => r['direction'] == 'incoming').length;
   void _clear() {
+    enterSendsMessages = true;
     _apiConnection.reset();
     if (_matrix != null) unawaited(_matrix!.disconnect());
     _live?.close();
@@ -701,6 +754,7 @@ class RiverApi extends ChangeNotifier {
       if (accountKey != "${next['issuer']}|${next['sub']}") _clear();
       user = next;
       _offlineSession = false;
+      await loadMessagingPreferences();
       await _rememberIdentity();
       if (matrixEnabled) {
         unawaited(
@@ -745,6 +799,7 @@ class RiverApi extends ChangeNotifier {
         if (account != "${profile['issuer']}|${profile['sub']}") {
           _clear();
           user = profile;
+          await loadMessagingPreferences();
           await matrix.bind(profile);
           await _initializeFiles();
         }

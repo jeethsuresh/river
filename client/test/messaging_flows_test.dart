@@ -2,6 +2,8 @@ import 'dart:async';
 import 'dart:convert';
 import 'package:crypto/crypto.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_quill/flutter_quill.dart'
+    show FlutterQuillLocalizations;
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
@@ -227,7 +229,18 @@ void main() {
               ..loading = false
               ..groups = [direct]
               ..selected = 'direct';
-        await tester.pumpWidget(RiverApp(api: api, boot: false));
+        // Exercise the shell's defensive draft handling directly. RiverApp now
+        // requires Matrix setup before this disconnected shell can be reached.
+        await tester.pumpWidget(
+          MaterialApp(
+            localizationsDelegates:
+                FlutterQuillLocalizations.localizationsDelegates,
+            home: AnimatedBuilder(
+              animation: api,
+              builder: (_, _) => RiverShell(app: api),
+            ),
+          ),
+        );
         await tester.pumpAndSettle();
         expect(find.byKey(const ValueKey('connect-matrix')), findsOneWidget);
         expect(

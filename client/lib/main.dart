@@ -12,6 +12,7 @@ import 'workspace_widgets.dart';
 import 'home_widgets.dart';
 import 'attachment_widgets.dart';
 import 'matrix_attachment_widgets.dart';
+import 'matrix_setup.dart';
 import 'call_widgets.dart';
 import 'file_models.dart' show FileScope;
 import 'rich_composer.dart';
@@ -96,6 +97,8 @@ class _RiverAppState extends State<RiverApp> with WidgetsBindingObserver {
       ),
       home: app.loading
           ? const Scaffold(body: Center(child: CircularProgressIndicator()))
+          : app.requiresMatrixSetup
+          ? MatrixSetup(app: app)
           : deepLink() ?? RiverShell(key: ValueKey(app.accountKey), app: app),
     ),
   );
@@ -1428,6 +1431,7 @@ class _RiverShellState extends State<RiverShell> {
                         Expanded(
                           child: RichComposer(
                             controller: draft,
+                            sendOnEnter: app.enterSendsMessages,
                             onAttach:
                                 sending ||
                                     needsMessaging ||

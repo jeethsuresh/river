@@ -9,7 +9,7 @@ void main() {
     (tester) async {
       for (final width in [390.0, 768.0, 1440.0]) {
         await tester.binding.setSurfaceSize(Size(width, 900));
-        final api = RiverApi()
+        final api = RiverApi(matrixEnabled: false)
           ..loading = false
           ..user = {
             'username': 'Alice',
@@ -43,7 +43,7 @@ void main() {
   testWidgets(
     'signed out view offers Gravitas login and states call availability',
     (tester) async {
-      final api = RiverApi()..loading = false;
+      final api = RiverApi(matrixEnabled: false)..loading = false;
       await tester.pumpWidget(RiverApp(api: api, boot: false));
       await tester.pumpAndSettle();
       expect(find.text('🔥'), findsOneWidget);
@@ -60,7 +60,7 @@ void main() {
   testWidgets('account changes discard the previous account composer', (
     tester,
   ) async {
-    final api = RiverApi()
+    final api = RiverApi(matrixEnabled: false)
       ..loading = false
       ..user = {'username': 'Alice', 'sub': 'alice'};
     api.groups = [
@@ -88,7 +88,7 @@ void main() {
   testWidgets('account changes dismiss private member sheets and dialogs', (
     tester,
   ) async {
-    final api = RiverApi()
+    final api = RiverApi(matrixEnabled: false)
       ..loading = false
       ..user = {'sub': 'alice', 'username': 'alice'};
     api.groups = [

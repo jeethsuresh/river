@@ -507,44 +507,58 @@ class MarkdownShortcuts extends StatelessWidget {
     required this.controller,
     required this.child,
     this.onSubmit,
+    this.sendOnEnter = false,
   });
   final TextEditingController controller;
   final Widget child;
   final VoidCallback? onSubmit;
+  final bool sendOnEnter;
   @override
   Widget build(BuildContext context) {
     final tools = MarkdownToolbar(controller: controller);
-    return CallbackShortcuts(
-      bindings: {
-        for (final meta in [false, true]) ...{
-          SingleActivator(
-            LogicalKeyboardKey.keyB,
-            control: !meta,
-            meta: meta,
-          ): () =>
-              tools.insert('**', '**'),
-          SingleActivator(
-            LogicalKeyboardKey.keyI,
-            control: !meta,
-            meta: meta,
-          ): () =>
-              tools.insert('_', '_'),
-          SingleActivator(
-            LogicalKeyboardKey.keyX,
-            control: !meta,
-            meta: meta,
-            shift: true,
-          ): () =>
-              tools.insert('~~', '~~'),
-          if (onSubmit != null)
-            SingleActivator(
+    return ListenableBuilder(
+      listenable: controller,
+      builder: (context, _) => CallbackShortcuts(
+        bindings: {
+          if (sendOnEnter &&
+              onSubmit != null &&
+              !(controller.value.composing.isValid &&
+                  !controller.value.composing.isCollapsed))
+            for (final key in [
               LogicalKeyboardKey.enter,
+              LogicalKeyboardKey.numpadEnter,
+            ])
+              SingleActivator(key, includeRepeats: false): onSubmit!,
+          for (final meta in [false, true]) ...{
+            SingleActivator(
+              LogicalKeyboardKey.keyB,
               control: !meta,
               meta: meta,
-            ): onSubmit!,
+            ): () =>
+                tools.insert('**', '**'),
+            SingleActivator(
+              LogicalKeyboardKey.keyI,
+              control: !meta,
+              meta: meta,
+            ): () =>
+                tools.insert('_', '_'),
+            SingleActivator(
+              LogicalKeyboardKey.keyX,
+              control: !meta,
+              meta: meta,
+              shift: true,
+            ): () =>
+                tools.insert('~~', '~~'),
+            if (onSubmit != null)
+              SingleActivator(
+                LogicalKeyboardKey.enter,
+                control: !meta,
+                meta: meta,
+              ): onSubmit!,
+          },
         },
-      },
-      child: child,
+        child: child,
+      ),
     );
   }
 }

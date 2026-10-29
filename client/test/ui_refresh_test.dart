@@ -424,6 +424,16 @@ void main() {
     await tester.tap(find.byTooltip('Settings'));
     await tester.pumpAndSettle();
     expect(find.text('Settings'), findsOneWidget);
+    await tester.scrollUntilVisible(
+      find.text('Sign out of River'),
+      200,
+      scrollable: find
+          .descendant(
+            of: find.byType(AccountPanel),
+            matching: find.byType(Scrollable),
+          )
+          .first,
+    );
     expect(find.text('Sign out of River'), findsOneWidget);
     await tester.tap(find.byTooltip('Close settings'));
     await tester.pumpAndSettle();
