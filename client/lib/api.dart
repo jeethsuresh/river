@@ -484,6 +484,8 @@ class RiverApi extends ChangeNotifier {
   Completer<void>? _queuedRefresh;
   bool get active => _active;
   set active(bool value) {
+    final transition = _active != value;
+    if (transition) _apiConnection.reset();
     _active = value;
     files?.setActive(value);
     _matrix?.active = value;
@@ -494,6 +496,7 @@ class RiverApi extends ChangeNotifier {
       startLive();
       unawaited(refresh());
     }
+    if (transition) notifyListeners();
   }
 
   void startLive() {

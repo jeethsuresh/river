@@ -161,6 +161,45 @@ void main() {
     },
   );
 
+  testWidgets('resuming starts a fresh grace period for connection failures', (
+    tester,
+  ) async {
+    final api = RiverApi(
+      live: false,
+      client: MockClient((_) async => http.Response('{}', 503)),
+    )..user = {'sub': 'alice'};
+    await expectLater(api.request('/api/test'), throwsA(isA<ApiException>()));
+    api.active = false;
+    await tester.pump(const Duration(seconds: 30));
+    api.active = true;
+    await tester.pumpAndSettle();
+    expect(api.connectionWarning, isNull);
+    expect(api.reconnecting, isTrue);
+    await tester.pump(ConnectionHealth.grace);
+    await expectLater(api.request('/api/test'), throwsA(isA<ApiException>()));
+    expect(api.connectionWarning, 'River is reconnecting…');
+    api.dispose();
+  });
+
+  testWidgets('Matrix also starts a fresh grace period after backgrounding', (
+    tester,
+  ) async {
+    final engine = FlowTransport();
+    final matrix = await device(engine);
+    await matrix.bind(matrixProfile);
+    engine.offline = true;
+    await expectLater(matrix.syncNow(), throwsStateError);
+    matrix.active = false;
+    await tester.pump(const Duration(seconds: 30));
+    matrix.active = true;
+    await expectLater(matrix.syncNow(), throwsStateError);
+    expect(matrix.networkUnavailable, isFalse);
+    await tester.pump(ConnectionHealth.grace);
+    await expectLater(matrix.syncNow(), throwsStateError);
+    expect(matrix.networkUnavailable, isTrue);
+    matrix.dispose();
+  });
+
   testWidgets('permission errors do not turn into connection warnings', (
     tester,
   ) async {

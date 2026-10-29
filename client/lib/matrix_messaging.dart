@@ -719,8 +719,11 @@ class MatrixMessaging extends ChangeNotifier {
       _transport ?? (throw StateError('Connect Matrix messaging first'));
   bool get active => _active;
   set active(bool value) {
+    final transition = _active != value;
+    if (transition) _connection.reset();
     _active = value;
     if (value) _startSync();
+    if (transition) notifyListeners();
   }
 
   void _startSync() {
