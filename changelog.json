@@ -1,14 +1,8 @@
 {
   "schemaVersion": 1,
-  "version": "0.11.0",
-  "versionCode": 18,
+  "version": "0.11.1",
+  "versionCode": 19,
   "changes": [
-    "Use a compact spaces and conversations sidebar, expandable search beside Home, and account Settings with sign out inside.",
-    "Arrange Home in desktop columns and a mobile stack with active voice rooms, Catch Up, recent posts, discussions and chats, and favourite people saved on this device.",
-    "Show compact messages directly on the conversation background, with readable sender names, timestamps below names, and reply followed by reactions.",
-    "Keep formatting, attachment, GIF, sticker, Markdown and preview controls in one horizontally scrolling composer toolbar.",
-    "Preview voice room participants before joining, keep one call at a time, and show mute and leave controls above the sidebar account row.",
-    "List space voice rooms above their text chats and remove text chat from voice rooms.",
-    "Display post and discussion replies as collapsible comment trees with reply editors sized to their parent comment."
+    "Keep conversation and space controls clear of Android's camera cutout, status bar and notification icons, including after rotating the screen."
   ]
 }
