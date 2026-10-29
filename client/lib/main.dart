@@ -477,11 +477,14 @@ class _RiverShellState extends State<RiverShell> {
                   ],
                 ),
           drawer: wide ? null : Drawer(child: SafeArea(child: navigation())),
-          body: Row(
-            children: [
-              if (wide) SizedBox(width: 260, child: navigation()),
-              Expanded(child: body),
-            ],
+          body: SafeArea(
+            bottom: false,
+            child: Row(
+              children: [
+                if (wide) SizedBox(width: 260, child: navigation()),
+                Expanded(child: body),
+              ],
+            ),
           ),
         );
       },
