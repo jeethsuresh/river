@@ -1,9 +1,10 @@
 {
   "schemaVersion": 1,
-  "version": "0.11.2",
-  "versionCode": 20,
+  "version": "0.11.3",
+  "versionCode": 21,
   "changes": [
-    "Open Friends from the sidebar without being redirected to Home, and open a conversation when you choose Message.",
-    "Retry brief connection hiccups quietly, show separate River and Matrix reconnecting warnings for sustained failures, and prevent delayed requests from restoring stale connection warnings."
+    "Recover expired Matrix sync connections automatically when starting a conversation or sending its first message.",
+    "Save drafts while a new conversation is syncing without showing a false storage warning.",
+    "Connect messaging directly from a conversation, keep your draft while connecting, and enable Send when the device is connected."
   ]
 }

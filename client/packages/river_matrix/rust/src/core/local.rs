@@ -14,11 +14,20 @@ impl MatrixCore {
         let key = match scope {
             "overview" => "river.ui.v1.overview".to_owned(),
             "history" | "draft" | "thread" => {
-                let room = self.room(data["room"].as_str().context("Missing room")?)?;
-                ensure!(
-                    room.state() == RoomState::Joined,
-                    "Room is no longer joined"
-                );
+                let room_id = matrix_sdk::ruma::RoomId::parse(
+                    data["room"].as_str().context("Missing room")?,
+                )?;
+                // Drafts are this device's own input. A newly created room may
+                // not have reached the SDK yet, but typing must still persist
+                // locally without waiting for a network sync. History and
+                // threads continue to require a joined room.
+                if scope != "draft" || self.client.get_room(&room_id).is_some() {
+                    let room = self.room(room_id.as_str())?;
+                    ensure!(
+                        room.state() == RoomState::Joined,
+                        "Room is no longer joined"
+                    );
+                }
                 let suffix = if scope == "thread" {
                     matrix_sdk::ruma::EventId::parse(
                         data["event"].as_str().context("Missing thread root")?,
@@ -27,7 +36,7 @@ impl MatrixCore {
                 } else {
                     String::new()
                 };
-                format!("river.ui.v1.{scope}.{}.{suffix}", room.room_id())
+                format!("river.ui.v1.{scope}.{room_id}.{suffix}")
             }
             _ => anyhow::bail!("Invalid local scope"),
         };
@@ -114,9 +123,31 @@ mod tests {
         changes
             .room_infos
             .insert(room.to_owned(), RoomInfo::new(room, RoomState::Joined));
+        let left = room_id!("!left:offline.invalid");
+        changes
+            .room_infos
+            .insert(left.to_owned(), RoomInfo::new(left, RoomState::Left));
         seed.state_store().save_changes(&changes).await?;
         drop(seed);
         let core = open(path).await.context("Open seeded SQLite store")?;
+        let pending_room = "!new:offline.invalid";
+        let pending_draft = json!({"text":"Draft before the first room sync"});
+        assert!(
+            core.action(
+                json!({"action":"local_write","scope":"draft","room":left,"value":{}}).to_string()
+            )
+            .await
+            .is_err()
+        );
+        core.action(json!({"action":"local_write","scope":"draft","room":pending_room,"value":pending_draft}).to_string()).await?;
+        assert!(
+            core.action(
+                json!({"action":"local_write","scope":"draft","room":"not-a-room","value":{}})
+                    .to_string()
+            )
+            .await
+            .is_err()
+        );
         let history = json!({"events":[{"event_id":"$old","content":{"body":"distinct-private-history-9dcac9"}}],"next_cursor":"older"});
         let draft = json!({"text":"distinct-private-draft-f25c2b","txn":"stable-retry-id"});
         for (scope, value) in [("history", history.clone()), ("draft", draft.clone())] {
@@ -128,6 +159,23 @@ mod tests {
         core.close(false).await?;
         drop(core);
         let restored = open(path).await.context("Reopen cached SQLite store")?;
+        let pending: Value = serde_json::from_str(
+            &restored
+                .action(
+                    json!({"action":"local_read","scope":"draft","room":pending_room}).to_string(),
+                )
+                .await?,
+        )?;
+        assert_eq!(pending["value"], pending_draft);
+        assert!(
+            restored
+                .action(
+                    json!({"action":"local_read","scope":"history","room":pending_room})
+                        .to_string()
+                )
+                .await
+                .is_err()
+        );
         for (scope, expected) in [("history", history), ("draft", draft)] {
             let result: Value = serde_json::from_str(
                 &restored
@@ -137,7 +185,13 @@ mod tests {
             assert_eq!(result["value"], expected);
         }
         let rooms: Value = serde_json::from_str(&restored.rooms().await?)?;
-        assert_eq!(rooms["rooms"][0]["room_id"], room.as_str());
+        assert!(
+            rooms["rooms"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|r| r["room_id"] == room.as_str())
+        );
         restored
             .action(
                 json!({"action":"local_write","scope":"draft","room":room,"value":null})
@@ -179,6 +233,7 @@ mod tests {
                 for secret in [
                     b"distinct-private-history-9dcac9".as_slice(),
                     b"distinct-private-draft-f25c2b".as_slice(),
+                    b"Draft before the first room sync".as_slice(),
                 ] {
                     assert!(
                         !bytes.windows(secret.len()).any(|part| part == secret),

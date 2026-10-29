@@ -254,7 +254,24 @@ impl MatrixCore {
         let mut session_changes = self.client.subscribe_to_session_changes();
         let poll = async {
             if let Some(connection) = connection {
-                Ok::<_, anyhow::Error>(connection.sync_once().await.map_err(sync_error)?.rooms)
+                // Unlike SlidingSync::sync(), sync_once() does not expire an
+                // invalid cursor. Recover here while holding the polling lock,
+                // so foreground room creation never receives a stale position.
+                // Retry once; a persistently failing server must still return.
+                let mut result = connection.sync_once().await;
+                for attempt in 0..2 {
+                    if !matches!(&result, Err(error) if error.client_api_error_kind()
+                        == Some(&matrix_sdk::ruma::api::error::ErrorKind::UnknownPos))
+                    {
+                        break;
+                    }
+                    connection.expire_session().await;
+                    if attempt == 0 {
+                        self.active()?;
+                        result = connection.sync_once().await;
+                    }
+                }
+                Ok::<_, anyhow::Error>(result.map_err(sync_error)?.rooms)
             } else {
                 let response = self
                     .client

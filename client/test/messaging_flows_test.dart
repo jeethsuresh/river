@@ -9,6 +9,7 @@ import 'package:http/testing.dart';
 import 'package:river/api.dart';
 import 'package:river/matrix_messaging.dart';
 import 'package:river/main.dart';
+import 'package:river/rich_composer.dart';
 import 'package:river/workspace_widgets.dart';
 import 'matrix_messaging_test.dart'
     show FakeMatrixTransport, MemoryMatrixStorage, matrixProfile;
@@ -22,6 +23,7 @@ class FlowTransport extends FakeMatrixTransport {
   final sendAttempts = <String>[];
   bool loseSendResponse = false;
   bool rosterUnavailable = false, offline = false;
+  final historyCacheReads = <String>[];
   int syncs = 0;
   Completer<void>? syncGate;
   @override
@@ -85,6 +87,15 @@ class FlowTransport extends FakeMatrixTransport {
   @override
   Future<Json> action(Json payload) async {
     if ((payload['action'] as String).startsWith('local_')) {
+      if (payload['action'] == 'local_read' && payload['scope'] == 'history') {
+        final wire = payload['room'] as String;
+        historyCacheReads.add(wire);
+        if (!roomList.any(
+          (room) => room['room_id'] == wire && room['membership'] == 'join',
+        )) {
+          throw StateError('Unknown room');
+        }
+      }
       return super.action(payload);
     }
     actions.add(payload);
@@ -138,6 +149,144 @@ Future<MatrixMessaging> device(FlowTransport engine) async {
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
   setUp(() => FlutterSecureStorage.setMockInitialValues({}));
+
+  test(
+    'opening a new room waits for sync before reading its history cache',
+    () async {
+      final direct = room('direct', '!new:example.org');
+      final engine = FlowTransport();
+      final saved = await device(engine);
+      final api = RiverApi(
+        live: false,
+        matrixEnabled: true,
+        matrixFactory: (_) async => engine,
+        matrixStorage: saved.storage,
+        client: MockClient(
+          (r) async => http.Response(
+            jsonEncode(
+              r.url.path == '/api/overview'
+                  ? {
+                      'groups': [direct],
+                      'recent': [],
+                    }
+                  : {'friends': [], 'requests': [], 'blocked': []},
+            ),
+            200,
+          ),
+        ),
+      )..user = Map.of(matrixProfile);
+      await api.matrix.bind(matrixProfile);
+      await api.refresh();
+      engine.nextRooms = [direct];
+      await api.open('direct');
+      expect(engine.syncs, greaterThan(0));
+      expect(engine.historyCacheReads, isEmpty);
+      expect(api.selected, 'direct');
+      expect(api.events, isNotEmpty);
+      expect(api.cacheError, isNull);
+      expect(api.error, isNull);
+      await api.saveDraft('!new:example.org', {'text': 'First message'});
+      expect(api.cacheError, isNull);
+      api.dispose();
+      saved.dispose();
+    },
+  );
+
+  for (final width in [390.0, 1200.0]) {
+    testWidgets(
+      'disconnected new conversation keeps a draft and enables send after connecting at width $width',
+      (tester) async {
+        tester.view
+          ..devicePixelRatio = 1
+          ..physicalSize = Size(width, 1000);
+        addTearDown(tester.view.reset);
+        final direct = room('direct', '!direct:example.org');
+        final engine = FlowTransport()..roomList = [direct];
+        final saved = await device(engine);
+        final api =
+            RiverApi(
+                live: false,
+                matrixEnabled: true,
+                matrixFactory: (_) async => engine,
+                matrixStorage: saved.storage,
+                client: MockClient(
+                  (r) async => http.Response(
+                    jsonEncode(
+                      r.url.path == '/api/overview'
+                          ? {
+                              'groups': [direct],
+                              'recent': [],
+                            }
+                          : {'friends': [], 'requests': [], 'blocked': []},
+                    ),
+                    200,
+                  ),
+                ),
+              )
+              ..user = Map.of(matrixProfile)
+              ..loading = false
+              ..groups = [direct]
+              ..selected = 'direct';
+        await tester.pumpWidget(RiverApp(api: api, boot: false));
+        await tester.pumpAndSettle();
+        expect(find.byKey(const ValueKey('connect-matrix')), findsOneWidget);
+        expect(
+          tester
+              .widget<IconButton>(
+                find.byWidgetPredicate(
+                  (widget) => widget is IconButton && widget.tooltip == 'Send',
+                ),
+              )
+              .onPressed,
+          isNull,
+        );
+        expect(
+          tester.widget<RichComposer>(find.byType(RichComposer)).onSubmit,
+          isNull,
+        );
+        expect(
+          tester.widget<RichComposer>(find.byType(RichComposer)).onAttach,
+          isNull,
+        );
+        await tester.ensureVisible(find.text('Markdown'));
+        await tester.tap(find.text('Markdown'));
+        await tester.pumpAndSettle();
+        await tester.enterText(find.byType(TextField).last, 'First message');
+        tester.view.viewInsets = const FakeViewPadding(bottom: 300);
+        await tester.pumpAndSettle();
+        expect(tester.takeException(), isNull);
+        expect(engine.sendAttempts, isEmpty);
+        // The in-conversation Connect action restores the saved device.
+        await tester.tap(find.byKey(const ValueKey('connect-matrix')));
+        await tester.pumpAndSettle();
+        expect(find.byKey(const ValueKey('connect-matrix')), findsNothing);
+        expect(
+          tester
+              .widget<TextField>(find.byType(TextField).last)
+              .controller!
+              .text,
+          'First message',
+        );
+        expect(
+          tester
+              .widget<IconButton>(
+                find.byWidgetPredicate(
+                  (widget) => widget is IconButton && widget.tooltip == 'Send',
+                ),
+              )
+              .onPressed,
+          isNotNull,
+        );
+        await tester.tap(find.byTooltip('Send'));
+        await tester.pumpAndSettle();
+        expect(engine.sentEvents, hasLength(1));
+        expect(find.textContaining('Your draft is kept.'), findsNothing);
+        expect(api.cacheError, isNull);
+        await tester.pumpWidget(const SizedBox());
+        saved.dispose();
+      },
+    );
+  }
 
   for (final width in [390.0, 1200.0]) {
     testWidgets(

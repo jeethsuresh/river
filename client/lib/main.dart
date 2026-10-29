@@ -403,9 +403,24 @@ class _RiverShellState extends State<RiverShell> {
                   app.matrix.error ??
                       (app.matrix.connecting
                           ? 'Confirm Matrix messaging in your browser, then return to River.'
-                          : 'Connect this device to read and send encrypted Matrix messages.'),
+                          : 'Connect this device to send encrypted messages. Your draft stays here.'),
                 ),
                 actions: [
+                  TextButton(
+                    key: const ValueKey('connect-matrix'),
+                    onPressed: app.matrix.connecting
+                        ? null
+                        : () => action(() async {
+                            if (app.user != null) {
+                              await app.matrix.bind(app.user!);
+                            }
+                            await app.matrix.connect();
+                            if (app.matrixConnected) await app.refresh();
+                          }),
+                    child: Text(
+                      app.matrix.connecting ? 'Connecting…' : 'Connect',
+                    ),
+                  ),
                   TextButton(
                     onPressed: () => setState(() {
                       section = 'Account';
@@ -954,6 +969,7 @@ class _RiverShellState extends State<RiverShell> {
     final directory =
         g['kind'] == 'space' && viewFilter == 'Chat' && !spaceChat;
     final voiceRoom = g['channel_kind'] == 'drop_in';
+    final needsMessaging = app.matrixEnabled && !app.matrixConnected;
     final items = app.events.where((e) {
       if (viewFilter == 'Chat') {
         final relation = (e['content'] as Json)['m.relates_to'] as Json?;
@@ -1414,6 +1430,7 @@ class _RiverShellState extends State<RiverShell> {
                             controller: draft,
                             onAttach:
                                 sending ||
+                                    needsMessaging ||
                                     (!app.matrixConnected && app.files == null)
                                 ? null
                                 : () => action(() async {
@@ -1438,13 +1455,17 @@ class _RiverShellState extends State<RiverShell> {
                                   }),
                             label: 'Message',
                             hint: 'Message ${g['name']}…',
-                            onSubmit: sending ? null : () => send(g),
+                            onSubmit: sending || needsMessaging
+                                ? null
+                                : () => send(g),
                           ),
                         ),
                         const SizedBox(width: 10),
                         IconButton.filled(
                           tooltip: 'Send',
-                          onPressed: sending ? null : () => send(g),
+                          onPressed: sending || needsMessaging
+                              ? null
+                              : () => send(g),
                           icon: Icon(
                             sending ? Icons.hourglass_top : Icons.arrow_upward,
                           ),
