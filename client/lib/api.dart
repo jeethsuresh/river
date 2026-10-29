@@ -4,6 +4,7 @@ import 'dart:math';
 
 import 'live_updates.dart';
 import 'performance.dart';
+import 'connection_health.dart';
 import 'matrix_messaging.dart';
 import 'matrix_timeline.dart';
 import 'calls.dart';
@@ -88,7 +89,7 @@ class RiverApi extends ChangeNotifier {
         }
         unawaited(
           _loadSelected().catchError((Object e) {
-            error = '$e';
+            error = _backgroundError(e);
             notifyListeners();
           }),
         );
@@ -98,12 +99,37 @@ class RiverApi extends ChangeNotifier {
   )..addListener(notifyListeners));
   final MatrixStorage _fallbackIdentity = const SecureMatrixStorage();
   MatrixStorage get _identity => _matrixStorage ?? _fallbackIdentity;
-  bool _restoringLocal = false,
-      _offlineSession = false,
-      _apiUnavailable = false;
+  bool _restoringLocal = false, _offlineSession = false;
+  late final _apiConnection = ConnectionHealth(notifyListeners);
+  bool get reconnecting =>
+      _apiConnection.retrying || (_matrix?.reconnecting ?? false);
   bool get networkUnavailable =>
-      _apiUnavailable || (_matrix?.networkUnavailable ?? false);
-  bool get readOnly => networkUnavailable || _offlineSession;
+      (_offlineSession && _apiConnection.retrying) ||
+      _apiConnection.unavailable ||
+      (_matrix?.networkUnavailable ?? false);
+  bool get readOnly => _offlineSession || (_matrix?.reconnecting ?? false);
+  String? get connectionWarning {
+    if (_offlineSession && _apiConnection.retrying) {
+      return 'Network unavailable';
+    }
+    final api = _apiConnection.unavailable;
+    final messaging = _matrix?.networkUnavailable ?? false;
+    if (api && messaging) return 'River and Matrix messaging are reconnecting…';
+    if (messaging) return 'Matrix messaging is reconnecting…';
+    if (api) return 'River is reconnecting…';
+    return null;
+  }
+
+  Future<void> retryConnections() async {
+    await Future.wait<void>([
+      refresh(),
+      if (matrixConnected)
+        matrix.syncNow().catchError((Object e) {
+          if (!matrixNetworkFailure(e)) throw e;
+        }),
+    ]);
+  }
+
   String? cacheError;
   final _cacheFailures = <String>{};
   int _historyRevision = 0;
@@ -115,6 +141,15 @@ class RiverApi extends ChangeNotifier {
     if (_offlineSession) {
       throw StateError('Network unavailable. Reconnect to make changes.');
     }
+  }
+
+  String? _backgroundError(Object error) {
+    final transportFailure =
+        error is http.ClientException ||
+        error is TimeoutException ||
+        matrixNetworkFailure(error) ||
+        (error is ApiException && [502, 503, 504].contains(error.status));
+    return transportFailure ? null : '$error';
   }
 
   Future<void> _saveLocal(
@@ -396,6 +431,7 @@ class RiverApi extends ChangeNotifier {
   int get incomingRequests =>
       requests.where((r) => r['direction'] == 'incoming').length;
   void _clear() {
+    _apiConnection.reset();
     if (_matrix != null) unawaited(_matrix!.disconnect());
     _live?.close();
     _live = null;
@@ -448,6 +484,8 @@ class RiverApi extends ChangeNotifier {
   Completer<void>? _queuedRefresh;
   bool get active => _active;
   set active(bool value) {
+    final transition = _active != value;
+    if (transition) _apiConnection.reset();
     _active = value;
     files?.setActive(value);
     _matrix?.active = value;
@@ -458,6 +496,7 @@ class RiverApi extends ChangeNotifier {
       startLive();
       unawaited(refresh());
     }
+    if (transition) notifyListeners();
   }
 
   void startLive() {
@@ -590,6 +629,7 @@ class RiverApi extends ChangeNotifier {
   }) async {
     final generation = _generation;
     final account = accountKey;
+    final observation = _apiConnection.begin();
     final r = http.Request(method, uri(path));
     r.headers.addAll({
       'Content-Type': 'application/json',
@@ -605,17 +645,17 @@ class RiverApi extends ChangeNotifier {
           .timeout(const Duration(seconds: 20));
       if (generation == _generation && account == accountKey) {
         final unavailable = [502, 503, 504].contains(response.statusCode);
-        if (_apiUnavailable != unavailable) {
-          _apiUnavailable = unavailable;
-          notifyListeners();
+        if (unavailable) {
+          _apiConnection.failed(observation);
+        } else {
+          _apiConnection.succeeded(observation);
         }
       }
     } on Object catch (e) {
       if ((e is http.ClientException || e is TimeoutException) &&
           generation == _generation &&
           account == accountKey) {
-        _apiUnavailable = true;
-        notifyListeners();
+        _apiConnection.failed(observation);
       }
       rethrow;
     }
@@ -671,18 +711,14 @@ class RiverApi extends ChangeNotifier {
       await _initializeFiles();
       await refresh();
     } catch (e) {
-      if (user != null) error = '$e';
+      if (user != null) error = _backgroundError(e);
     }
     loading = false;
     notifyListeners();
     startLive();
     if (liveEnabled) {
       timer ??= Timer.periodic(const Duration(seconds: 10), (_) {
-        if (!_disposed &&
-            active &&
-            user != null &&
-            !busy &&
-            networkUnavailable) {
+        if (!_disposed && active && user != null && !busy && reconnecting) {
           unawaited(refresh());
         }
       });
@@ -808,8 +844,7 @@ class RiverApi extends ChangeNotifier {
       await _saveOverview();
       error = null;
     } catch (e) {
-      if (matrixNetworkFailure(e)) _apiUnavailable = true;
-      error = networkUnavailable ? null : '$e';
+      error = _backgroundError(e);
     } finally {
       final queued = _queuedRefresh;
       _queuedRefresh = null;
@@ -841,7 +876,9 @@ class RiverApi extends ChangeNotifier {
         await matrix.ensureJoinedRoom(wire);
       }
       final data = matrixConnected && wire != null
-          ? await matrix.transport.history(wire, null)
+          ? await matrix.readNetwork(
+              (transport) => transport.history(wire, null),
+            )
           : await request('/api/groups/$selectedId/events');
       if (account == accountKey &&
           selectedId == selected &&
@@ -919,8 +956,7 @@ class RiverApi extends ChangeNotifier {
       await _loadSelected(roster: true);
       error = null;
     } catch (e) {
-      if (matrixNetworkFailure(e)) _apiUnavailable = true;
-      error = networkUnavailable ? null : '$e';
+      error = _backgroundError(e);
     }
     notifyListeners();
   }
@@ -1196,7 +1232,9 @@ class RiverApi extends ChangeNotifier {
     try {
       final wire = matrixRoom(room);
       final data = matrixConnected && wire != null
-          ? await matrix.transport.history(wire, cursor)
+          ? await matrix.readNetwork(
+              (transport) => transport.history(wire, cursor),
+            )
           : await request(
               '/api/groups/$room/events?before=${Uri.encodeQueryComponent(cursor)}',
             );
@@ -1412,7 +1450,9 @@ class RiverApi extends ChangeNotifier {
             ));
       } else {
         try {
-          result = await matrix.transport.thread(wire, event, before);
+          result = await matrix.readNetwork(
+            (transport) => transport.thread(wire, event, before),
+          );
           final page = (result['events'] as List).cast<Json>();
           final previous = ((cached?['events'] as List?) ?? []).cast<Json>();
           final updates = {for (final e in page) e['event_id']: e};
@@ -1428,7 +1468,6 @@ class RiverApi extends ChangeNotifier {
           await _saveLocal('thread', result, room: wire, event: event);
         } catch (e) {
           if (!matrixNetworkFailure(e) || cached == null) rethrow;
-          _apiUnavailable = true;
           notifyListeners();
           result = cached;
         }
@@ -1747,7 +1786,7 @@ class RiverApi extends ChangeNotifier {
       unawaited(
         _loadSelected().catchError((Object e) {
           if (account == accountKey && selected == id) {
-            error = '$e';
+            error = _backgroundError(e);
             notifyListeners();
           }
         }),
@@ -1833,6 +1872,7 @@ class RiverApi extends ChangeNotifier {
   void dispose() {
     _disposed = true;
     _generation++;
+    _apiConnection.dispose();
     timer?.cancel();
     _live?.close();
     _calls?.dispose();

@@ -1,8 +1,9 @@
 {
   "schemaVersion": 1,
-  "version": "0.11.1",
-  "versionCode": 19,
+  "version": "0.11.2",
+  "versionCode": 20,
   "changes": [
-    "Keep conversation and space controls clear of Android's camera cutout, status bar and notification icons, including after rotating the screen."
+    "Open Friends from the sidebar without being redirected to Home, and open a conversation when you choose Message.",
+    "Retry brief connection hiccups quietly, show separate River and Matrix reconnecting warnings for sustained failures, and prevent delayed requests from restoring stale connection warnings."
   ]
 }

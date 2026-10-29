@@ -10,6 +10,7 @@ import 'package:url_launcher/url_launcher.dart';
 
 import 'matrix_store_location.dart';
 import 'performance.dart';
+import 'connection_health.dart';
 
 typedef MatrixJson = Map<String, dynamic>;
 typedef MatrixRequest =
@@ -317,7 +318,22 @@ class MatrixMessaging extends ChangeNotifier {
   List<MatrixJson> roomList = [];
   String? error;
   bool connecting = false, _active = true, _disposed = false;
-  bool networkUnavailable = false;
+  late final _connection = ConnectionHealth(notifyListeners);
+  bool get networkUnavailable => _connection.unavailable;
+  bool get reconnecting => _connection.retrying;
+
+  Future<T> readNetwork<T>(Future<T> Function(MatrixTransport) read) async {
+    final generation = _generation, observation = _connection.begin();
+    try {
+      return await read(transport);
+    } catch (e) {
+      if (generation == _generation && matrixNetworkFailure(e)) {
+        _connection.failed(observation);
+      }
+      rethrow;
+    }
+  }
+
   Future<void> _localQueue = Future.value();
   bool get connected => _transport != null;
   int _generation = 0, _revokeBefore = -1;
@@ -622,19 +638,19 @@ class MatrixMessaging extends ChangeNotifier {
     final pending = _syncRequest;
     if (pending != null) return pending;
     final engine = transport;
+    final observation = _connection.begin();
     late final Future<MatrixJson> operation;
     operation = (() async {
       try {
         final snapshot = await engine.sync();
         _guard(generation);
-        networkUnavailable = false;
+        _connection.succeeded(observation);
         roomList = (snapshot['rooms'] as List).cast<MatrixJson>();
         notifyListeners();
         return snapshot;
       } catch (e) {
         if (generation == _generation && matrixNetworkFailure(e)) {
-          networkUnavailable = true;
-          notifyListeners();
+          _connection.failed(observation);
         }
         rethrow;
       } finally {
@@ -703,8 +719,11 @@ class MatrixMessaging extends ChangeNotifier {
       _transport ?? (throw StateError('Connect Matrix messaging first'));
   bool get active => _active;
   set active(bool value) {
+    final transition = _active != value;
+    if (transition) _connection.reset();
     _active = value;
     if (value) _startSync();
+    if (transition) notifyListeners();
   }
 
   void _startSync() {
@@ -733,7 +752,7 @@ class MatrixMessaging extends ChangeNotifier {
             final old = _transport;
             _transport = null;
             _credentialOwner = null;
-            networkUnavailable = false;
+            _connection.reset();
             error =
                 'This Matrix device session expired. Connect and verify this device again.';
             try {
@@ -769,7 +788,7 @@ class MatrixMessaging extends ChangeNotifier {
     roomList = [];
     connecting = false;
     error = null;
-    networkUnavailable = false;
+    _connection.reset();
     try {
       if (logout) {
         await _serializeStorage(() async {
@@ -803,6 +822,7 @@ class MatrixMessaging extends ChangeNotifier {
   @override
   void dispose() {
     _disposed = true;
+    _connection.dispose();
     _unsavedSessions.clear();
     unawaited(disconnect());
     super.dispose();

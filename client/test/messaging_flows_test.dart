@@ -272,7 +272,8 @@ void main() {
       await matrix.bind(matrixProfile);
       expect(matrix.connected, true);
       await expectLater(matrix.syncNow(), throwsStateError);
-      expect(matrix.networkUnavailable, true);
+      expect(matrix.reconnecting, true);
+      expect(matrix.networkUnavailable, false);
       engine.offline = false;
       await matrix.syncNow();
       expect(matrix.connected, true);

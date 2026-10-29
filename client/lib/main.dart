@@ -288,10 +288,10 @@ class _RiverShellState extends State<RiverShell> {
     }
   }
 
-  void open(String? id) {
+  void open(String? id, {String destination = 'Home'}) {
     scaffold.currentState?.closeDrawer();
     setState(() {
-      section = 'Home';
+      section = destination;
       filter = 'Chat';
       spaceChat = false;
     });
@@ -373,14 +373,14 @@ class _RiverShellState extends State<RiverShell> {
         final wide = box.maxWidth >= 1000;
         final body = Column(
           children: [
-            if (app.networkUnavailable)
+            if (app.connectionWarning case final warning?)
               MaterialBanner(
                 key: const ValueKey('network-unavailable'),
-                leading: const Icon(Icons.wifi_off),
-                content: const Text('Network unavailable'),
+                leading: const Icon(Icons.sync_problem),
+                content: Text(warning),
                 actions: [
                   TextButton(
-                    onPressed: () => app.refresh(),
+                    onPressed: () => action(app.retryConnections),
                     child: const Text('Retry'),
                   ),
                 ],
@@ -427,7 +427,7 @@ class _RiverShellState extends State<RiverShell> {
                   ),
                 ],
               ),
-            if (app.error != null && !app.networkUnavailable)
+            if (app.error != null)
               MaterialBanner(
                 content: Text(app.error!),
                 actions: [
@@ -675,8 +675,7 @@ class _RiverShellState extends State<RiverShell> {
                 ? Badge(label: Text('${app.incomingRequests}'))
                 : null,
             onTap: () {
-              setState(() => section = 'Friends');
-              open(null);
+              open(null, destination: 'Friends');
             },
           ),
           Expanded(
