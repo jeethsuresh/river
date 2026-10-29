@@ -43,16 +43,21 @@ void editorScenarios() {
       await tester.tap(find.byTooltip('Redo'));
       await tester.pumpAndSettle();
       expect(source.text, '**Hello** River');
+      await tester.ensureVisible(find.text('Markdown'));
       await tester.tap(find.text('Markdown'));
       await tester.pumpAndSettle();
       const exact =
           '# Heading\n\nA **bold** and _italic_ 🫶🏽 draft.\n\n- first\n- second\n\n```go\nfmt.Println("River")\n```';
       await tester.enterText(find.byType(TextField), exact);
+      await tester.ensureVisible(find.text('Preview'));
       await tester.tap(find.text('Preview'));
       await tester.pumpAndSettle();
       expect(find.byType(RichBody), findsOneWidget);
       expect(source.text, exact);
-      await tester.tap(find.text('Write'));
+      await tester.tap(find.text('Preview'));
+      await tester.pumpAndSettle();
+      await tester.ensureVisible(find.text('Markdown'));
+      await tester.tap(find.text('Markdown'));
       await tester.pumpAndSettle();
       expect(
         source.text,
@@ -102,10 +107,12 @@ void editorScenarios() {
       );
       await tester.pumpAndSettle();
       expect(find.byType(q.QuillEditor), findsNothing);
-      await tester.tap(find.text('Write'));
+      await tester.ensureVisible(find.text('Markdown'));
+      await tester.tap(find.text('Markdown'));
       await tester.pumpAndSettle();
       expect(source.text, draft);
       expect(find.byType(q.QuillEditor), findsNothing);
+      await tester.ensureVisible(find.text('Preview'));
       await tester.tap(find.text('Preview'));
       await tester.pumpAndSettle();
       expect(find.byType(Image), findsNothing);

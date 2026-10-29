@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import 'api.dart';
+import 'call_widgets.dart';
 import 'matrix_security_widgets.dart';
 import 'content_widgets.dart';
 import 'publishing_widgets.dart';
@@ -173,7 +174,7 @@ class _ConversationPickerState extends State<ConversationPicker> {
             onChanged: (_) => setState(() {}),
             decoration: InputDecoration(
               labelText: widget.contextGroup == null
-                  ? 'Find a friend'
+                  ? 'Friend, Matrix user or room'
                   : 'Find a group member',
               prefixIcon: Icon(Icons.search),
             ),
@@ -199,6 +200,35 @@ class _ConversationPickerState extends State<ConversationPicker> {
                       });
                       try {
                         await widget.app.messageFriend(person);
+                        if (context.mounted) Navigator.pop(context, true);
+                      } catch (e) {
+                        if (mounted) setState(() => error = '$e');
+                      } finally {
+                        if (mounted) setState(() => busy = false);
+                      }
+                    },
+            ),
+          if (widget.app.matrixConnected && widget.contextGroup == null)
+            TextButton.icon(
+              icon: const Icon(Icons.add_link),
+              label: const Text('Join Matrix room'),
+              onPressed: busy
+                  ? null
+                  : () async {
+                      final room = query.text.trim();
+                      if (room.isEmpty) {
+                        setState(
+                          () => error =
+                              'Enter a room ID, alias or matrix.to link in the search field.',
+                        );
+                        return;
+                      }
+                      setState(() {
+                        busy = true;
+                        error = null;
+                      });
+                      try {
+                        await widget.app.joinMatrixRoom(room);
                         if (context.mounted) Navigator.pop(context, true);
                       } catch (e) {
                         if (mounted) setState(() => error = '$e');
@@ -296,8 +326,9 @@ Future<void> openRiverThread(
 }
 
 class CatchUpPanel extends StatelessWidget {
-  const CatchUpPanel({super.key, required this.app});
+  const CatchUpPanel({super.key, required this.app, this.open});
   final RiverApi app;
+  final ValueChanged<String?>? open;
   List<Json> unreadGroups(bool conversations) {
     final items = app.groups
         .where(
@@ -323,7 +354,7 @@ class CatchUpPanel extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text('Catch up', style: Theme.of(context).textTheme.titleLarge),
+          Text('Catch Up', style: Theme.of(context).textTheme.titleLarge),
           if (app.catchUp.isEmpty &&
               !app.groups.any((g) => (g['unread_count'] as int? ?? 0) > 0))
             const Padding(
@@ -335,16 +366,20 @@ class CatchUpPanel extends StatelessWidget {
             Padding(
               padding: const EdgeInsets.only(top: 16),
               child: Text(
-                'New ${kind == 'post' ? 'posts' : 'discussions'} from your spaces',
+                kind == 'post' ? 'Recent Posts' : 'Recent Discussions',
                 style: Theme.of(context).textTheme.titleSmall,
               ),
             ),
-            if (!app.catchUp.any(
-              (e) => e['type'] == 'cool.gravitas.river.$kind.v1',
-            ))
+            if (![
+              ...app.catchUp,
+              ...app.recent,
+            ].any((e) => e['type'] == 'cool.gravitas.river.$kind.v1'))
               Text('No unread ${kind == 'post' ? 'posts' : 'discussions'}.'),
             for (final e
-                in app.catchUp
+                in {
+                      for (final entry in [...app.recent, ...app.catchUp])
+                        entry['event_id']: entry,
+                    }.values
                     .where((e) => e['type'] == 'cool.gravitas.river.$kind.v1')
                     .take(20))
               ListTile(
@@ -355,7 +390,7 @@ class CatchUpPanel extends StatelessWidget {
                 ),
                 title: Text(rendered(e)['title'] as String? ?? 'Entry'),
                 subtitle: Text(
-                  '${e['group_name'] ?? ''} · ${e['sender']}\n${rendered(e)['body'] ?? ''}',
+                  '${e['group_name'] ?? ''} · ${app.displayName(e['sender'] as String)}\n${rendered(e)['body'] ?? ''}',
                   maxLines: 3,
                   overflow: TextOverflow.ellipsis,
                 ),
@@ -367,13 +402,27 @@ class CatchUpPanel extends StatelessWidget {
             Padding(
               padding: const EdgeInsets.only(top: 16),
               child: Text(
-                conversation
-                    ? 'Unread conversations'
-                    : 'New activity in your channels',
+                conversation ? 'Recent Chats' : 'New activity in your channels',
                 style: Theme.of(context).textTheme.titleSmall,
               ),
             ),
-            for (final g in unreadGroups(conversation))
+            for (final g
+                in conversation
+                    ? (app.groups
+                              .where(
+                                (g) =>
+                                    ['dm', 'group'].contains(g['kind']) &&
+                                    g['membership'] == 'join',
+                              )
+                              .toList()
+                            ..sort(
+                              (a, b) => (b['last_activity_at'] as int? ?? 0)
+                                  .compareTo(
+                                    a['last_activity_at'] as int? ?? 0,
+                                  ),
+                            ))
+                          .take(12)
+                    : unreadGroups(false))
               ListTile(
                 leading: Icon(
                   conversation ? Icons.mark_chat_unread_outlined : Icons.tag,
@@ -386,8 +435,12 @@ class CatchUpPanel extends StatelessWidget {
                         maxLines: 2,
                         overflow: TextOverflow.ellipsis,
                       ),
-                trailing: Badge(label: Text('${g['unread_count']}')),
-                onTap: () => app.open(g['id'] as String),
+                trailing: (g['unread_count'] as int? ?? 0) > 0
+                    ? Badge(label: Text('${g['unread_count']}'))
+                    : null,
+                onTap: () => open != null
+                    ? open!(g['id'] as String)
+                    : app.open(g['id'] as String),
               ),
           ],
         ],
@@ -397,8 +450,9 @@ class CatchUpPanel extends StatelessWidget {
 }
 
 class AccountPanel extends StatelessWidget {
-  const AccountPanel({super.key, required this.app});
+  const AccountPanel({super.key, required this.app, this.onSignOut});
   final RiverApi app;
+  final VoidCallback? onSignOut;
   @override
   Widget build(BuildContext context) => ListView(
     padding: const EdgeInsets.all(24),
@@ -445,7 +499,7 @@ class AccountPanel extends StatelessWidget {
       if (app.matrixEnabled) MatrixSecurityPanel(messaging: app.matrix),
       const SizedBox(height: 24),
       OutlinedButton.icon(
-        onPressed: app.logout,
+        onPressed: onSignOut ?? app.logout,
         icon: const Icon(Icons.logout),
         label: const Text('Sign out of River'),
       ),
@@ -536,27 +590,176 @@ class SpaceChannels extends StatelessWidget {
   @override
   Widget build(BuildContext context) => Column(
     children: [
-      for (final kind in ['text', 'drop_in'])
-        ExpansionTile(
-          key: PageStorageKey('$space:$kind'),
-          initiallyExpanded: true,
-          title: Text(
-            kind == 'text' ? 'Text channels' : 'Voice rooms',
-            style: const TextStyle(fontSize: 12),
-          ),
-          children: [
-            for (final channel
-                in app.channels(space).where((c) => c['channel_kind'] == kind))
-              _ChannelWithThreads(
-                app: app,
-                channel: channel,
-                open: open,
-                thread: thread,
-              ),
-          ],
+      for (final channel
+          in app.channels(space).where((c) => c['channel_kind'] == 'drop_in'))
+        Padding(
+          padding: const EdgeInsets.only(left: 24),
+          child: VoiceRoomTile(app: app, channel: channel, compact: true),
+        ),
+      for (final channel
+          in app.channels(space).where((c) => c['channel_kind'] == 'text'))
+        _ChannelWithThreads(
+          app: app,
+          channel: channel,
+          open: open,
+          thread: thread,
         ),
     ],
   );
+}
+
+/// Rooms belong directly to a space. Voice rooms never open a message timeline.
+class SpaceRoomList extends StatelessWidget {
+  const SpaceRoomList({
+    super.key,
+    required this.app,
+    required this.space,
+    required this.open,
+    this.openSpaceChat,
+  });
+  final RiverApi app;
+  final String space;
+  final ValueChanged<String> open;
+  final VoidCallback? openSpaceChat;
+  @override
+  Widget build(BuildContext context) {
+    final channels = app.channels(space);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        if (channels.any((c) => c['channel_kind'] == 'drop_in'))
+          SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            child: Row(
+              children: [
+                for (final channel in channels.where(
+                  (c) => c['channel_kind'] == 'drop_in',
+                ))
+                  SizedBox(
+                    width: 220,
+                    child: VoiceRoomTile(app: app, channel: channel),
+                  ),
+              ],
+            ),
+          ),
+        if (openSpaceChat != null)
+          ListTile(
+            key: const ValueKey('space-chat'),
+            dense: true,
+            leading: const Icon(Icons.tag, size: 18),
+            title: const Text('Space chat'),
+            onTap: openSpaceChat,
+          ),
+        for (final channel in channels.where(
+          (c) => c['channel_kind'] == 'text',
+        ))
+          ListTile(
+            dense: true,
+            leading: const Icon(Icons.tag, size: 18),
+            title: Text(channel['name'] as String),
+            trailing: (channel['unread_count'] as int? ?? 0) > 0
+                ? Badge(label: Text('${channel['unread_count']}'))
+                : null,
+            onTap: () => open(channel['id'] as String),
+          ),
+        if (channels.isEmpty)
+          const Padding(
+            padding: EdgeInsets.all(12),
+            child: Text(
+              'Create a voice room or text chat from the space menu.',
+            ),
+          ),
+      ],
+    );
+  }
+}
+
+class VoiceRoomTile extends StatefulWidget {
+  const VoiceRoomTile({
+    super.key,
+    required this.app,
+    required this.channel,
+    this.compact = false,
+  });
+  final RiverApi app;
+  final Json channel;
+  final bool compact;
+  @override
+  State<VoiceRoomTile> createState() => _VoiceRoomTileState();
+}
+
+class _VoiceRoomTileState extends State<VoiceRoomTile> {
+  bool preview = false;
+  @override
+  Widget build(BuildContext context) {
+    final app = widget.app, channel = widget.channel;
+    final people = app.activeCalls
+        .where((c) => c['group_id'] == channel['id'])
+        .expand((c) => (c['participants'] as List? ?? []).cast<Json>())
+        .toList();
+    return MouseRegion(
+      onEnter: (_) => setState(() => preview = true),
+      onExit: (_) => setState(() => preview = false),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          ListTile(
+            dense: true,
+            minTileHeight: widget.compact ? 32 : 44,
+            contentPadding: const EdgeInsets.symmetric(horizontal: 8),
+            minLeadingWidth: 18,
+            horizontalTitleGap: 6,
+            leading: const Icon(Icons.headphones_outlined, size: 17),
+            title: Text(
+              channel['name'] as String,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(fontSize: 13),
+            ),
+            trailing: Text(
+              '${people.length}',
+              style: Theme.of(context).textTheme.labelSmall,
+            ),
+            onTap: () {
+              if (preview) {
+                joinRiverCall(context, app, channel);
+              } else {
+                setState(() => preview = true);
+              }
+            },
+          ),
+          if (preview)
+            Padding(
+              padding: const EdgeInsets.only(left: 8, right: 8, bottom: 4),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Text(
+                    people.isEmpty
+                        ? 'No one here yet'
+                        : '${people.length} ${people.length == 1 ? 'person' : 'people'} here',
+                    style: Theme.of(context).textTheme.labelSmall,
+                  ),
+                  for (final p in people)
+                    Text(
+                      app.displayName(
+                        p['user_id'] as String? ??
+                            p['identity'] as String? ??
+                            'Guest',
+                      ),
+                      style: Theme.of(context).textTheme.bodySmall,
+                    ),
+                  TextButton.icon(
+                    onPressed: () => joinRiverCall(context, app, channel),
+                    icon: const Icon(Icons.call_outlined, size: 16),
+                    label: const Text('Join voice room'),
+                  ),
+                ],
+              ),
+            ),
+        ],
+      ),
+    );
+  }
 }
 
 class _ChannelWithThreads extends StatefulWidget {

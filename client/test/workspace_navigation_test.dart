@@ -79,7 +79,7 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.text('My active project'), findsOneWidget);
       expect(find.text('Other space thread'), findsNothing);
-      expect(find.text('2 people here'), findsOneWidget);
+      expect(find.text('2'), findsOneWidget);
       await tester.tap(find.text('My active project'));
       expect(openedThread?['event_id'], r'$root');
       await tester.tap(find.byTooltip('Collapse replies in Projects'));
@@ -89,7 +89,11 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.text('My active project'), findsOneWidget);
       await tester.tap(find.text('Lounge'));
-      expect(openedRoom, 'voice');
+      await tester.pumpAndSettle();
+      expect(openedRoom, isNull);
+      expect(find.text('2 people here'), findsOneWidget);
+      expect(find.text('alice'), findsOneWidget);
+      expect(app.calls.active, isFalse);
       expect(tester.takeException(), isNull);
       await tester.pumpWidget(const SizedBox());
       app.dispose();

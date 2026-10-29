@@ -209,6 +209,7 @@ void main() {
         expect(engine.actions.any((a) => a['action'] == 'encrypt'), true);
         await tester.pumpWidget(RiverApp(api: api, boot: false));
         await tester.pumpAndSettle();
+        await tester.ensureVisible(find.text('Markdown'));
         await tester.tap(find.text('Markdown'));
         await tester.pumpAndSettle();
         await tester.enterText(

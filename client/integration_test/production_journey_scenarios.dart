@@ -255,10 +255,13 @@ void productionJourneyScenarios() {
         await until(() => b.calls.muted, 'mute failed');
         await tap(find.text('Unmute'));
         await until(() => !b.calls.muted, 'unmute failed');
-        final chat = b.calls.chat!;
+        expect(b.calls.chat, isNull); // Voice rooms have no attached text chat.
+        final chat =
+            b.channels(sid).firstWhere((g) => g['channel_kind'] == 'text')['id']
+                as String;
         await io(
           () => b.send(chat, 'm.room.message', {
-            'body': '$runtime current call chat',
+            'body': '$runtime space text chat',
             'msgtype': 'm.text',
           }, transactionId()),
         );
@@ -296,7 +299,7 @@ void productionJourneyScenarios() {
           attempts: 400,
         );
         passed(
-          'real audio/video decoding, mute/unmute, call-chat ACL, membership removal and live consent revocation',
+          'real audio/video decoding, mute/unmute, space text-chat ACL, membership removal and live consent revocation',
         );
         expect(tester.takeException(), isNull);
       }

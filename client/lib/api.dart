@@ -252,6 +252,41 @@ class RiverApi extends ChangeNotifier {
 
   bool get matrixConnected => _matrix?.connected ?? false;
   Json? group(String id) => groups.where((g) => g['id'] == id).firstOrNull;
+  String displayName(String id) {
+    final people = <Json>[
+      if (user != null) user!,
+      ...friends,
+      ...otherContacts,
+      for (final g in groups) ...(g['members'] as List? ?? []).cast<Json>(),
+    ];
+    for (final person in people) {
+      if (person['user_id'] == id || person['username'] == id) {
+        final name =
+            person['display_name'] ??
+            person['displayname'] ??
+            person['name'] ??
+            person['username'];
+        if (name is String && name.isNotEmpty && !name.startsWith('@')) {
+          return name;
+        }
+      }
+    }
+    final local = id.startsWith('@') ? id.substring(1).split(':').first : id;
+    return local.replaceAll(RegExp(r'[._]'), ' ');
+  }
+
+  String get _favouritesKey =>
+      'river.favourites.${sha256.convert(utf8.encode(accountKey ?? ''))}';
+  Future<Set<String>> favouritePeople() async {
+    final value = await _identity.read(_favouritesKey);
+    return value == null
+        ? <String>{}
+        : (jsonDecode(value) as List).cast<String>().toSet();
+  }
+
+  Future<void> saveFavouritePeople(Set<String> people) =>
+      _identity.write(_favouritesKey, jsonEncode(people.toList()..sort()));
+
   String? matrixRoom(String id) => group(id)?['room_id'] as String?;
   bool encrypted(String id) => group(id)?['encrypted'] == true;
 

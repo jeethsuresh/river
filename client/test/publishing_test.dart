@@ -214,6 +214,7 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
+    await tester.ensureVisible(find.text('Markdown'));
     await tester.tap(find.text('Markdown'));
     await tester.pumpAndSettle();
     await tester.enterText(find.byType(TextField), 'Private draft');

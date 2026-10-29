@@ -174,7 +174,7 @@ class _CallChatScreenState extends State<CallChatScreen> {
                       ),
                     for (final e in events)
                       Padding(
-                        padding: const EdgeInsets.only(bottom: 10),
+                        padding: const EdgeInsets.symmetric(vertical: 3),
                         child: ContentCard(
                           app: widget.api,
                           room: widget.room,
@@ -214,17 +214,13 @@ class _CallChatScreenState extends State<CallChatScreen> {
                         ),
                       Row(
                         children: [
-                          IconButton(
-                            tooltip: 'Attach files',
-                            onPressed: sending || attachments.length >= 5
-                                ? null
-                                : pick,
-                            icon: const Icon(Icons.attach_file),
-                          ),
                           Expanded(
                             child: RichComposer(
                               controller: draft,
                               label: 'Message callers',
+                              onAttach: sending || attachments.length >= 5
+                                  ? null
+                                  : pick,
                               onSubmit: sending ? null : send,
                             ),
                           ),
