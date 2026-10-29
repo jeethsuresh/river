@@ -34,8 +34,16 @@ Next.js River code; Git history retains that implementation.
   Matrix approval return to the app automatically, with an Open River fallback
   when the browser requires a tap. Return links contain no credentials. Android
   retains the pending verifier in secure storage so a cold start can finish the
-  exchange. Matrix device sign-in uses the same browser approval model. Initial
+  exchange. Matrix device sign-in is required on a new or unlinked device, using
+  the same browser approval model. Conversations remain unavailable until Matrix
+  connects. Failed or cancelled approval stays on setup with retry and sign-out
+  options. A restored linked device can open its cached conversations offline. Initial
   encryption setup may require a password, sent directly from the SDK to Gravitas.
+- Desktop message composers send with Enter by default; Shift+Enter inserts a new
+  line. **Settings → Enter sends messages on desktop** turns this off and saves
+  the choice per account on the device. Ctrl/Cmd+Enter remains available, and
+  mobile Enter inserts a new line. This applies to messages in visual and Markdown
+  modes; post and discussion editors keep their multiline behavior.
 - Conversation drafts and pending attachments stay with their room while navigating.
   Failed sends retain their transaction ID and offer Retry, including when the
   homeserver accepted a message but its response was lost.

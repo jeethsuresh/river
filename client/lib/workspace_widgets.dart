@@ -454,7 +454,12 @@ class AccountPanel extends StatelessWidget {
   final RiverApi app;
   final VoidCallback? onSignOut;
   @override
-  Widget build(BuildContext context) => ListView(
+  Widget build(BuildContext context) => AnimatedBuilder(
+    animation: app,
+    builder: (context, _) => buildSettings(context),
+  );
+
+  Widget buildSettings(BuildContext context) => ListView(
     padding: const EdgeInsets.all(24),
     children: [
       Text('Your account', style: Theme.of(context).textTheme.headlineMedium),
@@ -493,6 +498,28 @@ class AccountPanel extends StatelessWidget {
               ),
             ),
           ],
+        ),
+      ),
+      const SizedBox(height: 24),
+      Card(
+        child: SwitchListTile(
+          key: const ValueKey('enter-sends-messages'),
+          title: const Text('Enter sends messages on desktop'),
+          subtitle: const Text(
+            'Use Shift+Enter for a new line. Turn off to use Enter for new lines.',
+          ),
+          value: app.enterSendsMessages,
+          onChanged: (enabled) async {
+            try {
+              await app.setEnterSendsMessages(enabled);
+            } catch (e) {
+              if (context.mounted) {
+                ScaffoldMessenger.of(
+                  context,
+                ).showSnackBar(SnackBar(content: Text('$e')));
+              }
+            }
+          },
         ),
       ),
       const SizedBox(height: 24),

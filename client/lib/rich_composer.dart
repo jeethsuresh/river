@@ -2,6 +2,7 @@
 // Keep it off so pasted HTML cannot inject remote embeds into a peer-only editor.
 // ignore_for_file: experimental_member_use
 import 'dart:async';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_quill/flutter_quill.dart' as q;
@@ -26,6 +27,7 @@ class RichComposer extends StatefulWidget {
     this.enabled = true,
     this.compact = true,
     this.onSubmit,
+    this.sendOnEnter = false,
     this.onAttach,
     this.onChanged,
     this.validator,
@@ -35,6 +37,7 @@ class RichComposer extends StatefulWidget {
   final int maxLength;
   final double minHeight, maxHeight;
   final bool enabled, compact;
+  final bool sendOnEnter;
   final VoidCallback? onSubmit, onAttach;
   final ValueChanged<String>? onChanged;
   final FormFieldValidator<String>? validator;
@@ -45,6 +48,7 @@ class RichComposer extends StatefulWidget {
 
 class _RichComposerState extends State<RichComposer> {
   final focus = FocusNode(), scroll = ScrollController();
+  final editorKey = GlobalKey<q.EditorState>();
   final field = GlobalKey<FormFieldState<String>>();
   final toMarkdown = DeltaToMarkdown();
   final toDelta = MarkdownToDelta(
@@ -57,6 +61,35 @@ class _RichComposerState extends State<RichComposer> {
   StreamSubscription<q.DocChange>? subscription;
   String mode = 'Write', loaded = '', editMode = 'Write';
   bool syncing = false, extended = false;
+
+  bool get desktopSend =>
+      widget.sendOnEnter &&
+      const {
+        TargetPlatform.linux,
+        TargetPlatform.macOS,
+        TargetPlatform.windows,
+      }.contains(defaultTargetPlatform);
+
+  KeyEventResult? submitKey(KeyEvent event) {
+    if (!desktopSend ||
+        !widget.enabled ||
+        widget.onSubmit == null ||
+        (event.logicalKey != LogicalKeyboardKey.enter &&
+            event.logicalKey != LogicalKeyboardKey.numpadEnter) ||
+        HardwareKeyboard.instance.isShiftPressed ||
+        HardwareKeyboard.instance.isControlPressed ||
+        HardwareKeyboard.instance.isMetaPressed ||
+        HardwareKeyboard.instance.isAltPressed) {
+      return null;
+    }
+    final raw = editorKey.currentState;
+    if (raw is q.QuillRawEditorState) {
+      final composing = raw.composingRange.value;
+      if (composing.isValid && !composing.isCollapsed) return null;
+    }
+    if (event is KeyDownEvent) widget.onSubmit!();
+    return KeyEventResult.handled;
+  }
 
   @override
   void initState() {
@@ -510,6 +543,8 @@ class _RichComposerState extends State<RichComposer> {
                   focusNode: focus,
                   scrollController: scroll,
                   config: q.QuillEditorConfig(
+                    editorKey: editorKey,
+                    onKeyPressed: (event, _) => submitKey(event),
                     minHeight: widget.minHeight,
                     maxHeight: widget.maxHeight,
                     padding: const EdgeInsets.symmetric(
@@ -527,6 +562,7 @@ class _RichComposerState extends State<RichComposer> {
           MarkdownShortcuts(
             controller: widget.controller,
             onSubmit: widget.onSubmit,
+            sendOnEnter: desktopSend && widget.enabled,
             child: TextField(
               controller: widget.controller,
               enabled: widget.enabled,

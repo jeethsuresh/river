@@ -1,10 +1,9 @@
 {
   "schemaVersion": 1,
-  "version": "0.11.3",
-  "versionCode": 21,
+  "version": "0.11.4",
+  "versionCode": 22,
   "changes": [
-    "Recover expired Matrix sync connections automatically when starting a conversation or sending its first message.",
-    "Save drafts while a new conversation is syncing without showing a false storage warning.",
-    "Connect messaging directly from a conversation, keep your draft while connecting, and enable Send when the device is connected."
+    "Connect Matrix messaging as a required step when signing in on a device. Conversations open only after connection succeeds.",
+    "Press Enter to send messages on desktop, or Shift+Enter for a new line. Turn off Enter-to-send in Settings; the choice is saved for your account on this device."
   ]
 }
