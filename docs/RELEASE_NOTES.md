@@ -1,7 +1,7 @@
-# River 0.10.0 (Android build 16)
+# River 0.12.0 (Android build 23)
 
-Previously viewed rooms, chat history and threads are available without a network connection. Room drafts, attachment references and retry details survive restarting River in the existing encrypted device store.
+River now has five focused destinations: Chats for friends and calls, Communities for shared text and voice rooms, Forums for topics and replies, Posts for community or public publishing, and Matrix for conversations beyond River.
 
-A network unavailable banner appears in the header when River cannot connect. Saved conversations refresh when connectivity returns. Sending messages requires connectivity; only history already loaded on this device is available offline.
+The interface uses a slimmer sidebar, compact room headers, clearer typography, and direct destination shortcuts on mobile. Active call controls stay visible while navigating on mobile.
 
-Linked images and GIFs are cached beside peer attachments for offline viewing. Web clients can also reload the cached app while offline after an online visit to this version.
+Forums and Posts collect recent activity from your communities; choose a community to browse its full history. Posts retain their existing audience and comment controls. Matrix rooms expose supported messaging features without River call or publishing actions.

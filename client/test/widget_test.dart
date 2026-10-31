@@ -33,7 +33,13 @@ void main() {
         api.selected = 'space';
         api.notifyListeners();
         await tester.pumpAndSettle();
-        expect(find.text('Chat'), findsOneWidget);
+        expect(
+          find.descendant(
+            of: find.byType(SegmentedButton<String>),
+            matching: find.text('Rooms'),
+          ),
+          findsOneWidget,
+        );
         expect(tester.takeException(), isNull);
         await tester.pumpWidget(const SizedBox());
       }

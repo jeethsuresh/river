@@ -91,7 +91,13 @@ class _SubgroupDetailsState extends State<SubgroupDetails> {
 }
 
 class ConversationPicker extends StatefulWidget {
-  const ConversationPicker({super.key, required this.app, this.contextGroup});
+  const ConversationPicker({
+    super.key,
+    required this.app,
+    this.contextGroup,
+    this.matrixOnly = false,
+  });
+  final bool matrixOnly;
   final RiverApi app;
   final Json? contextGroup;
   @override
@@ -154,7 +160,9 @@ class _ConversationPickerState extends State<ConversationPicker> {
   @override
   Widget build(BuildContext context) => AlertDialog(
     title: Text(
-      widget.contextGroup == null
+      widget.matrixOnly
+          ? 'Connect with Matrix'
+          : widget.contextGroup == null
           ? 'New conversation'
           : 'Conversation in ${widget.contextGroup!['name']}',
     ),
@@ -173,7 +181,9 @@ class _ConversationPickerState extends State<ConversationPicker> {
             controller: query,
             onChanged: (_) => setState(() {}),
             decoration: InputDecoration(
-              labelText: widget.contextGroup == null
+              labelText: widget.matrixOnly
+                  ? 'Matrix ID, room alias or link'
+                  : widget.contextGroup == null
                   ? 'Friend, Matrix user or room'
                   : 'Find a group member',
               prefixIcon: Icon(Icons.search),
@@ -238,7 +248,15 @@ class _ConversationPickerState extends State<ConversationPicker> {
                     },
             ),
           Expanded(
-            child: candidates.isEmpty
+            child: widget.matrixOnly
+                ? Center(
+                    child: Text(
+                      widget.app.matrixConnected
+                          ? 'Use @name:server to message someone, or #room:server to join a room.'
+                          : 'Connect Matrix messaging on this device to continue.',
+                    ),
+                  )
+                : candidates.isEmpty
                 ? Center(
                     child: Text(
                       widget.contextGroup == null
@@ -289,10 +307,11 @@ class _ConversationPickerState extends State<ConversationPicker> {
         onPressed: busy ? null : () => Navigator.pop(context),
         child: const Text('Cancel'),
       ),
-      FilledButton(
-        onPressed: busy || selected.isEmpty ? null : create,
-        child: Text(busy ? 'Creating…' : 'Start conversation'),
-      ),
+      if (!widget.matrixOnly)
+        FilledButton(
+          onPressed: busy || selected.isEmpty ? null : create,
+          child: Text(busy ? 'Creating…' : 'Start conversation'),
+        ),
     ],
   );
 }
@@ -654,6 +673,18 @@ class SpaceRoomList extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
+        const Padding(
+          padding: EdgeInsets.fromLTRB(12, 8, 12, 4),
+          child: Text(
+            'CHATROOMS',
+            style: TextStyle(
+              fontSize: 11,
+              fontWeight: FontWeight.w700,
+              color: Color(0xff6b7280),
+              letterSpacing: 1,
+            ),
+          ),
+        ),
         if (channels.any((c) => c['channel_kind'] == 'drop_in'))
           SingleChildScrollView(
             scrollDirection: Axis.horizontal,
