@@ -12,6 +12,7 @@ import 'matrix_attachment_widgets.dart';
 import 'rich_composer.dart';
 import 'media.dart';
 import 'media_widgets.dart';
+import 'river_design.dart';
 
 const reactionEmojis = [
   '👍',
@@ -68,22 +69,110 @@ Future<void> openContentLink(BuildContext context, String? value) async {
   }
 }
 
+const contentBodyStyle = TextStyle(fontSize: 16, height: 1.45, color: riverInk);
+const contentTitleStyle = TextStyle(
+  fontSize: 18,
+  height: 1.3,
+  fontWeight: FontWeight.w600,
+  color: riverInk,
+);
+const contentMetaStyle = TextStyle(
+  fontSize: 11,
+  height: 1.4,
+  color: riverMuted,
+);
+
+ButtonStyle contentActionStyle() => TextButton.styleFrom(
+  foregroundColor: riverMuted,
+  textStyle: const TextStyle(fontFamily: 'Roboto', fontSize: 11),
+  visualDensity: VisualDensity.compact,
+  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+  padding: const EdgeInsets.symmetric(horizontal: 3),
+  minimumSize: const Size(0, 24),
+);
+
+/// A flat reading surface: the writing comes first; context is a small caption.
+class EntryPreview extends StatelessWidget {
+  const EntryPreview({
+    super.key,
+    required this.title,
+    required this.body,
+    required this.metadata,
+    required this.open,
+  });
+  final String title, body;
+  final List<String> metadata;
+  final VoidCallback open;
+  @override
+  Widget build(BuildContext context) => InkWell(
+    onTap: open,
+    child: Container(
+      decoration: const BoxDecoration(
+        border: Border(bottom: BorderSide(color: riverBorder)),
+      ),
+      padding: const EdgeInsets.symmetric(vertical: 10),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          if (title.isNotEmpty) ...[
+            Text(title, style: contentTitleStyle),
+            const SizedBox(height: 3),
+          ],
+          if (body.isNotEmpty) RichBody(body),
+          const SizedBox(height: 4),
+          Wrap(
+            spacing: 8,
+            runSpacing: 2,
+            children: [
+              for (final label in metadata)
+                Text(label, style: contentMetaStyle),
+            ],
+          ),
+        ],
+      ),
+    ),
+  );
+}
+
 class RichBody extends StatelessWidget {
   const RichBody(this.body, {super.key});
   final String body;
   @override
-  Widget build(BuildContext context) => SelectionArea(
-    child: MarkdownBody(
-      data: body,
-      onTapLink: (_, href, _) => openContentLink(context, href),
-      inlineSyntaxes: [MediaLinkSyntax()],
-      imageBuilder: (uri, title, alt) => mediaUri('$uri') == null
-          ? const Text('Unsupported image link')
-          : LinkedMedia(
-              url: '$uri',
-              sticker: title == stickerTitle,
-              label: alt ?? 'Image',
+  Widget build(BuildContext context) => Align(
+    alignment: Alignment.topLeft,
+    child: ConstrainedBox(
+      constraints: const BoxConstraints(maxWidth: 880),
+      child: SelectionArea(
+        child: MarkdownBody(
+          data: body,
+          styleSheet: MarkdownStyleSheet.fromTheme(Theme.of(context)).copyWith(
+            p: contentBodyStyle,
+            a: contentBodyStyle.copyWith(
+              color: riverAccent,
+              decoration: TextDecoration.underline,
             ),
+            h1: contentTitleStyle.copyWith(fontSize: 22),
+            h2: contentTitleStyle.copyWith(fontSize: 20),
+            h3: contentTitleStyle,
+            blockSpacing: 6,
+            listIndent: 20,
+            blockquote: contentBodyStyle,
+            blockquotePadding: const EdgeInsets.only(left: 10),
+            blockquoteDecoration: const BoxDecoration(
+              border: Border(left: BorderSide(color: riverBorder, width: 2)),
+            ),
+          ),
+          onTapLink: (_, href, _) => openContentLink(context, href),
+          inlineSyntaxes: [MediaLinkSyntax()],
+          imageBuilder: (uri, title, alt) => mediaUri('$uri') == null
+              ? const Text('Unsupported image link')
+              : LinkedMedia(
+                  url: '$uri',
+                  sticker: title == stickerTitle,
+                  label: alt ?? 'Image',
+                ),
+        ),
+      ),
     ),
   );
 }
@@ -171,37 +260,50 @@ class _ReactionBarState extends State<ReactionBar> {
     crossAxisAlignment: WrapCrossAlignment.center,
     children: [
       for (final r in widget.summary)
-        FilterChip(
-          visualDensity: VisualDensity.compact,
-          materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-          label: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              if (stickerReactionUrl(r['key'] as String) case final url?)
-                StickerImage(image: NetworkImage(mediaFetchUrl(url)), size: 30)
-              else
-                Text(r['key'] as String),
-              const SizedBox(width: 4),
-              Text('${r['count']}'),
-            ],
-          ),
+        Semantics(
           selected: r['mine'] == true || r['active'] == true,
-          tooltip: (r['mine'] == true || r['active'] == true)
-              ? 'Remove ${stickerReactionUrl(r['key'] as String) != null ? 'sticker' : r['key']} reaction'
-              : 'React ${stickerReactionUrl(r['key'] as String) != null ? 'with sticker' : r['key']}',
-          onSelected: busy || !widget.enabled
-              ? null
-              : (_) => react(r['key'] as String),
+          child: Tooltip(
+            message: (r['mine'] == true || r['active'] == true)
+                ? 'Remove ${stickerReactionUrl(r['key'] as String) != null ? 'sticker' : r['key']} reaction'
+                : 'React ${stickerReactionUrl(r['key'] as String) != null ? 'with sticker' : r['key']}',
+            child: TextButton(
+              style: contentActionStyle().copyWith(
+                foregroundColor: WidgetStatePropertyAll(
+                  r['mine'] == true || r['active'] == true
+                      ? riverAccent
+                      : riverMuted,
+                ),
+              ),
+              onPressed: busy || !widget.enabled
+                  ? null
+                  : () => react(r['key'] as String),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  if (stickerReactionUrl(r['key'] as String) case final url?)
+                    StickerImage(
+                      image: NetworkImage(mediaFetchUrl(url)),
+                      size: 20,
+                    )
+                  else
+                    Text(r['key'] as String),
+                  const SizedBox(width: 3),
+                  Text('${r['count']}'),
+                ],
+              ),
+            ),
+          ),
         ),
       IconButton(
         style: IconButton.styleFrom(
           tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+          foregroundColor: riverMuted,
         ),
-        constraints: const BoxConstraints.tightFor(width: 32, height: 28),
+        constraints: const BoxConstraints.tightFor(width: 24, height: 24),
         padding: EdgeInsets.zero,
         tooltip: widget.enabled ? 'Add reaction' : 'Sign in to react',
         onPressed: busy || !widget.enabled ? null : choose,
-        icon: const Icon(Icons.add_reaction_outlined, size: 20),
+        icon: const Icon(Icons.add_reaction_outlined, size: 15),
       ),
     ],
   );
@@ -216,13 +318,16 @@ class ContentCard extends StatelessWidget {
     required this.reply,
     this.changed,
     this.publicPostId,
+    this.audience,
+    this.threadControl,
   });
   final RiverApi app;
   final String room;
   final Json event;
   final VoidCallback reply;
   final Future<void> Function()? changed;
-  final String? publicPostId;
+  final String? publicPostId, audience;
+  final Widget? threadControl;
   @override
   Widget build(BuildContext context) {
     final c = rendered(event),
@@ -243,50 +348,10 @@ class ContentCard extends StatelessWidget {
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Row(
-            children: [
-              const CircleAvatar(
-                radius: 15,
-                child: Icon(Icons.person_outline, size: 18),
-              ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      app.displayName(event['sender'] as String),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                        fontWeight: FontWeight.w600,
-                        fontSize: 13,
-                      ),
-                    ),
-                    Text(
-                      '${t.hour.toString().padLeft(2, '0')}:${t.minute.toString().padLeft(2, '0')}${event['edited'] == true ? ' · edited' : ''}',
-                      style: TextStyle(
-                        fontSize: 10,
-                        color: Theme.of(context).colorScheme.onSurfaceVariant,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ),
-          if (c['title'] != null)
-            Padding(
-              padding: const EdgeInsets.only(top: 6),
-              child: Text(
-                c['title'] as String,
-                style: const TextStyle(
-                  fontSize: 22,
-                  fontWeight: FontWeight.w700,
-                ),
-              ),
-            ),
-          const SizedBox(height: 3),
+          if (c['title'] != null) ...[
+            Text(c['title'] as String, style: contentTitleStyle),
+            const SizedBox(height: 3),
+          ],
           if (event['type'] == 'm.room.encrypted')
             const Text(
               'Encrypted message · verify this device or restore your recovery key to read it.',
@@ -306,24 +371,35 @@ class ContentCard extends StatelessWidget {
               sticker: event['type'] == 'm.sticker',
             )
           else
-            RichBody(c['body'] as String? ?? ''),
+            RichBody(
+              c['body'] as String? ?? '',
+              key: ValueKey('content-body-${event['event_id']}'),
+            ),
           for (final file
               in ((c['cool.gravitas.river.attachments'] as List?) ?? [])
                   .cast<Json>())
             AttachmentCard(app: app, file: file),
           const SizedBox(height: 2),
           Wrap(
-            spacing: 8,
+            key: ValueKey('content-meta-${event['event_id']}'),
+            spacing: 6,
+            runSpacing: 0,
+            crossAxisAlignment: WrapCrossAlignment.center,
             children: [
+              Text(
+                app.displayName(event['sender'] as String),
+                style: contentMetaStyle.copyWith(fontWeight: FontWeight.w500),
+              ),
+              Text(
+                '${t.hour.toString().padLeft(2, '0')}:${t.minute.toString().padLeft(2, '0')}${event['edited'] == true ? ' · edited' : ''}',
+                style: contentMetaStyle,
+              ),
+              if (audience != null) Text(audience!, style: contentMetaStyle),
+              if (threadControl != null) threadControl!,
               TextButton.icon(
-                style: TextButton.styleFrom(
-                  visualDensity: VisualDensity.compact,
-                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                  padding: const EdgeInsets.symmetric(horizontal: 4),
-                  minimumSize: const Size(0, 28),
-                ),
+                style: contentActionStyle(),
                 onPressed: app.user == null ? null : reply,
-                icon: const Icon(Icons.reply, size: 18),
+                icon: const Icon(Icons.reply, size: 14),
                 label: Text(
                   replies == 0
                       ? 'Reply'
@@ -361,14 +437,16 @@ class ContentCard extends StatelessWidget {
               if (event['type'] == 'cool.gravitas.river.post.v1' &&
                   (event['publication'] as Json?)?['visibility'] == 'public')
                 TextButton.icon(
+                  style: contentActionStyle(),
                   onPressed: () => Clipboard.setData(
                     ClipboardData(text: postLink(event['event_id'] as String)),
                   ),
-                  icon: const Icon(Icons.link, size: 17),
+                  icon: const Icon(Icons.link, size: 14),
                   label: const Text('Copy public link'),
                 ),
               if (canEdit)
                 TextButton.icon(
+                  style: contentActionStyle(),
                   onPressed: () async {
                     await showDialog<bool>(
                       context: context,
@@ -377,7 +455,7 @@ class ContentCard extends StatelessWidget {
                     );
                     await changed?.call();
                   },
-                  icon: const Icon(Icons.edit_outlined, size: 17),
+                  icon: const Icon(Icons.edit_outlined, size: 14),
                   label: const Text('Edit'),
                 ),
             ],
@@ -819,7 +897,7 @@ class _ThreadScreenState extends State<ThreadScreen> {
                   reply: () => setState(() => parent = null),
                   changed: () => load(),
                 ),
-              const SizedBox(height: 20),
+              const Divider(height: 20),
               if (cursor != null)
                 TextButton(
                   onPressed: loading ? null : () => load(older: true),
@@ -835,10 +913,11 @@ class _ThreadScreenState extends State<ThreadScreen> {
                 parentOf: getReplyParent,
                 replyTarget: parent?['event_id'] as String?,
                 composer: replyComposer(),
-                builder: (e) => ContentCard(
+                branchBuilder: (e, control) => ContentCard(
                   app: widget.app,
                   room: widget.room,
                   event: e,
+                  threadControl: control,
                   reply: () => setState(() => parent = e),
                   changed: () => load(),
                 ),
@@ -972,7 +1051,7 @@ class _EntryFeedState extends State<EntryFeed> {
 
   @override
   Widget build(BuildContext context) => ListView(
-    padding: const EdgeInsets.all(20),
+    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
     children: [
       if (loading) const LinearProgressIndicator(),
       if (error != null)
@@ -984,7 +1063,7 @@ class _EntryFeedState extends State<EntryFeed> {
         Text('Start the ${widget.kind == 'post' ? 'posts' : 'discussions'}.'),
       for (final e in events)
         Padding(
-          padding: const EdgeInsets.only(bottom: 14),
+          padding: const EdgeInsets.symmetric(vertical: 6),
           child: ContentCard(
             app: widget.app,
             room: widget.room,

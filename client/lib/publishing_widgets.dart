@@ -189,71 +189,97 @@ class _PostScreenState extends State<PostScreen> {
           Expanded(
             child: Center(
               child: ConstrainedBox(
-                constraints: const BoxConstraints(maxWidth: 850),
+                constraints: const BoxConstraints(maxWidth: 880),
                 child: ListView(
-                  padding: const EdgeInsets.all(20),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 16,
+                    vertical: 12,
+                  ),
                   children: [
                     if (entry != null) ...[
                       Text(
                         (entry['content'] as Json)['title'] as String,
-                        style: Theme.of(context).textTheme.headlineMedium,
+                        style: contentTitleStyle.copyWith(fontSize: 22),
                       ),
-                      const SizedBox(height: 8),
-                      Text(
-                        '${widget.app.displayName(entry['sender'] as String)} · ${policy?['visibility'] == 'public' ? 'Public post' : 'Members only'}',
-                      ),
-                      const SizedBox(height: 20),
+                      const SizedBox(height: 6),
                       RichBody((entry['content'] as Json)['body'] as String),
-                      const SizedBox(height: 16),
-                      ReactionBar(
-                        enabled: widget.app.user != null,
-                        summary: ((data?['reaction_summary'] as List?) ?? [])
-                            .cast<Json>(),
-                        change: (emoji, active) async {
-                          await widget.app.postReaction(
-                            widget.event,
-                            emoji,
-                            active,
-                          );
-                          await load();
-                        },
-                      ),
-                      if (data?['member'] == true &&
-                          entry['sender'] == widget.app.user?['user_id'])
-                        TextButton.icon(
-                          onPressed: () async {
-                            await showDialog<bool>(
-                              context: context,
-                              builder: (_) => EntryEditor(
-                                app: widget.app,
-                                room: (data!['space'] as Json)['id'] as String,
-                                entry: {...entry, 'publication': policy},
+                      const SizedBox(height: 4),
+                      Wrap(
+                        spacing: 8,
+                        crossAxisAlignment: WrapCrossAlignment.center,
+                        children: [
+                          Text(
+                            widget.app.displayName(entry['sender'] as String),
+                            style: contentMetaStyle,
+                          ),
+                          Text(
+                            policy?['visibility'] == 'public'
+                                ? 'Public post'
+                                : 'Members only',
+                            style: contentMetaStyle,
+                          ),
+                          ReactionBar(
+                            enabled: widget.app.user != null,
+                            summary:
+                                ((data?['reaction_summary'] as List?) ?? [])
+                                    .cast<Json>(),
+                            change: (emoji, active) async {
+                              await widget.app.postReaction(
+                                widget.event,
+                                emoji,
+                                active,
+                              );
+                              await load();
+                            },
+                          ),
+                          if (data?['member'] == true &&
+                              entry['sender'] == widget.app.user?['user_id'])
+                            TextButton.icon(
+                              style: contentActionStyle(),
+                              onPressed: () async {
+                                await showDialog<bool>(
+                                  context: context,
+                                  builder: (_) => EntryEditor(
+                                    app: widget.app,
+                                    room:
+                                        (data!['space'] as Json)['id']
+                                            as String,
+                                    entry: {...entry, 'publication': policy},
+                                  ),
+                                );
+                                await load();
+                              },
+                              icon: const Icon(Icons.edit_outlined, size: 14),
+                              label: const Text('Edit post and audience'),
+                            ),
+                          TextButton.icon(
+                            style: contentActionStyle(),
+                            onPressed: () => Navigator.push<void>(
+                              context,
+                              MaterialPageRoute(
+                                builder: (_) => BlogScreen(
+                                  app: widget.app,
+                                  room:
+                                      (data!['space'] as Json)['id'] as String,
+                                ),
                               ),
-                            );
-                            await load();
-                          },
-                          icon: const Icon(Icons.edit_outlined),
-                          label: const Text('Edit post and audience'),
-                        ),
-                      TextButton.icon(
-                        onPressed: () => Navigator.push<void>(
-                          context,
-                          MaterialPageRoute(
-                            builder: (_) => BlogScreen(
-                              app: widget.app,
-                              room: (data!['space'] as Json)['id'] as String,
+                            ),
+                            icon: const Icon(
+                              Icons.library_books_outlined,
+                              size: 14,
+                            ),
+                            label: Text(
+                              'More from ${(data!['space'] as Json)['name']}',
                             ),
                           ),
-                        ),
-                        icon: const Icon(Icons.library_books_outlined),
-                        label: Text(
-                          'More from ${(data!['space'] as Json)['name']}',
-                        ),
+                        ],
                       ),
-                      const Divider(height: 36),
+                      const Divider(height: 20),
                       Text(
                         'Comments',
-                        style: Theme.of(context).textTheme.titleLarge,
+                        style: contentMetaStyle.copyWith(
+                          fontWeight: FontWeight.w600,
+                        ),
                       ),
                       if (data?['can_view_comments'] != true)
                         const Text(
@@ -273,29 +299,22 @@ class _PostScreenState extends State<PostScreen> {
                         composer: data?['can_comment'] == true
                             ? replyComposer()
                             : null,
-                        builder: (c) => Column(
-                          crossAxisAlignment: CrossAxisAlignment.stretch,
-                          children: [
-                            Text(
-                              c['audience'] == 'members'
-                                  ? 'Space members only'
-                                  : 'Public comment',
-                              style: Theme.of(context).textTheme.labelSmall,
-                            ),
-                            ContentCard(
-                              app: widget.app,
-                              room: c['comment_room'] as String,
-                              event: c,
-                              publicPostId: widget.event,
-                              changed: load,
-                              reply: () => setState(() {
-                                parent = c;
-                                if (c['audience'] == 'members') {
-                                  draftAudience = 'members';
-                                }
-                              }),
-                            ),
-                          ],
+                        branchBuilder: (c, control) => ContentCard(
+                          app: widget.app,
+                          room: c['comment_room'] as String,
+                          event: c,
+                          threadControl: control,
+                          audience: c['audience'] == 'members'
+                              ? 'Space members only'
+                              : 'Public comment',
+                          publicPostId: widget.event,
+                          changed: load,
+                          reply: () => setState(() {
+                            parent = c;
+                            if (c['audience'] == 'members') {
+                              draftAudience = 'members';
+                            }
+                          }),
                         ),
                       ),
                       if (widget.app.user == null)
@@ -320,7 +339,7 @@ class _PostScreenState extends State<PostScreen> {
           if (data?['can_comment'] == true && parent == null)
             Center(
               child: ConstrainedBox(
-                constraints: const BoxConstraints(maxWidth: 850),
+                constraints: const BoxConstraints(maxWidth: 880),
                 child: Padding(
                   padding: const EdgeInsets.symmetric(horizontal: 20),
                   child: replyComposer(),
@@ -468,25 +487,16 @@ class _BlogScreenState extends State<BlogScreen> {
         if (loading) const LinearProgressIndicator(),
         if (error != null) Text(error!),
         for (final post in posts)
-          Padding(
-            padding: const EdgeInsets.only(bottom: 12),
-            child: Card(
-              child: ListTile(
-                title: Text(post['title'] as String),
-                subtitle: Text(
-                  post['preview'] as String,
-                  maxLines: 4,
-                  overflow: TextOverflow.ellipsis,
-                ),
-                trailing: const Icon(Icons.chevron_right),
-                onTap: () => Navigator.push<void>(
-                  context,
-                  MaterialPageRoute(
-                    builder: (_) => PostScreen(
-                      app: widget.app,
-                      event: post['event_id'] as String,
-                    ),
-                  ),
+          EntryPreview(
+            title: post['title'] as String,
+            body: post['preview'] as String,
+            metadata: const [],
+            open: () => Navigator.push<void>(
+              context,
+              MaterialPageRoute(
+                builder: (_) => PostScreen(
+                  app: widget.app,
+                  event: post['event_id'] as String,
                 ),
               ),
             ),

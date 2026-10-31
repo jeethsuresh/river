@@ -1,7 +1,5 @@
-# River 0.12.0 (Android build 23)
+# River 0.12.1 (Android build 24)
 
-River now has five focused destinations: Chats for friends and calls, Communities for shared text and voice rooms, Forums for topics and replies, Posts for community or public publishing, and Matrix for conversations beyond River.
+Messages, discussions, posts, and comments now put the writing first: readable body text, flat layouts, and compact author, time, audience, and action captions below the text.
 
-The interface uses a slimmer sidebar, compact room headers, clearer typography, and direct destination shortcuts on mobile. Active call controls stay visible while navigating on mobile.
-
-Forums and Posts collect recent activity from your communities; choose a community to browse its full history. Posts retain their existing audience and comment controls. Matrix rooms expose supported messaging features without River call or publishing actions.
+Avatar headers, padded post cards, large action rows, and reaction pills have been removed from content. Forum and post overviews display the actual bodies instead of hiding discussions or reducing posts to muted snippets. Public post pages and blog listings follow the same layout. Existing reply, reaction, edit, sharing, attachment, and visibility behavior is preserved.
