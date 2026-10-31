@@ -403,7 +403,9 @@ class _RiverShellState extends State<RiverShell> {
 
   @override
   Widget build(BuildContext context) {
-    if (app.user == null) return welcome();
+    if (app.user == null) {
+      return app.finishingNativeSignIn ? finishSignIn() : welcome();
+    }
     bindComposer();
     final group = app.groups.where((g) => g['id'] == app.selected).firstOrNull;
     return LayoutBuilder(
@@ -556,6 +558,54 @@ class _RiverShellState extends State<RiverShell> {
     );
   }
 
+  Widget finishSignIn() => Scaffold(
+    key: const ValueKey('finish-native-sign-in'),
+    body: SafeArea(
+      child: Center(
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.all(28),
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 480),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Icon(Icons.waves_rounded, color: blue, size: 64),
+                const SizedBox(height: 20),
+                Text(
+                  'Finish signing in',
+                  style: Theme.of(context).textTheme.headlineSmall,
+                ),
+                const SizedBox(height: 12),
+                const Text(
+                  'Your River device is linked. River could not load your account. Retry to continue with the sign-in you already approved.',
+                ),
+                if (app.error != null) ...[
+                  const SizedBox(height: 12),
+                  Text(
+                    app.error!,
+                    style: TextStyle(
+                      color: Theme.of(context).colorScheme.error,
+                    ),
+                  ),
+                ],
+                const SizedBox(height: 20),
+                FilledButton(
+                  onPressed: () => action(app.boot),
+                  child: const Text('Retry sign-in'),
+                ),
+                TextButton(
+                  onPressed: () => action(app.logout),
+                  child: const Text('Sign out'),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    ),
+  );
+
   Widget welcome() => Scaffold(
     body: Center(
       child: SingleChildScrollView(
@@ -593,9 +643,8 @@ class _RiverShellState extends State<RiverShell> {
               const SizedBox(height: 32),
               UsernameLogin(
                 defaultDomain: app.defaultDomain,
-                onSubmit: (username) =>
-                    action(() => app.login(username: username)),
-                onRegister: () => action(() => app.login(register: true)),
+                onSubmit: (username) => app.login(username: username),
+                onRegister: () => app.login(register: true),
               ),
               if (app.pairingLabel != null)
                 Padding(

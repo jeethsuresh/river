@@ -1,10 +1,10 @@
 {
   "schemaVersion": 1,
-  "version": "0.12.1",
-  "versionCode": 24,
+  "version": "0.12.2",
+  "versionCode": 25,
   "changes": [
-    "Read messages, discussions, posts, and comments as flat text blocks, with larger body text and compact metadata below the writing.",
-    "Remove avatar headers, padded post cards, and reaction pills from content. Reply, edit, sharing, and reaction controls use a quiet inline caption.",
-    "Show the actual discussion and post bodies in overview feeds, with consistent readable Markdown across feeds, threads, and public posts."
+    "Retry temporary connection failures while returning from Android browser sign-in.",
+    "Resume loading an approved device session when River reopens, instead of getting stuck at the username screen.",
+    "Show a Retry sign-in option if account loading fails after device approval, and keep sign-in errors visible beside the username."
   ]
 }

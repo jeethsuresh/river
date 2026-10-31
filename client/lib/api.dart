@@ -65,6 +65,7 @@ class RiverApi extends ChangeNotifier {
   final bool matrixEnabled;
   final Future<bool> Function(Uri)? authLaunch;
   Future<void>? _nativeExchange;
+  Future<void>? _booting;
   bool _signingIn = false;
   final MatrixFactory? _matrixFactory;
   final MatrixStorage? _matrixStorage;
@@ -303,6 +304,7 @@ class RiverApi extends ChangeNotifier {
   bool get matrixConnected => _matrix?.connected ?? false;
   bool get requiresMatrixSetup =>
       user != null && matrixEnabled && !matrixConnected;
+  bool get finishingNativeSignIn => !kIsWeb && user == null && token != null;
 
   Future<void> connectMessaging() async {
     final profile = user;
@@ -730,9 +732,16 @@ class RiverApi extends ChangeNotifier {
     } catch (_) {}
   }
 
-  Future<void> boot() => RiverPerformance.measure('app.boot', _boot);
+  Future<void> boot() => _booting ??= RiverPerformance.measure(
+    'app.boot',
+    _boot,
+  ).whenComplete(() => _booting = null);
 
   Future<void> _boot() async {
+    if (user == null) {
+      loading = true;
+      notifyListeners();
+    }
     await _restoreLocal();
     if (!kIsWeb) {
       token = await storage.read(key: 'river_session');
@@ -754,6 +763,7 @@ class RiverApi extends ChangeNotifier {
       if (accountKey != "${next['issuer']}|${next['sub']}") _clear();
       user = next;
       _offlineSession = false;
+      error = null;
       await loadMessagingPreferences();
       await _rememberIdentity();
       if (matrixEnabled) {
@@ -768,7 +778,7 @@ class RiverApi extends ChangeNotifier {
       await _initializeFiles();
       await refresh();
     } catch (e) {
-      if (user != null) error = _backgroundError(e);
+      error = _backgroundError(e);
     }
     loading = false;
     notifyListeners();
@@ -1119,11 +1129,24 @@ class RiverApi extends ChangeNotifier {
         if (generation != _generation || _disposed) {
           throw ApiException(409, 'session_changed');
         }
-        final result = await request(
-          '/api/native/session',
-          method: 'POST',
-          body: {'id': pending['id'], 'verifier': pending['verifier']},
-        );
+        late final Json result;
+        try {
+          result = await request(
+            '/api/native/session',
+            method: 'POST',
+            body: {'id': pending['id'], 'verifier': pending['verifier']},
+          );
+        } catch (e) {
+          // Android may suspend the app's connection while the system browser
+          // is open. Keep the saved verifier and retry within its original TTL.
+          final temporary =
+              e is http.ClientException ||
+              e is TimeoutException ||
+              (e is ApiException && [502, 503, 504].contains(e.status));
+          if (!temporary || generation != _generation || _disposed) rethrow;
+          await Future<void>.delayed(const Duration(seconds: 2));
+          continue;
+        }
         if (result['session'] is String) {
           await _sessionStorage(() async {
             if (generation != _generation || _disposed) {
@@ -1175,6 +1198,9 @@ class RiverApi extends ChangeNotifier {
         }
       }
     }
+    // Approval can finish while Android is in the browser. If loading the
+    // approved session then failed, there is no pending link left to redeem.
+    if (finishingNativeSignIn) await boot();
     if (user == null) return;
     if (matrixEnabled && !matrixConnected) {
       await matrix.bind(user!);
