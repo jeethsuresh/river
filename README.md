@@ -61,6 +61,15 @@ centrally authorized MatrixRTC memberships with a LiveKit SFU and Coturn relay.
 See [the parity contract](docs/ORBIT_PARITY.md) and [media setup](deploy/media/README.md).
 Gravitas implements native Matrix client/server and room federation APIs. River connects a local Matrix device through its Apache-2.0 adapter, using native Sliding Sync when advertised and classic sync otherwise. It sends standard messages, threads, reactions, edits and encrypted attachments through that device. Existing Gravitas contacts, delegated space tools, publishing and calls retain their app permissions.
 
+River serves `/.well-known/matrix/client` with the `GRAVITAS_ISSUER` homeserver
+URL, so other Matrix clients can discover Gravitas from `chat.gravitas.cool`.
+The production Matrix server name is `gravitas.cool`, matching account IDs such
+as `@alice:gravitas.cool`. Use `gravitas.cool` in the
+[Matrix federation tester](https://federationtester.matrix.org/#gravitas.cool).
+Testing `chat.gravitas.cool` instead tests a separate server identity that River
+does not host. Federation delegation changes the connection address, not the
+server name in signing keys, accounts or rooms.
+
 Device security in Account supports showing a Matrix QR code, reading a QR image, camera capture where supported, SAS number comparison, cross-signing and encrypted key recovery. Confirming a QR scan is required before granting trust. Matrix sessions and private encryption keys stay in the client's encrypted store; the Go server receives only the one-use SSO login token. Encrypted messages never fall back to a clear-text send when the Matrix connection fails.
 
 The adapter has native plugin builds for Android, iOS, macOS, Windows and Linux and a WebAssembly/IndexedDB implementation for Flutter web. River currently distributes web and Android applications; platform CI links the adapter on the other Flutter targets. See [the adapter](client/packages/river_matrix/README.md) for pinned dependencies and build/test instructions. Standard encrypted file uploads are limited to 32 MiB by River.
