@@ -21,3 +21,13 @@ flutter_*.log
 
 # Isolated Matrix protocol checkout used by CI only.
 .matrix-server/
+
+# Native desktop build outputs
+desktop-dist/
+client/macos/Pods/
+client/macos/Flutter/ephemeral/
+client/macos/Runner.xcworkspace/xcuserdata/
+client/windows/flutter/ephemeral/
+client/linux/flutter/ephemeral/
+
+__pycache__/
