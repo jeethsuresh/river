@@ -344,121 +344,147 @@ class ContentCard extends StatelessWidget {
         ].contains(event['type']);
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 2),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
+      child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          if (c['title'] != null) ...[
-            Text(c['title'] as String, style: contentTitleStyle),
-            const SizedBox(height: 3),
-          ],
-          if (event['type'] == 'm.room.encrypted')
-            const Text(
-              'Encrypted message · verify this device or restore your recovery key to read it.',
-            )
-          else if ((event['unsigned'] as Json?)?['redacted_because'] != null)
-            const Text('Message removed')
-          else if ([
-                'm.file',
-                'm.image',
-                'm.audio',
-                'm.video',
-              ].contains(c['msgtype']) ||
-              event['type'] == 'm.sticker')
-            MatrixAttachmentCard(
-              app: app,
-              content: c,
-              sticker: event['type'] == 'm.sticker',
-            )
-          else
-            RichBody(
-              c['body'] as String? ?? '',
-              key: ValueKey('content-body-${event['event_id']}'),
+          Semantics(
+            label:
+                'Profile picture for ${app.displayName(event['sender'] as String)}',
+            image: true,
+            excludeSemantics: true,
+            child: RiverAvatar(
+              key: ValueKey('content-avatar-${event['event_id']}'),
+              name: app.displayName(event['sender'] as String),
+              size: 30,
             ),
-          for (final file
-              in ((c['cool.gravitas.river.attachments'] as List?) ?? [])
-                  .cast<Json>())
-            AttachmentCard(app: app, file: file),
-          const SizedBox(height: 2),
-          Wrap(
-            key: ValueKey('content-meta-${event['event_id']}'),
-            spacing: 6,
-            runSpacing: 0,
-            crossAxisAlignment: WrapCrossAlignment.center,
-            children: [
-              Text(
-                app.displayName(event['sender'] as String),
-                style: contentMetaStyle.copyWith(fontWeight: FontWeight.w500),
-              ),
-              Text(
-                '${t.hour.toString().padLeft(2, '0')}:${t.minute.toString().padLeft(2, '0')}${event['edited'] == true ? ' · edited' : ''}',
-                style: contentMetaStyle,
-              ),
-              if (audience != null) Text(audience!, style: contentMetaStyle),
-              if (threadControl != null) threadControl!,
-              TextButton.icon(
-                style: contentActionStyle(),
-                onPressed: app.user == null ? null : reply,
-                icon: const Icon(Icons.reply, size: 14),
-                label: Text(
-                  replies == 0
-                      ? 'Reply'
-                      : replies == 1
-                      ? '1 reply'
-                      : '$replies replies',
-                ),
-              ),
-              ReactionBar(
-                summary: summary,
-                enabled: app.user != null,
-                change: (emoji, active) async {
-                  if (publicPostId != null ||
-                      event['type'] == 'cool.gravitas.river.post.v1') {
-                    await app.postReaction(
-                      publicPostId ?? event['event_id'] as String,
-                      emoji,
-                      active,
-                      target: publicPostId == null
-                          ? null
-                          : event['event_id'] as String,
-                    );
-                    if (changed == null) await app.refresh();
-                  } else {
-                    await app.react(
-                      room,
-                      event['event_id'] as String,
-                      emoji,
-                      active,
-                    );
-                  }
-                  await changed?.call();
-                },
-              ),
-              if (event['type'] == 'cool.gravitas.river.post.v1' &&
-                  (event['publication'] as Json?)?['visibility'] == 'public')
-                TextButton.icon(
-                  style: contentActionStyle(),
-                  onPressed: () => Clipboard.setData(
-                    ClipboardData(text: postLink(event['event_id'] as String)),
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                if (c['title'] != null) ...[
+                  Text(c['title'] as String, style: contentTitleStyle),
+                  const SizedBox(height: 3),
+                ],
+                if (event['type'] == 'm.room.encrypted')
+                  const Text(
+                    'Encrypted message · verify this device or restore your recovery key to read it.',
+                  )
+                else if ((event['unsigned'] as Json?)?['redacted_because'] !=
+                    null)
+                  const Text('Message removed')
+                else if ([
+                      'm.file',
+                      'm.image',
+                      'm.audio',
+                      'm.video',
+                    ].contains(c['msgtype']) ||
+                    event['type'] == 'm.sticker')
+                  MatrixAttachmentCard(
+                    app: app,
+                    content: c,
+                    sticker: event['type'] == 'm.sticker',
+                  )
+                else
+                  RichBody(
+                    c['body'] as String? ?? '',
+                    key: ValueKey('content-body-${event['event_id']}'),
                   ),
-                  icon: const Icon(Icons.link, size: 14),
-                  label: const Text('Copy public link'),
+                for (final file
+                    in ((c['cool.gravitas.river.attachments'] as List?) ?? [])
+                        .cast<Json>())
+                  AttachmentCard(app: app, file: file),
+                const SizedBox(height: 2),
+                Wrap(
+                  key: ValueKey('content-meta-${event['event_id']}'),
+                  spacing: 6,
+                  runSpacing: 0,
+                  crossAxisAlignment: WrapCrossAlignment.center,
+                  children: [
+                    Text(
+                      app.displayName(event['sender'] as String),
+                      style: contentMetaStyle.copyWith(
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                    Text(
+                      '${t.hour.toString().padLeft(2, '0')}:${t.minute.toString().padLeft(2, '0')}${event['edited'] == true ? ' · edited' : ''}',
+                      style: contentMetaStyle,
+                    ),
+                    if (audience != null)
+                      Text(audience!, style: contentMetaStyle),
+                    if (threadControl != null) threadControl!,
+                    TextButton.icon(
+                      style: contentActionStyle(),
+                      onPressed: app.user == null ? null : reply,
+                      icon: const Icon(Icons.reply, size: 14),
+                      label: Text(
+                        replies == 0
+                            ? 'Reply'
+                            : replies == 1
+                            ? '1 reply'
+                            : '$replies replies',
+                      ),
+                    ),
+                    ReactionBar(
+                      summary: summary,
+                      enabled: app.user != null,
+                      change: (emoji, active) async {
+                        if (publicPostId != null ||
+                            event['type'] == 'cool.gravitas.river.post.v1') {
+                          await app.postReaction(
+                            publicPostId ?? event['event_id'] as String,
+                            emoji,
+                            active,
+                            target: publicPostId == null
+                                ? null
+                                : event['event_id'] as String,
+                          );
+                          if (changed == null) await app.refresh();
+                        } else {
+                          await app.react(
+                            room,
+                            event['event_id'] as String,
+                            emoji,
+                            active,
+                          );
+                        }
+                        await changed?.call();
+                      },
+                    ),
+                    if (event['type'] == 'cool.gravitas.river.post.v1' &&
+                        (event['publication'] as Json?)?['visibility'] ==
+                            'public')
+                      TextButton.icon(
+                        style: contentActionStyle(),
+                        onPressed: () => Clipboard.setData(
+                          ClipboardData(
+                            text: postLink(event['event_id'] as String),
+                          ),
+                        ),
+                        icon: const Icon(Icons.link, size: 14),
+                        label: const Text('Copy public link'),
+                      ),
+                    if (canEdit)
+                      TextButton.icon(
+                        style: contentActionStyle(),
+                        onPressed: () async {
+                          await showDialog<bool>(
+                            context: context,
+                            builder: (_) =>
+                                EntryEditor(app: app, room: room, entry: event),
+                          );
+                          await changed?.call();
+                        },
+                        icon: const Icon(Icons.edit_outlined, size: 14),
+                        label: const Text('Edit'),
+                      ),
+                  ],
                 ),
-              if (canEdit)
-                TextButton.icon(
-                  style: contentActionStyle(),
-                  onPressed: () async {
-                    await showDialog<bool>(
-                      context: context,
-                      builder: (_) =>
-                          EntryEditor(app: app, room: room, entry: event),
-                    );
-                    await changed?.call();
-                  },
-                  icon: const Icon(Icons.edit_outlined, size: 14),
-                  label: const Text('Edit'),
-                ),
-            ],
+              ],
+            ),
           ),
         ],
       ),

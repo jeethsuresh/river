@@ -6,11 +6,13 @@ import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:river/api.dart';
+import 'package:river/call_chat.dart';
 import 'package:river/comment_tree.dart';
 import 'package:river/content_widgets.dart';
 import 'package:river/home_widgets.dart';
 import 'package:river/main.dart';
 import 'package:river/rich_composer.dart';
+import 'package:river/river_design.dart';
 import 'package:river/workspace_widgets.dart';
 import 'matrix_messaging_test.dart' show MemoryMatrixStorage;
 
@@ -361,6 +363,18 @@ void main() {
         expect(find.byType(Card), findsNothing);
         expect(find.text('Alice Chen'), findsOneWidget);
         expect(find.text('@alice:home'), findsNothing);
+        final avatar = find.byKey(const ValueKey('content-avatar-Hello'));
+        expect(tester.widget<RiverAvatar>(avatar).name, 'Alice Chen');
+        expect(
+          tester.getTopLeft(avatar).dx,
+          lessThan(tester.getTopLeft(find.text('Hello')).dx),
+        );
+        expect(
+          tester.getTopLeft(avatar).dy,
+          tester
+              .getTopLeft(find.byKey(const ValueKey('content-body-Hello')))
+              .dy,
+        );
         expect(
           tester.getTopLeft(find.text('Reply')).dx,
           lessThan(tester.getTopLeft(find.byTooltip('Add reaction')).dx),
@@ -371,7 +385,133 @@ void main() {
         app.dispose();
       },
     );
+    testWidgets('short chat stays above the composer at $width', (
+      tester,
+    ) async {
+      await tester.binding.setSurfaceSize(Size(width, 900));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+      final app = RiverApi(live: false, matrixStorage: MemoryMatrixStorage())
+        ..loading = false
+        ..user = {'user_id': '@alice:home', 'username': 'Alice Chen'}
+        ..groups = [
+          {
+            'id': 'chat',
+            'name': 'Weekend plans',
+            'kind': 'dm',
+            'membership': 'join',
+            'members': <Json>[],
+          },
+        ]
+        ..selected = 'chat'
+        ..events = [comment('First message'), comment('Latest message')];
+      await tester.pumpWidget(RiverApp(api: app, boot: false));
+      await tester.pumpAndSettle();
+      final timeline = find.byKey(const ValueKey('message-timeline'));
+      void expectBottom(String last) {
+        final card = find.ancestor(
+          of: find.byKey(ValueKey('content-body-$last')),
+          matching: find.byType(ContentCard),
+        );
+        expect(
+          tester.getBottomLeft(card).dy,
+          closeTo(tester.getBottomLeft(timeline).dy - 7, 1),
+        );
+        expect(
+          tester.getBottomLeft(card).dy,
+          lessThan(tester.getTopLeft(find.byType(RichComposer)).dy),
+        );
+      }
+
+      expectBottom('Latest message');
+      expect(
+        tester
+            .getTopLeft(
+              find.byKey(const ValueKey('content-body-First message')),
+            )
+            .dy,
+        greaterThan(tester.getCenter(timeline).dy),
+      );
+      expect(
+        tester.getTopLeft(find.text('First message')).dy,
+        lessThan(tester.getTopLeft(find.text('Latest message')).dy),
+      );
+      app.events = [...app.events, comment('Just arrived')];
+      app.notifyListeners();
+      await tester.pumpAndSettle();
+      expectBottom('Just arrived');
+      expect(find.text('New messages'), findsNothing);
+      expect(tester.takeException(), isNull);
+      await tester.pumpWidget(const SizedBox());
+    });
   }
+  testWidgets(
+    'call chat grows up from the composer and loads earlier messages above it',
+    (tester) async {
+      await tester.binding.setSurfaceSize(const Size(390, 900));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+      Json callMessage(String id, String order) => {
+        ...comment(id),
+        'unsigned': {'cool.gravitas.stream_order': order},
+      };
+      final app = RiverApi(
+        live: false,
+        matrixStorage: MemoryMatrixStorage(),
+        client: MockClient(
+          (request) async => http.Response(
+            jsonEncode({
+              'events': request.url.queryParameters['before'] == 'older'
+                  ? [callMessage('Earlier in the call', '00')]
+                  : [
+                      callMessage('Hello in the call', '01'),
+                      callMessage('Latest in the call', '02'),
+                    ],
+              'next_cursor': request.url.hasQuery ? null : 'older',
+            }),
+            200,
+          ),
+        ),
+      )..user = {'user_id': '@alice:home', 'username': 'Alice'};
+      app.calls
+        ..room = ReviewRoom()
+        ..chat = 'call';
+      await tester.pumpWidget(
+        MaterialApp(
+          home: CallChatScreen(api: app, room: 'call'),
+        ),
+      );
+      await tester.pumpAndSettle();
+      final timeline = find.byType(ListView);
+      final last = find.ancestor(
+        of: find.byKey(const ValueKey('content-body-Latest in the call')),
+        matching: find.byType(ContentCard),
+      );
+      expect(
+        tester.getBottomLeft(last).dy,
+        closeTo(tester.getBottomLeft(timeline).dy - 19, 1),
+      );
+      expect(
+        tester.getTopLeft(find.text('Hello in the call')).dy,
+        lessThan(tester.getTopLeft(find.text('Latest in the call')).dy),
+      );
+      expect(
+        tester.getTopLeft(find.text('Load older messages')).dy,
+        lessThan(tester.getTopLeft(find.text('Hello in the call')).dy),
+      );
+      await tester.tap(find.text('Load older messages'));
+      await tester.pumpAndSettle();
+      expect(
+        tester.getTopLeft(find.text('Earlier in the call')).dy,
+        lessThan(tester.getTopLeft(find.text('Hello in the call')).dy),
+      );
+      expect(
+        tester.getBottomLeft(last).dy,
+        closeTo(tester.getBottomLeft(timeline).dy - 19, 1),
+      );
+      expect(tester.takeException(), isNull);
+      await tester.pumpWidget(const SizedBox());
+      app.dispose();
+    },
+  );
   testWidgets(
     'composer has one ordered toolbar row without Write or a formatting gate',
     (tester) async {

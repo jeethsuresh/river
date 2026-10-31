@@ -117,7 +117,7 @@ class _RiverShellState extends State<RiverShell> {
   }
 
   void scrolled() {
-    if (timeline.hasClients && timeline.position.extentAfter < 60) {
+    if (timeline.hasClients && timeline.position.extentBefore < 60) {
       if (newMessages) setState(() => newMessages = false);
       markVisibleRead();
     }
@@ -135,7 +135,7 @@ class _RiverShellState extends State<RiverShell> {
   void scrollLatest(String id) {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted || app.selected != id || !timeline.hasClients) return;
-      timeline.jumpTo(timeline.position.maxScrollExtent);
+      timeline.jumpTo(timeline.position.minScrollExtent);
       markVisibleRead();
     });
   }
@@ -1216,7 +1216,7 @@ class _RiverShellState extends State<RiverShell> {
       final stick =
           renderedList != listKey ||
           !timeline.hasClients ||
-          timeline.position.extentAfter < 100;
+          timeline.position.extentBefore < 100;
       renderedList = listKey;
       renderedLast = last;
       if (stick) {
@@ -1638,13 +1638,22 @@ class _RiverShellState extends State<RiverShell> {
                   ),
                 )
               : ListView.builder(
+                  key: const ValueKey('message-timeline'),
                   controller: timeline,
+                  reverse: true,
                   padding: const EdgeInsets.symmetric(
                     horizontal: 12,
                     vertical: 4,
                   ),
                   itemCount: items.length,
-                  itemBuilder: (context, index) => eventCard(items[index], g),
+                  findChildIndexCallback: (key) {
+                    final index = items.indexWhere(
+                      (event) => ValueKey(event['event_id']) == key,
+                    );
+                    return index < 0 ? null : items.length - 1 - index;
+                  },
+                  itemBuilder: (context, index) =>
+                      eventCard(items[items.length - 1 - index], g),
                 ),
         ),
         if (!voiceRoom && !directory)
@@ -1739,6 +1748,7 @@ class _RiverShellState extends State<RiverShell> {
   }
 
   Widget eventCard(Json e, Json g) => Padding(
+    key: ValueKey(e['event_id']),
     padding: const EdgeInsets.symmetric(vertical: 3),
     child: e['type'] == 'cool.gravitas.river.invitation.v1'
         ? InvitationCard(app: app, event: e)

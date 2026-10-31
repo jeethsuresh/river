@@ -3,6 +3,7 @@
   "version": "0.12.2",
   "versionCode": 25,
   "changes": [
+    "Show profile icons beside message text and keep short conversations at the bottom, above the composer.",
     "Use a signed-in Private Store account on Android when River access is already approved; otherwise continue with browser sign-in. Matrix device approval is still required for a new device.",
     "Retry temporary connection failures while returning from Android browser sign-in.",
     "Resume loading an approved device session when River reopens, instead of getting stuck at the username screen.",
