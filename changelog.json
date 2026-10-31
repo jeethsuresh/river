@@ -1,9 +1,11 @@
 {
   "schemaVersion": 1,
-  "version": "0.11.4",
-  "versionCode": 22,
+  "version": "0.12.0",
+  "versionCode": 23,
   "changes": [
-    "Connect Matrix messaging as a required step when signing in on a device. Conversations open only after connection succeeds.",
-    "Press Enter to send messages on desktop, or Shift+Enter for a new line. Turn off Enter-to-send in Settings; the choice is saved for your account on this device."
+    "Navigate River through dedicated Chats, Communities, Forums, Posts, and Matrix destinations, with focused lists and actions for each.",
+    "Use a slimmer sidebar, compact room headers, clearer typography, and direct destination navigation on mobile.",
+    "Browse recent forum topics and posts across your communities, then open a community for its full history. Post cards show their audience when available.",
+    "Keep active call controls visible while navigating on mobile, and find external rooms in Matrix with supported messaging actions."
   ]
 }

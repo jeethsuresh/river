@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'api.dart';
 import 'workspace_widgets.dart';
+import 'river_design.dart';
 
 class RiverHome extends StatelessWidget {
   const RiverHome({
@@ -8,10 +9,12 @@ class RiverHome extends StatelessWidget {
     required this.app,
     required this.open,
     required this.create,
+    this.navigate,
   });
   final RiverApi app;
   final ValueChanged<String?> open;
   final ValueChanged<String> create;
+  final ValueChanged<String>? navigate;
 
   @override
   Widget build(BuildContext context) => LayoutBuilder(
@@ -62,11 +65,59 @@ class RiverHome extends StatelessWidget {
               OutlinedButton.icon(
                 onPressed: () => create('space'),
                 icon: const Icon(Icons.grid_view_outlined),
-                label: const Text('Create a space'),
+                label: const Text('Create community'),
               ),
             ],
           ),
-          const SizedBox(height: 20),
+          const SizedBox(height: 16),
+          if (navigate != null && box.maxWidth >= 600) ...[
+            Row(
+              children: [
+                for (final d in riverDestinations)
+                  Expanded(
+                    child: Padding(
+                      padding: const EdgeInsets.only(right: 6),
+                      child: Card(
+                        child: InkWell(
+                          onTap: () => navigate!(d.name),
+                          borderRadius: BorderRadius.circular(12),
+                          child: Padding(
+                            padding: const EdgeInsets.all(12),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Icon(d.icon, color: riverAccent, size: 20),
+                                const SizedBox(height: 8),
+                                Text(
+                                  d.name,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: const TextStyle(
+                                    fontWeight: FontWeight.w600,
+                                    fontSize: 12,
+                                  ),
+                                ),
+                                const SizedBox(height: 2),
+                                Text(
+                                  d.description,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: const TextStyle(
+                                    fontSize: 10,
+                                    color: riverMuted,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+            const SizedBox(height: 16),
+          ],
           if (box.maxWidth >= 850)
             Row(
               key: const ValueKey('home-columns'),

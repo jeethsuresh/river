@@ -99,7 +99,12 @@ void main() {
             };
       await tester.pumpWidget(RiverApp(api: api, boot: false));
       await tester.pumpAndSettle();
-      await tester.tap(find.text('Posts'));
+      await tester.tap(
+        find.descendant(
+          of: find.byType(SegmentedButton<String>),
+          matching: find.text('Posts'),
+        ),
+      );
       await tester.pumpAndSettle();
       expect(find.text('New post'), findsOneWidget);
       for (final kind in ['dm', 'group', 'channel']) {

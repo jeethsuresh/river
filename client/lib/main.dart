@@ -10,6 +10,8 @@ import 'friends_view.dart';
 import 'content_widgets.dart';
 import 'workspace_widgets.dart';
 import 'home_widgets.dart';
+import 'river_design.dart';
+import 'destination_widgets.dart';
 import 'attachment_widgets.dart';
 import 'matrix_attachment_widgets.dart';
 import 'matrix_setup.dart';
@@ -25,9 +27,7 @@ void main() {
   runApp(const RiverApp());
 }
 
-const blue = Color(0xff185adb),
-    ink = Color(0xff172d4b),
-    muted = Color(0xff64748b);
+const blue = riverAccent, ink = riverInk, muted = riverMuted;
 
 class RiverApp extends StatefulWidget {
   const RiverApp({super.key, this.api, this.boot = true});
@@ -72,29 +72,7 @@ class _RiverAppState extends State<RiverApp> with WidgetsBindingObserver {
       ),
       localizationsDelegates: FlutterQuillLocalizations.localizationsDelegates,
       debugShowCheckedModeBanner: false,
-      theme: ThemeData(
-        useMaterial3: true,
-        colorScheme: ColorScheme.fromSeed(
-          seedColor: blue,
-          primary: blue,
-          surface: Colors.white,
-        ),
-        scaffoldBackgroundColor: const Color(0xfff4f7fc),
-        textTheme: const TextTheme(bodyMedium: TextStyle(color: ink)),
-        cardTheme: const CardThemeData(
-          elevation: 0,
-          color: Colors.white,
-          margin: EdgeInsets.zero,
-        ),
-        inputDecorationTheme: InputDecorationTheme(
-          filled: true,
-          fillColor: const Color(0xfff4f7fc),
-          border: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(12),
-            borderSide: BorderSide.none,
-          ),
-        ),
-      ),
+      theme: riverTheme(),
       home: app.loading
           ? const Scaffold(body: Center(child: CircularProgressIndicator()))
           : app.requiresMatrixSetup
@@ -291,14 +269,70 @@ class _RiverShellState extends State<RiverShell> {
     }
   }
 
-  void open(String? id, {String destination = 'Home'}) {
+  String get activeDestination {
+    final group = app.selected == null ? null : app.group(app.selected!);
+    if (group == null) return section;
+    if (supportsRiverEntries(app, group) &&
+        ['Forums', 'Posts'].contains(section)) {
+      return section;
+    }
+    return roomDestination(app, group);
+  }
+
+  void open(String? id, {String? destination}) {
     scaffold.currentState?.closeDrawer();
+    final group = id == null ? null : app.group(id);
+    final target =
+        destination ?? (group == null ? 'Home' : roomDestination(app, group));
     setState(() {
-      section = destination;
-      filter = 'Chat';
+      section = target;
+      filter = target == 'Posts'
+          ? 'Posts'
+          : target == 'Forums'
+          ? 'Discussions'
+          : 'Chat';
       spaceChat = false;
     });
     unawaited(app.open(id));
+  }
+
+  Future<void> composeEntry(String destination) async {
+    final spaces = destinationGroups(
+      app,
+      destination,
+    ).where((g) => g['membership'] == 'join').toList();
+    final room = await showDialog<String>(
+      context: context,
+      builder: (ctx) => SimpleDialog(
+        title: Text(
+          destination == 'Posts'
+              ? 'Post to a community'
+              : 'Start a community discussion',
+        ),
+        children: [
+          if (spaces.isEmpty)
+            const Padding(
+              padding: EdgeInsets.all(20),
+              child: Text('Join or create a River community first.'),
+            ),
+          for (final space in spaces)
+            SimpleDialogOption(
+              onPressed: () => Navigator.pop(ctx, space['id']),
+              child: Text(space['name'] as String),
+            ),
+        ],
+      ),
+    );
+    if (room == null || !mounted) return;
+    open(room, destination: destination);
+    await showDialog<bool>(
+      context: context,
+      builder: (_) => EntryEditor(
+        app: app,
+        room: room,
+        kind: destination == 'Posts' ? 'post' : 'discussion',
+      ),
+    );
   }
 
   Future<String?> ask(String title, String label, {int maxLength = 160}) async {
@@ -338,28 +372,29 @@ class _RiverShellState extends State<RiverShell> {
   }
 
   Future<void> create(String kind) async {
-    if (kind == 'dm') {
+    if (kind == 'dm' || kind == 'matrix') {
       final created = await showDialog<bool>(
         context: context,
-        builder: (_) => ConversationPicker(app: app),
+        builder: (_) =>
+            ConversationPicker(app: app, matrixOnly: kind == 'matrix'),
       );
       if (created == true && mounted) {
         setState(() {
-          section = 'Home';
+          section = kind == 'matrix' ? 'Matrix' : 'Chats';
           filter = 'Chat';
         });
       }
       return;
     }
     final name = await ask(
-      kind == 'space' ? 'Create a space' : 'New conversation',
-      kind == 'space' ? 'Space name' : 'Conversation name',
+      kind == 'space' ? 'Create community' : 'New conversation',
+      kind == 'space' ? 'Community name' : 'Conversation name',
     );
     if (name != null) {
       await action(() => app.create(name, kind));
       if (mounted) {
         setState(() {
-          section = 'Home';
+          section = kind == 'space' ? 'Communities' : 'Chats';
           filter = 'Chat';
         });
       }
@@ -455,6 +490,7 @@ class _RiverShellState extends State<RiverShell> {
                   ),
                 ],
               ),
+            if (!wide) RiverCallBar(api: app),
             Expanded(
               child: group != null
                   ? groupView(group)
@@ -464,9 +500,21 @@ class _RiverShellState extends State<RiverShell> {
                   ? FriendsView(
                       app: app,
                       onConversation: () => setState(() {
-                        section = 'Home';
+                        section = 'Chats';
                         filter = 'Chat';
                       }),
+                    )
+                  : riverDestinations.any((d) => d.name == section)
+                  ? RiverDestinationView(
+                      key: ValueKey(section),
+                      app: app,
+                      destination: section,
+                      open: (id) => open(id, destination: section),
+                      create: create,
+                      friends: () => open(null, destination: 'Friends'),
+                      compose: () => composeEntry(section),
+                      thread: (room, event) =>
+                          openRiverThread(context, app, room, event),
                     )
                   : home(),
             ),
@@ -478,7 +526,8 @@ class _RiverShellState extends State<RiverShell> {
               ? null
               : AppBar(
                   title: Text(
-                    group?['name'] as String? ?? 'River',
+                    group?['name'] as String? ??
+                        (section == 'Home' ? 'River' : section),
                     style: const TextStyle(fontWeight: FontWeight.w800),
                   ),
                   actions: [
@@ -494,12 +543,16 @@ class _RiverShellState extends State<RiverShell> {
                     ),
                   ],
                 ),
+          bottomNavigationBar: wide || group != null
+              ? null
+              : mobileDestinations(),
           drawer: wide ? null : Drawer(child: SafeArea(child: navigation())),
           body: SafeArea(
             bottom: false,
             child: Row(
               children: [
-                if (wide) SizedBox(width: 260, child: navigation()),
+                if (wide) SizedBox(width: 248, child: navigation()),
+                if (wide) const VerticalDivider(width: 1),
                 Expanded(child: body),
               ],
             ),
@@ -615,142 +668,218 @@ class _RiverShellState extends State<RiverShell> {
     );
   }
 
-  Widget navigation() => Material(
+  Widget mobileDestinations() => Material(
     color: Colors.white,
+    child: SafeArea(
+      top: false,
+      child: Container(
+        decoration: const BoxDecoration(
+          border: Border(top: BorderSide(color: riverBorder)),
+        ),
+        child: Row(
+          children: [
+            for (final d in riverDestinations)
+              Expanded(
+                child: InkWell(
+                  key: ValueKey('mobile-${d.name}'),
+                  onTap: () => open(null, destination: d.name),
+                  child: Semantics(
+                    selected: activeDestination == d.name,
+                    button: true,
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 3,
+                        vertical: 10,
+                      ),
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(
+                            d.icon,
+                            size: 21,
+                            color: activeDestination == d.name ? blue : muted,
+                          ),
+                          const SizedBox(height: 4),
+                          FittedBox(
+                            child: Text(
+                              d.name,
+                              style: TextStyle(
+                                fontSize: 10,
+                                color: activeDestination == d.name
+                                    ? blue
+                                    : muted,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+          ],
+        ),
+      ),
+    ),
+  );
+
+  Widget navigation() => Material(
+    color: const Color(0xfff3f5fa),
     child: ListTileTheme(
-      data: const ListTileThemeData(
+      data: ListTileThemeData(
         dense: true,
-        minTileHeight: 34,
+        minTileHeight: 36,
         minLeadingWidth: 20,
-        horizontalTitleGap: 8,
-        contentPadding: EdgeInsets.symmetric(horizontal: 12),
+        horizontalTitleGap: 10,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+        contentPadding: const EdgeInsets.symmetric(horizontal: 10),
         visualDensity: VisualDensity.compact,
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          const Padding(
-            padding: EdgeInsets.fromLTRB(14, 16, 14, 10),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(14, 12, 8, 8),
             child: Row(
               children: [
-                Icon(Icons.waves_rounded, color: blue, size: 26),
-                SizedBox(width: 8),
-                Text(
-                  'river',
-                  style: TextStyle(
-                    fontWeight: FontWeight.w800,
-                    fontSize: 26,
-                    letterSpacing: -1,
+                const Icon(Icons.waves_rounded, color: blue, size: 24),
+                const SizedBox(width: 8),
+                const Expanded(
+                  child: Text(
+                    'river',
+                    style: TextStyle(
+                      fontWeight: FontWeight.w800,
+                      fontSize: 24,
+                      letterSpacing: -1,
+                    ),
                   ),
+                ),
+                IconButton(
+                  tooltip: searchOpen ? 'Close search' : 'Search',
+                  icon: Icon(searchOpen ? Icons.close : Icons.search, size: 19),
+                  onPressed: () => setState(() {
+                    searchOpen = !searchOpen;
+                    if (!searchOpen) conversationQuery = '';
+                  }),
                 ),
               ],
             ),
           ),
-          Row(
-            children: [
-              Expanded(
-                child: ListTile(
-                  selected: app.selected == null && section == 'Home',
-                  leading: const Icon(Icons.home_outlined, size: 20),
-                  title: const Text('Home'),
-                  onTap: () {
-                    setState(() => section = 'Home');
-                    open(null);
-                  },
-                ),
-              ),
-              IconButton(
-                tooltip: searchOpen ? 'Close search' : 'Search',
-                icon: Icon(searchOpen ? Icons.close : Icons.search, size: 20),
-                onPressed: () => setState(() {
-                  searchOpen = !searchOpen;
-                  if (!searchOpen) conversationQuery = '';
-                }),
-              ),
-            ],
-          ),
-          if (searchOpen)
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-              child: TextField(
-                key: const ValueKey('conversation-search'),
-                autofocus: true,
-                decoration: const InputDecoration(
-                  hintText: 'Search spaces and conversations',
-                  isDense: true,
-                  prefixIcon: Icon(Icons.search, size: 18),
-                  contentPadding: EdgeInsets.all(10),
-                ),
-                onChanged: (v) =>
-                    setState(() => conversationQuery = v.trim().toLowerCase()),
-              ),
-            ),
-          ListTile(
-            selected: app.selected == null && section == 'Friends',
-            leading: const Icon(Icons.people_outline, size: 20),
-            title: const Text('Friends'),
-            trailing: app.incomingRequests > 0
-                ? Badge(label: Text('${app.incomingRequests}'))
-                : null,
-            onTap: () {
-              open(null, destination: 'Friends');
-            },
-          ),
           Expanded(
             child: ListView(
-              padding: EdgeInsets.zero,
+              padding: const EdgeInsets.symmetric(horizontal: 8),
               children: [
-                for (final kind in ['space', 'dm']) ...[
-                  ListTile(
-                    title: Text(
-                      kind == 'space' ? 'YOUR SPACES' : 'CONVERSATIONS',
-                      style: const TextStyle(
-                        fontSize: 10,
-                        fontWeight: FontWeight.w700,
-                        color: muted,
-                        letterSpacing: .7,
-                      ),
+                ListTile(
+                  selected: app.selected == null && section == 'Home',
+                  leading: const Icon(Icons.inbox_outlined, size: 19),
+                  title: const Text('Home'),
+                  onTap: () => open(null),
+                ),
+                for (final d in riverDestinations)
+                  Padding(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 8,
+                      vertical: 1,
                     ),
-                    trailing: IconButton(
-                      tooltip: kind == 'space'
-                          ? 'New space'
-                          : 'New conversation',
-                      constraints: const BoxConstraints.tightFor(
-                        width: 32,
-                        height: 32,
+                    child: ListTile(
+                      key: ValueKey('destination-${d.name}'),
+                      selected: activeDestination == d.name,
+                      leading: Icon(d.icon, size: 19),
+                      title: Text(
+                        d.name,
+                        style: const TextStyle(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w600,
+                        ),
                       ),
-                      padding: EdgeInsets.zero,
-                      icon: const Icon(Icons.add, size: 18),
-                      onPressed: () => create(kind),
+                      trailing:
+                          destinationGroups(
+                            app,
+                            d.name,
+                          ).any((g) => (g['unread_count'] as int? ?? 0) > 0)
+                          ? const Icon(Icons.circle, size: 6, color: blue)
+                          : null,
+                      onTap: () => open(null, destination: d.name),
                     ),
                   ),
+                const Padding(
+                  padding: EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                  child: Divider(),
+                ),
+                if (searchOpen)
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(8, 0, 8, 8),
+                    child: TextField(
+                      key: const ValueKey('conversation-search'),
+                      autofocus: true,
+                      decoration: const InputDecoration(
+                        hintText: 'Search all rooms and people',
+                        prefixIcon: Icon(Icons.search, size: 18),
+                      ),
+                      onChanged: (v) => setState(
+                        () => conversationQuery = v.trim().toLowerCase(),
+                      ),
+                    ),
+                  ),
+                if (searchOpen && conversationQuery.isNotEmpty) ...[
+                  navHeading('SEARCH RESULTS'),
                   for (final g in app.groups.where(
                     (g) =>
-                        (kind == 'dm'
-                            ? ['dm', 'group'].contains(g['kind'])
-                            : g['kind'] == 'space') &&
-                        (conversationMatches(g, conversationQuery) ||
-                            (kind == 'space' &&
-                                app
-                                    .channels(g['id'] as String)
-                                    .any(
-                                      (c) => conversationMatches(
-                                        c,
-                                        conversationQuery,
-                                      ),
-                                    ))),
+                        !['call_chat', 'post_comments'].contains(g['kind']) &&
+                        conversationMatches(g, conversationQuery),
                   ))
-                    navigationGroup(g, kind),
+                    navigationGroup(g, 'search'),
+                  if (!app.groups.any(
+                    (g) => conversationMatches(g, conversationQuery),
+                  ))
+                    empty('No matching rooms or people.'),
+                ] else ...[
+                  navHeading(
+                    switch (activeDestination) {
+                      'Chats' => 'CONVERSATIONS',
+                      'Matrix' => 'MATRIX ROOMS',
+                      'Forums' || 'Posts' => 'BY COMMUNITY',
+                      _ => 'YOUR COMMUNITIES',
+                    },
+                    add: () => create(
+                      activeDestination == 'Chats'
+                          ? 'dm'
+                          : activeDestination == 'Matrix'
+                          ? 'matrix'
+                          : 'space',
+                    ),
+                  ),
+                  for (final g in destinationGroups(app, activeDestination))
+                    navigationGroup(g, g['kind'] == 'space' ? 'space' : 'dm'),
+                  if (destinationGroups(app, activeDestination).isEmpty)
+                    empty(switch (activeDestination) {
+                      'Chats' => 'Start a conversation with a friend.',
+                      'Matrix' => 'Connect to people beyond River.',
+                      _ => 'Your communities will appear here.',
+                    }),
                 ],
               ],
             ),
           ),
           RiverCallBar(api: app),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 8),
+            child: ListTile(
+              selected: section == 'Friends' && app.selected == null,
+              leading: const Icon(Icons.people_outline, size: 19),
+              title: const Text('Friends'),
+              trailing: app.incomingRequests > 0
+                  ? Badge(label: Text('${app.incomingRequests}'))
+                  : null,
+              onTap: () => open(null, destination: 'Friends'),
+            ),
+          ),
+          const Divider(),
           ListTile(
-            leading: const CircleAvatar(
-              radius: 15,
-              backgroundColor: Color(0xffe8efff),
-              child: Icon(Icons.person_outline, color: blue, size: 19),
+            leading: RiverAvatar(
+              name: app.user?['username'] as String? ?? '',
+              size: 30,
             ),
             title: Text(
               app.displayName(
@@ -759,10 +888,11 @@ class _RiverShellState extends State<RiverShell> {
                     '',
               ),
               overflow: TextOverflow.ellipsis,
+              style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
             ),
             trailing: IconButton(
               tooltip: 'Settings',
-              icon: const Icon(Icons.settings_outlined, size: 19),
+              icon: const Icon(Icons.settings_outlined, size: 18),
               onPressed: settings,
             ),
             onTap: settings,
@@ -772,6 +902,38 @@ class _RiverShellState extends State<RiverShell> {
       ),
     ),
   );
+
+  Widget navHeading(String text, {VoidCallback? add}) => Padding(
+    padding: const EdgeInsets.only(left: 10, top: 2, bottom: 6),
+    child: Row(
+      children: [
+        Expanded(
+          child: Text(
+            text,
+            style: const TextStyle(
+              fontSize: 10,
+              fontWeight: FontWeight.w700,
+              color: muted,
+              letterSpacing: .8,
+            ),
+          ),
+        ),
+        if (add != null)
+          IconButton(
+            tooltip: activeDestination == 'Chats'
+                ? 'New conversation'
+                : activeDestination == 'Matrix'
+                ? 'Connect with Matrix'
+                : 'New space',
+            constraints: const BoxConstraints.tightFor(width: 30, height: 30),
+            padding: EdgeInsets.zero,
+            onPressed: add,
+            icon: const Icon(Icons.add, size: 17),
+          ),
+      ],
+    ),
+  );
+
   Widget navigationGroup(Json g, String kind) => Column(
     children: [
       ListTile(
@@ -821,22 +983,38 @@ class _RiverShellState extends State<RiverShell> {
                 }
               })
             : null,
-        onTap: () => open(g['id'] as String),
+        onTap: () => open(
+          g['id'] as String,
+          destination:
+              supportsRiverEntries(app, g) &&
+                  ['Posts', 'Forums'].contains(activeDestination)
+              ? activeDestination
+              : null,
+        ),
       ),
       if (kind == 'space' &&
+          !['Posts', 'Forums'].contains(activeDestination) &&
           !collapsed.contains(g['id']) &&
           g['membership'] == 'join')
-        SpaceChannels(
-          app: app,
-          space: g['id'] as String,
-          open: open,
-          thread: (event) {
-            scaffold.currentState?.closeDrawer();
-            unawaited(
-              openRiverThread(context, app, event['group_id'] as String, event),
-            );
-          },
-        ),
+        if (isMatrixGroup(app, g))
+          MatrixRoomList(app: app, space: g['id'] as String, open: open)
+        else
+          SpaceChannels(
+            app: app,
+            space: g['id'] as String,
+            open: open,
+            thread: (event) {
+              scaffold.currentState?.closeDrawer();
+              unawaited(
+                openRiverThread(
+                  context,
+                  app,
+                  event['group_id'] as String,
+                  event,
+                ),
+              );
+            },
+          ),
     ],
   );
 
@@ -871,7 +1049,12 @@ class _RiverShellState extends State<RiverShell> {
     padding: const EdgeInsets.symmetric(vertical: 12),
     child: Text(text, style: const TextStyle(color: muted, height: 1.5)),
   );
-  Widget home() => RiverHome(app: app, open: open, create: create);
+  Widget home() => RiverHome(
+    app: app,
+    open: open,
+    create: create,
+    navigate: (destination) => open(null, destination: destination),
+  );
   Future<void> members(Json g) async {
     await showModalBottomSheet<void>(
       context: context,
@@ -932,6 +1115,7 @@ class _RiverShellState extends State<RiverShell> {
   }
 
   Widget groupView(Json g) {
+    final matrixOnly = isMatrixGroup(app, g);
     if (g['membership'] == 'invite') {
       return Center(
         child: Padding(
@@ -964,14 +1148,12 @@ class _RiverShellState extends State<RiverShell> {
       );
     }
     final viewFilter =
-        g['kind'] != 'space' ||
-            g['matrix_only'] == true ||
-            g['encrypted'] == true
+        g['kind'] != 'space' || matrixOnly || g['encrypted'] == true
         ? 'Chat'
         : filter;
     final directory =
         g['kind'] == 'space' && viewFilter == 'Chat' && !spaceChat;
-    final voiceRoom = g['channel_kind'] == 'drop_in';
+    final voiceRoom = !matrixOnly && g['channel_kind'] == 'drop_in';
     final needsMessaging = app.matrixEnabled && !app.matrixConnected;
     final items = app.events.where((e) {
       if (viewFilter == 'Chat') {
@@ -1004,8 +1186,11 @@ class _RiverShellState extends State<RiverShell> {
     return Column(
       children: [
         Container(
-          color: Colors.white,
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+          decoration: const BoxDecoration(
+            color: Colors.white,
+            border: Border(bottom: BorderSide(color: riverBorder)),
+          ),
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
           child: Column(
             children: [
               Row(
@@ -1028,23 +1213,27 @@ class _RiverShellState extends State<RiverShell> {
                       children: [
                         Text(
                           g['name'] as String,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
                           style: const TextStyle(
-                            fontSize: 21,
+                            fontSize: 17,
                             fontWeight: FontWeight.w700,
                           ),
                         ),
                         Text(
-                          '${['dm', 'group'].contains(g['kind'])
+                          '${matrixOnly
+                              ? 'Matrix'
+                              : ['dm', 'group'].contains(g['kind'])
                               ? 'Conversation'
                               : g['kind'] == 'channel'
-                              ? 'Channel'
-                              : 'Space'} · ${(g['members'] as List).length} members',
+                              ? 'Chatroom'
+                              : 'Community'} · ${(g['members'] as List? ?? []).length} members',
                           style: const TextStyle(color: muted, fontSize: 12),
                         ),
                       ],
                     ),
                   ),
-                  if (g['matrix_only'] != true &&
+                  if (!matrixOnly &&
                       (['dm', 'group'].contains(g['kind']) ||
                           g['channel_kind'] == 'drop_in'))
                     IconButton(
@@ -1191,7 +1380,7 @@ class _RiverShellState extends State<RiverShell> {
                           value: 'encrypt',
                           child: Text('Enable encryption'),
                         ),
-                      if (g['matrix_only'] != true) ...[
+                      if (!matrixOnly) ...[
                         const PopupMenuItem(
                           value: 'subgroups',
                           child: Text('Group hierarchy'),
@@ -1206,15 +1395,14 @@ class _RiverShellState extends State<RiverShell> {
                         value: 'members',
                         child: Text('Members'),
                       ),
-                      if (g['matrix_only'] != true &&
-                          ['dm', 'group'].contains(g['kind']))
+                      if (!matrixOnly && ['dm', 'group'].contains(g['kind']))
                         const PopupMenuItem(
                           value: 'share-space',
                           child: Text('Invite to a space'),
                         ),
                       if (g['kind'] == 'space' &&
                           g['owner'] == true &&
-                          g['matrix_only'] != true) ...[
+                          !matrixOnly) ...[
                         const PopupMenuItem(
                           value: 'description',
                           child: Text('Edit description'),
@@ -1304,31 +1492,47 @@ class _RiverShellState extends State<RiverShell> {
                   icon: const Icon(Icons.arrow_back, size: 16),
                   label: const Text('Back to rooms'),
                 ),
-              if (g['kind'] == 'space' &&
-                  g['matrix_only'] != true &&
-                  g['encrypted'] != true)
+              if (g['kind'] == 'space' && !matrixOnly && g['encrypted'] != true)
                 SegmentedButton<String>(
                   segments: const [
                     ButtonSegment(
                       value: 'Chat',
-                      label: Text('Chat'),
+                      label: Text('Rooms'),
                       icon: Icon(Icons.tag),
                     ),
-                    ButtonSegment(
-                      value: 'Discussions',
-                      label: Text('Discussions'),
-                    ),
+                    ButtonSegment(value: 'Discussions', label: Text('Forums')),
                     ButtonSegment(value: 'Posts', label: Text('Posts')),
                   ],
                   selected: {filter},
                   onSelectionChanged: (v) => setState(() {
                     filter = v.first;
+                    section = filter == 'Posts'
+                        ? 'Posts'
+                        : filter == 'Discussions'
+                        ? 'Forums'
+                        : 'Communities';
                     spaceChat = false;
                   }),
                 ),
             ],
           ),
         ),
+        if (matrixOnly)
+          const Padding(
+            padding: EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+            child: Row(
+              children: [
+                Icon(Icons.hub_outlined, size: 14, color: muted),
+                SizedBox(width: 6),
+                Expanded(
+                  child: Text(
+                    'Matrix · messages, threads, and attachments',
+                    style: TextStyle(fontSize: 11, color: muted),
+                  ),
+                ),
+              ],
+            ),
+          ),
         if (newMessages && !directory && !voiceRoom)
           TextButton.icon(
             onPressed: () {
@@ -1357,15 +1561,22 @@ class _RiverShellState extends State<RiverShell> {
                     vertical: 8,
                   ),
                   children: [
-                    SpaceRoomList(
-                      app: app,
-                      space: g['id'] as String,
-                      open: open,
-                      openSpaceChat: () => setState(() => spaceChat = true),
-                    ),
+                    if (matrixOnly)
+                      MatrixRoomList(
+                        app: app,
+                        space: g['id'] as String,
+                        open: open,
+                      )
+                    else
+                      SpaceRoomList(
+                        app: app,
+                        space: g['id'] as String,
+                        open: open,
+                        openSpaceChat: () => setState(() => spaceChat = true),
+                      ),
                   ],
                 )
-              : g['channel_kind'] == 'drop_in'
+              : voiceRoom
               ? Center(
                   child: VoiceRoomTile(app: app, channel: g),
                 )
