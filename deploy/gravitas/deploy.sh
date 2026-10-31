@@ -10,4 +10,5 @@ actual="$(kubectl -n river get deployment/river -o jsonpath='{.spec.template.spe
 [[ "$actual" == "$1" ]] || { echo "Deployment image differs from the tested release" >&2; exit 1; }
 # Certificate validation stays enabled. An untrusted certificate fails release verification.
 curl --fail --silent --show-error --retry 5 --retry-delay 5 https://chat.gravitas.cool/healthz
-
+curl --fail --silent --show-error --retry 5 --retry-delay 5 https://chat.gravitas.cool/.well-known/matrix/client \
+  | python3 -c 'import json, sys; assert json.load(sys.stdin)["m.homeserver"]["base_url"] == "https://gravitas.cool", "River Matrix discovery points to the wrong homeserver"'

@@ -98,6 +98,9 @@ func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Referrer-Policy", "no-referrer")
 	w.Header().Set("Permissions-Policy", "camera=(self), microphone=(self), display-capture=(self)")
 	switch r.URL.Path {
+	case "/.well-known/matrix/client":
+		s.matrixDiscovery(w, r)
+		return
 	case "/api/public/media":
 		serveLinkedMedia(w, r, linkedMediaClient)
 		return
