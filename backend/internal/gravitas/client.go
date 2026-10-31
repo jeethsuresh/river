@@ -3,6 +3,7 @@ package gravitas
 
 import (
 	"bytes"
+	"context"
 	"crypto/aes"
 	"crypto/cipher"
 	"crypto/rand"
@@ -276,52 +277,67 @@ func (c *Client) Callback(w http.ResponseWriter, r *http.Request) (Authorization
 		return identity, "", err
 	}
 	c = selected
+	identity, err = c.exchange(r.Context(), q.Get("code"), f.Verifier, f.Username, false)
+	return identity, SafeNext(f.Next), err
+}
+
+func (c *Client) exchange(ctx context.Context, code, verifier, username string, requireScope bool) (Authorization, error) {
+	var identity Authorization
 	m, err := c.discovery()
 	if err != nil {
-		return identity, "", err
+		return identity, err
 	}
-	form := url.Values{"grant_type": {"authorization_code"}, "code": {q.Get("code")}, "code_verifier": {f.Verifier}, "redirect_uri": {c.AppURL + "/auth/gravitas/callback"}}
-	req, err := http.NewRequest(http.MethodPost, m.Token, bytes.NewBufferString(form.Encode()))
+	form := url.Values{"grant_type": {"authorization_code"}, "code": {code}, "code_verifier": {verifier}, "redirect_uri": {c.AppURL + "/auth/gravitas/callback"}}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, m.Token, bytes.NewBufferString(form.Encode()))
 	if err != nil {
-		return identity, "", err
+		return identity, err
 	}
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	resp, err := c.HTTP.Do(req)
 	if err != nil {
-		return identity, "", errors.New("IAM is unavailable")
+		return identity, errors.New("IAM is unavailable")
 	}
 	var tokens struct {
 		AccessToken  string `json:"access_token"`
 		RefreshToken string `json:"refresh_token"`
 		ExpiresIn    int64  `json:"expires_in"`
 		TokenType    string `json:"token_type"`
+		Scope        string `json:"scope"`
 		CheckToken   string `json:"session_check_token"`
 		CheckTTL     int64  `json:"session_check_expires_in"`
 		SessionID    string `json:"session_id"`
 	}
 	if err = readJSON(resp, &tokens); err != nil {
-		return identity, "", err
+		return identity, err
 	}
 	if tokens.AccessToken == "" || !strings.EqualFold(tokens.TokenType, "Bearer") {
-		return identity, "", errors.New("invalid IAM token response")
+		return identity, errors.New("invalid IAM token response")
+	}
+	if requireScope {
+		granted := " " + strings.Join(strings.Fields(tokens.Scope), " ") + " "
+		for _, scope := range strings.Fields(c.requestedScope()) {
+			if !strings.Contains(granted, " "+scope+" ") {
+				return Authorization{}, ErrConsentRequired
+			}
+		}
 	}
 	if err = c.getJSON(m.Profile, tokens.AccessToken, &identity.Identity); err != nil {
-		return identity, "", err
+		return identity, err
 	}
 	if identity.Subject == "" || len(identity.Subject) > 256 || identity.Username == "" || identity.Domain != m.Domain || identity.UserID != "@"+identity.Username+":"+m.Domain {
-		return Authorization{}, "", errors.New("invalid IAM identity")
+		return Authorization{}, errors.New("invalid IAM identity")
 	}
-	if f.Username != "" && identity.UserID != f.Username {
-		return Authorization{}, "", ErrLoginRequired
+	if username != "" && identity.UserID != username {
+		return Authorization{}, ErrLoginRequired
 	}
 	identity.Issuer = c.Issuer
 	if tokens.CheckTTL <= 0 || tokens.CheckTTL > int64(MaxFamilyLifetime/time.Second) {
-		return Authorization{}, "", errors.New("invalid IAM session binding")
+		return Authorization{}, errors.New("invalid IAM session binding")
 	}
 	identity.AccessToken = tokens.AccessToken
 	if tokens.RefreshToken != "" {
 		if tokens.ExpiresIn <= 0 || tokens.ExpiresIn > int64(SessionLifetime/time.Second) || len(tokens.RefreshToken) > 256 {
-			return Authorization{}, "", errors.New("invalid IAM refresh binding")
+			return Authorization{}, errors.New("invalid IAM refresh binding")
 		}
 		identity.RefreshToken = tokens.RefreshToken
 		identity.AccessExpires = time.Now().Unix() + tokens.ExpiresIn
@@ -330,10 +346,10 @@ func (c *Client) Callback(w http.ResponseWriter, r *http.Request) (Authorization
 	identity.SessionID = tokens.SessionID
 	identity.CheckExpires = time.Now().Unix() + tokens.CheckTTL
 	bound := AppSession{Authorization: identity, ExpiresAt: time.Now().Add(SessionLifetime)}
-	if err = c.Revalidate(r.Context(), bound); err != nil {
-		return Authorization{}, "", err
+	if err = c.Revalidate(ctx, bound); err != nil {
+		return Authorization{}, err
 	}
-	return identity, SafeNext(f.Next), nil
+	return identity, nil
 }
 func (c *Client) ClearSession(w http.ResponseWriter) { cookie(w, SessionCookie, "", -1) }
 func (c *Client) ValidMutation(r *http.Request) bool {

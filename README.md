@@ -29,13 +29,22 @@ Next.js River code; Git history retains that implementation.
 - A responsive home and chat UI for phones, tablets and desktop.
 - Browser cookies are encrypted, Secure, HttpOnly, host-only and SameSite=Lax.
   Android stores the same encrypted app-session envelope in platform secure storage.
-- Android uses the system browser and an explicit device-link confirmation with a
-  verifier challenge and five-minute, single-use exchange. Both device linking and
-  Matrix approval return to the app automatically, with an Open River fallback
+- With the signed Private Store installed and signed in, Android first requests a one-use account
+  code from its pinned Android broker. This reuses already-approved River
+  permissions and the Store's existing login lifetime. A missing account,
+  different username, older Store, or missing consent falls back to the browser.
+  Browser sign-in uses the system browser and an explicit device-link confirmation with a
+  verifier challenge and five-minute exchange. The same verifier can recover a
+  lost approval response for up to two minutes, within the original expiry;
+  retries return the same session and never create or extend a login. Both device
+  linking and Matrix approval return to the app automatically, with an Open River fallback
   when the browser requires a tap. Return links contain no credentials. Android
   retains the pending verifier in secure storage so a cold start can finish the
-  exchange. Matrix device sign-in is required on a new or unlinked device, using
-  the same browser approval model. Conversations remain unavailable until Matrix
+  exchange. Temporary connection failures retry within that expiry. If account
+  loading fails after approval, River resumes it when reopened and offers Retry
+  sign-in without requiring another device approval. Matrix device sign-in is
+  required on a new or unlinked device, using the same browser approval model.
+  Conversations remain unavailable until Matrix
   connects. Failed or cancelled approval stays on setup with retry and sign-out
   options. A restored linked device can open its cached conversations offline. Initial
   encryption setup may require a password, sent directly from the SDK to Gravitas.
@@ -60,6 +69,15 @@ comment policies, peer file attachments and calling. The Go process brokers
 centrally authorized MatrixRTC memberships with a LiveKit SFU and Coturn relay.
 See [the parity contract](docs/ORBIT_PARITY.md) and [media setup](deploy/media/README.md).
 Gravitas implements native Matrix client/server and room federation APIs. River connects a local Matrix device through its Apache-2.0 adapter, using native Sliding Sync when advertised and classic sync otherwise. It sends standard messages, threads, reactions, edits and encrypted attachments through that device. Existing Gravitas contacts, delegated space tools, publishing and calls retain their app permissions.
+
+River serves `/.well-known/matrix/client` with the `GRAVITAS_ISSUER` homeserver
+URL, so other Matrix clients can discover Gravitas from `chat.gravitas.cool`.
+The production Matrix server name is `gravitas.cool`, matching account IDs such
+as `@alice:gravitas.cool`. Use `gravitas.cool` in the
+[Matrix federation tester](https://federationtester.matrix.org/#gravitas.cool).
+Testing `chat.gravitas.cool` instead tests a separate server identity that River
+does not host. Federation delegation changes the connection address, not the
+server name in signing keys, accounts or rooms.
 
 Device security in Account supports showing a Matrix QR code, reading a QR image, camera capture where supported, SAS number comparison, cross-signing and encrypted key recovery. Confirming a QR scan is required before granting trust. Matrix sessions and private encryption keys stay in the client's encrypted store; the Go server receives only the one-use SSO login token. Encrypted messages never fall back to a clear-text send when the Matrix connection fails.
 

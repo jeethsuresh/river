@@ -27,11 +27,11 @@ func fixture(t *testing.T) (*Client, *atomic.Int32) {
 	mux.HandleFunc("POST /oauth/token", func(w http.ResponseWriter, r *http.Request) {
 		_ = r.ParseForm()
 		verifier := r.Form.Get("code_verifier")
-		if r.Form.Get("code") != "one-use-code" || len(verifier) != 43 || r.Form.Get("redirect_uri") != "https://app.example/auth/gravitas/callback" || r.Form.Get("grant_type") != "authorization_code" || calls.Add(1) != 1 {
+		if (r.Form.Get("code") != "one-use-code" && r.Form.Get("code") != strings.Repeat("b", 43)) || len(verifier) != 43 || r.Form.Get("redirect_uri") != "https://app.example/auth/gravitas/callback" || r.Form.Get("grant_type") != "authorization_code" || calls.Add(1) != 1 {
 			w.WriteHeader(400)
 			return
 		}
-		_ = json.NewEncoder(w).Encode(map[string]any{"access_token": "private-opaque-token", "token_type": "Bearer", "session_check_token": checkToken, "session_check_expires_in": familyExpiry - time.Now().Unix(), "session_id": "11111111-1111-4111-8111-111111111111"})
+		_ = json.NewEncoder(w).Encode(map[string]any{"access_token": "private-opaque-token", "token_type": "Bearer", "scope": "profile.name", "session_check_token": checkToken, "session_check_expires_in": familyExpiry - time.Now().Unix(), "session_id": "11111111-1111-4111-8111-111111111111"})
 	})
 	mux.HandleFunc("GET /app/v1/me", func(w http.ResponseWriter, r *http.Request) {
 		if r.Header.Get("Authorization") != "Bearer private-opaque-token" {

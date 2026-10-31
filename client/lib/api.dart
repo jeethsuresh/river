@@ -4,6 +4,7 @@ import 'dart:math';
 
 import 'live_updates.dart';
 import 'performance.dart';
+import 'native_broker.dart';
 import 'connection_health.dart';
 import 'matrix_messaging.dart';
 import 'matrix_timeline.dart';
@@ -55,6 +56,7 @@ class RiverApi extends ChangeNotifier {
     Future<String> Function(String)? matrixStoreLocation,
     bool? matrixEnabled,
     this.authLaunch,
+    this.brokerAuthorize,
   }) : client = client ?? http.Client(),
        liveEnabled = live ?? client == null,
        matrixEnabled = matrixEnabled ?? (live ?? client == null),
@@ -64,7 +66,14 @@ class RiverApi extends ChangeNotifier {
   final bool liveEnabled;
   final bool matrixEnabled;
   final Future<bool> Function(Uri)? authLaunch;
+  final Future<Json?> Function(
+    String challenge,
+    String state,
+    String? username,
+  )?
+  brokerAuthorize;
   Future<void>? _nativeExchange;
+  Future<void>? _booting;
   bool _signingIn = false;
   final MatrixFactory? _matrixFactory;
   final MatrixStorage? _matrixStorage;
@@ -303,6 +312,7 @@ class RiverApi extends ChangeNotifier {
   bool get matrixConnected => _matrix?.connected ?? false;
   bool get requiresMatrixSetup =>
       user != null && matrixEnabled && !matrixConnected;
+  bool get finishingNativeSignIn => !kIsWeb && user == null && token != null;
 
   Future<void> connectMessaging() async {
     final profile = user;
@@ -732,9 +742,16 @@ class RiverApi extends ChangeNotifier {
     } catch (_) {}
   }
 
-  Future<void> boot() => RiverPerformance.measure('app.boot', _boot);
+  Future<void> boot() => _booting ??= RiverPerformance.measure(
+    'app.boot',
+    _boot,
+  ).whenComplete(() => _booting = null);
 
   Future<void> _boot() async {
+    if (user == null) {
+      loading = true;
+      notifyListeners();
+    }
     await _restoreLocal();
     if (!kIsWeb) {
       token = await storage.read(key: 'river_session');
@@ -756,6 +773,7 @@ class RiverApi extends ChangeNotifier {
       if (accountKey != "${next['issuer']}|${next['sub']}") _clear();
       user = next;
       _offlineSession = false;
+      error = null;
       await loadMessagingPreferences();
       await _rememberIdentity();
       if (matrixEnabled) {
@@ -770,7 +788,7 @@ class RiverApi extends ChangeNotifier {
       await _initializeFiles();
       await refresh();
     } catch (e) {
-      if (user != null) error = _backgroundError(e);
+      error = _backgroundError(e);
     }
     loading = false;
     notifyListeners();
@@ -1061,6 +1079,58 @@ class RiverApi extends ChangeNotifier {
     final challenge = base64Url
         .encode(sha256.convert(utf8.encode(proof)).bytes)
         .replaceAll('=', '');
+    final generation = _generation;
+    if (!register) {
+      final broker = await (brokerAuthorize ?? authorizeNativeBroker)(
+        challenge,
+        transactionId() + transactionId().substring(0, 11),
+        username,
+      );
+      if (generation != _generation || _disposed) {
+        throw ApiException(409, 'session_changed');
+      }
+      if (broker != null) {
+        Json? authorized;
+        final response = await _send(
+          '/api/native/broker',
+          method: 'POST',
+          body: {
+            'code': broker['code'],
+            'code_verifier': proof,
+            'sub': broker['sub'],
+            'session_id': broker['session_id'],
+            if (username != null) 'username': username,
+          },
+        );
+        // Older relays may return plain-text 404s or require a session for an
+        // unknown API route. Neither response invalidates the current account.
+        if (![400, 401, 403, 404, 405].contains(response.statusCode)) {
+          authorized = _responseData(response);
+        }
+        if (authorized != null) {
+          final session = authorized['session'];
+          if (session is! String || session.isEmpty) {
+            throw ApiException(502, 'invalid_response');
+          }
+          await _sessionStorage(() async {
+            if (generation != _generation || _disposed) {
+              throw ApiException(409, 'session_changed');
+            }
+            await storage.write(key: 'river_session', value: session);
+            if (generation != _generation || _disposed) {
+              throw ApiException(409, 'session_changed');
+            }
+            token = session;
+            await storage.delete(key: 'river_native_pending');
+          });
+          await boot();
+          return;
+        }
+      }
+    }
+    if (generation != _generation || _disposed) {
+      throw ApiException(409, 'session_changed');
+    }
     final pair = await request(
       '/api/native/new',
       method: 'POST',
@@ -1121,11 +1191,24 @@ class RiverApi extends ChangeNotifier {
         if (generation != _generation || _disposed) {
           throw ApiException(409, 'session_changed');
         }
-        final result = await request(
-          '/api/native/session',
-          method: 'POST',
-          body: {'id': pending['id'], 'verifier': pending['verifier']},
-        );
+        late final Json result;
+        try {
+          result = await request(
+            '/api/native/session',
+            method: 'POST',
+            body: {'id': pending['id'], 'verifier': pending['verifier']},
+          );
+        } catch (e) {
+          // Android may suspend the app's connection while the system browser
+          // is open. Keep the saved verifier and retry within its original TTL.
+          final temporary =
+              e is http.ClientException ||
+              e is TimeoutException ||
+              (e is ApiException && [502, 503, 504].contains(e.status));
+          if (!temporary || generation != _generation || _disposed) rethrow;
+          await Future<void>.delayed(const Duration(seconds: 2));
+          continue;
+        }
         if (result['session'] is String) {
           await _sessionStorage(() async {
             if (generation != _generation || _disposed) {
@@ -1177,6 +1260,9 @@ class RiverApi extends ChangeNotifier {
         }
       }
     }
+    // Approval can finish while Android is in the browser. If loading the
+    // approved session then failed, there is no pending link left to redeem.
+    if (finishingNativeSignIn) await boot();
     if (user == null) return;
     if (matrixEnabled && !matrixConnected) {
       await matrix.bind(user!);
