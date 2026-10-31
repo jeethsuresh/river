@@ -526,8 +526,7 @@ class _RiverShellState extends State<RiverShell> {
               ? null
               : AppBar(
                   title: Text(
-                    group?['name'] as String? ??
-                        (section == 'Home' ? 'River' : section),
+                    group?['name'] as String? ?? 'River',
                     style: const TextStyle(fontWeight: FontWeight.w800),
                   ),
                   actions: [
@@ -535,11 +534,6 @@ class _RiverShellState extends State<RiverShell> {
                       tooltip: 'Refresh',
                       onPressed: () => app.refresh(),
                       icon: const Icon(Icons.refresh),
-                    ),
-                    IconButton(
-                      tooltip: 'New space',
-                      onPressed: () => create('space'),
-                      icon: const Icon(Icons.add),
                     ),
                   ],
                 ),

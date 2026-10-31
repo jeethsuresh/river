@@ -181,7 +181,7 @@ class _RiverDestinationViewState extends State<RiverDestinationView> {
           key: ValueKey('search-$destination'),
           decoration: InputDecoration(
             hintText: entries
-                ? 'Search recent ${destination.toLowerCase()}'
+                ? 'Search recent ${destination == 'Forums' ? 'topics' : 'posts'}'
                 : 'Search ${destination.toLowerCase()}',
             prefixIcon: const Icon(Icons.search, size: 18),
           ),
@@ -237,7 +237,7 @@ class _RiverDestinationViewState extends State<RiverDestinationView> {
           ),
           const SizedBox(height: 20),
           Text(
-            'RECENT ${destination.toUpperCase()}',
+            destination == 'Forums' ? 'RECENT TOPICS' : 'RECENT POSTS',
             style: Theme.of(context).textTheme.labelSmall?.copyWith(
               color: riverMuted,
               letterSpacing: 1,
@@ -303,7 +303,7 @@ class _RiverDestinationViewState extends State<RiverDestinationView> {
                     g['membership'] == 'invite'
                         ? 'Invitation · tap to respond'
                         : destination == 'Communities'
-                        ? '${app.channels(g['id'] as String).length} rooms · ${(g['members'] as List? ?? []).length} members'
+                        ? '${app.channels(g['id'] as String).length} ${app.channels(g['id'] as String).length == 1 ? 'room' : 'rooms'} · ${(g['members'] as List? ?? []).length} members'
                         : (g['unread_preview'] as String? ?? '').isNotEmpty
                         ? g['unread_preview'] as String
                         : destination == 'Matrix'
