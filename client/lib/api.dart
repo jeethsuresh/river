@@ -442,7 +442,9 @@ class RiverApi extends ChangeNotifier {
   RiverCalls get calls => _calls ??= RiverCalls(this);
   List<Json> activeCalls = [];
   final http.Client client;
-  final storage = const FlutterSecureStorage();
+  final storage = const FlutterSecureStorage(
+    mOptions: MacOsOptions(usesDataProtectionKeychain: false),
+  );
   String defaultDomain = const String.fromEnvironment(
     'GRAVITAS_IDENTITY_DOMAIN',
     defaultValue: 'gravitas.cool',

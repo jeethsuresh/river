@@ -19,7 +19,9 @@ void main() {
       await file.writeAsString('durable desktop data', flush: true);
       expect(await file.readAsString(), 'durable desktop data');
       await file.delete();
-      const secrets = FlutterSecureStorage();
+      const secrets = FlutterSecureStorage(
+        mOptions: MacOsOptions(usesDataProtectionKeychain: false),
+      );
       await secrets.write(
         key: 'desktop-smoke-only',
         value: 'encrypted desktop credential',
@@ -35,7 +37,7 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.widgetWithText(TextField, 'Username'), findsOneWidget);
       await tester.pumpWidget(const SizedBox());
-        expect(tester.takeException(), isNull);
+      expect(tester.takeException(), isNull);
     },
   );
 }
