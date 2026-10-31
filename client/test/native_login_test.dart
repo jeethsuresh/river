@@ -21,6 +21,7 @@ class NativeLoginFixture {
   bool sessionRejected = false;
   Json? brokerResponse;
   bool brokerRejected = false;
+  int brokerStatus = 403;
   int browserLaunches = 0;
   int brokerExchanges = 0;
   late final api = RiverApi(
@@ -45,7 +46,12 @@ class NativeLoginFixture {
           expectSync(body['code_verifier'], hasLength(43));
           expectSync(body['sub'], 'alice');
           return brokerRejected
-              ? http.Response('{"error":"broker_login_failed"}', 403)
+              ? http.Response(
+                  brokerStatus == 404
+                      ? 'Not Found'
+                      : '{"error":"broker_login_failed"}',
+                  brokerStatus,
+                )
               : http.Response('{"session":"approved-session"}', 200);
         case '/api/native/new':
           return http.Response(
@@ -136,28 +142,34 @@ void main() {
     },
   );
 
-  testWidgets('broker rejection falls back to normal browser approval', (
-    tester,
-  ) async {
-    final f = NativeLoginFixture()
-      ..brokerResponse = {
-        'code': 'one-use-code',
-        'sub': 'alice',
-        'session_id': '11111111-1111-4111-8111-111111111111',
-      }
-      ..brokerRejected = true;
-    await tester.pumpWidget(RiverApp(api: f.api, boot: false));
-    await tester.enterText(find.byType(TextField), 'alice');
-    await tester.tap(find.text('🔥'));
-    await tester.pump();
-    await f.polling.future;
-    f.approval.complete(http.Response('{"session":"approved-session"}', 200));
-    await tester.pumpAndSettle();
-    expect(f.api.user, matrixProfile);
-    expect(f.brokerExchanges, 1);
-    expect(f.browserLaunches, 1);
-    await tester.pumpWidget(const SizedBox());
-  });
+  for (final status in [401, 403, 404]) {
+    testWidgets(
+      'broker response $status falls back to normal browser approval',
+      (tester) async {
+        final f = NativeLoginFixture()
+          ..brokerResponse = {
+            'code': 'one-use-code',
+            'sub': 'alice',
+            'session_id': '11111111-1111-4111-8111-111111111111',
+          }
+          ..brokerRejected = true
+          ..brokerStatus = status;
+        await tester.pumpWidget(RiverApp(api: f.api, boot: false));
+        await tester.enterText(find.byType(TextField), 'alice');
+        await tester.tap(find.text('🔥'));
+        await tester.pump();
+        await f.polling.future;
+        f.approval.complete(
+          http.Response('{"session":"approved-session"}', 200),
+        );
+        await tester.pumpAndSettle();
+        expect(f.api.user, matrixProfile);
+        expect(f.brokerExchanges, 1);
+        expect(f.browserLaunches, 1);
+        await tester.pumpWidget(const SizedBox());
+      },
+    );
+  }
 
   testWidgets('resume retries loading a device session after an IAM outage', (
     tester,

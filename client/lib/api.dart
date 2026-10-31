@@ -1089,20 +1089,21 @@ class RiverApi extends ChangeNotifier {
       }
       if (broker != null) {
         Json? authorized;
-        try {
-          authorized = await request(
-            '/api/native/broker',
-            method: 'POST',
-            body: {
-              'code': broker['code'],
-              'code_verifier': proof,
-              'sub': broker['sub'],
-              'session_id': broker['session_id'],
-              if (username != null) 'username': username,
-            },
-          );
-        } on ApiException catch (e) {
-          if (![400, 403, 404, 405].contains(e.status)) rethrow;
+        final response = await _send(
+          '/api/native/broker',
+          method: 'POST',
+          body: {
+            'code': broker['code'],
+            'code_verifier': proof,
+            'sub': broker['sub'],
+            'session_id': broker['session_id'],
+            if (username != null) 'username': username,
+          },
+        );
+        // Older relays may return plain-text 404s or require a session for an
+        // unknown API route. Neither response invalidates the current account.
+        if (![400, 401, 403, 404, 405].contains(response.statusCode)) {
+          authorized = _responseData(response);
         }
         if (authorized != null) {
           final session = authorized['session'];
@@ -1124,6 +1125,9 @@ class RiverApi extends ChangeNotifier {
           return;
         }
       }
+    }
+    if (generation != _generation || _disposed) {
+      throw ApiException(409, 'session_changed');
     }
     final pair = await request(
       '/api/native/new',
