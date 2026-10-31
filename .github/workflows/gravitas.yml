@@ -212,6 +212,9 @@ jobs:
           git -C "$RUNNER_TEMP/native-flutter" checkout --detach abaf9c523780a608bd46686fd5e53740a07077f8
           test "$(git -C "$RUNNER_TEMP/native-flutter" rev-parse HEAD)" = abaf9c523780a608bd46686fd5e53740a07077f8
           echo "$RUNNER_TEMP/native-flutter/bin" >> "$GITHUB_PATH"
+      - name: Select Xcode with the macOS 26 SDK
+        if: runner.os == 'macOS'
+        run: sudo xcode-select --switch /Applications/Xcode_26.0.app/Contents/Developer
       - name: Install the pinned Matrix Rust toolchain
         run: bash scripts/matrix-toolchain.sh
       - name: Install native Linux dependencies and credential service
