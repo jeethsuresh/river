@@ -29,13 +29,22 @@ Next.js River code; Git history retains that implementation.
 - A responsive home and chat UI for phones, tablets and desktop.
 - Browser cookies are encrypted, Secure, HttpOnly, host-only and SameSite=Lax.
   Android stores the same encrypted app-session envelope in platform secure storage.
-- Android uses the system browser and an explicit device-link confirmation with a
-  verifier challenge and five-minute, single-use exchange. Both device linking and
-  Matrix approval return to the app automatically, with an Open River fallback
+- With the signed Private Store installed and signed in, Android first requests a one-use account
+  code from its pinned Android broker. This reuses already-approved River
+  permissions and the Store's existing login lifetime. A missing account,
+  different username, older Store, or missing consent falls back to the browser.
+  Browser sign-in uses the system browser and an explicit device-link confirmation with a
+  verifier challenge and five-minute exchange. The same verifier can recover a
+  lost approval response for up to two minutes, within the original expiry;
+  retries return the same session and never create or extend a login. Both device
+  linking and Matrix approval return to the app automatically, with an Open River fallback
   when the browser requires a tap. Return links contain no credentials. Android
   retains the pending verifier in secure storage so a cold start can finish the
-  exchange. Matrix device sign-in is required on a new or unlinked device, using
-  the same browser approval model. Conversations remain unavailable until Matrix
+  exchange. Temporary connection failures retry within that expiry. If account
+  loading fails after approval, River resumes it when reopened and offers Retry
+  sign-in without requiring another device approval. Matrix device sign-in is
+  required on a new or unlinked device, using the same browser approval model.
+  Conversations remain unavailable until Matrix
   connects. Failed or cancelled approval stays on setup with retry and sign-out
   options. A restored linked device can open its cached conversations offline. Initial
   encryption setup may require a password, sent directly from the SDK to Gravitas.

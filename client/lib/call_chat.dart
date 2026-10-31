@@ -165,15 +165,12 @@ class _CallChatScreenState extends State<CallChatScreen> {
               if (loading) const LinearProgressIndicator(),
               Expanded(
                 child: ListView(
+                  reverse: true,
                   padding: const EdgeInsets.all(16),
                   children: [
-                    if (cursor != null)
-                      TextButton(
-                        onPressed: loading ? null : () => load(older: true),
-                        child: const Text('Load older messages'),
-                      ),
-                    for (final e in events)
+                    for (final e in events.reversed)
                       Padding(
+                        key: ValueKey(e['event_id']),
                         padding: const EdgeInsets.symmetric(vertical: 3),
                         child: ContentCard(
                           app: widget.api,
@@ -191,6 +188,11 @@ class _CallChatScreenState extends State<CallChatScreen> {
                             ),
                           ),
                         ),
+                      ),
+                    if (cursor != null)
+                      TextButton(
+                        onPressed: loading ? null : () => load(older: true),
+                        child: const Text('Load older messages'),
                       ),
                   ],
                 ),

@@ -26,6 +26,7 @@ import (
 type pairing struct {
 	Challenge, Label, Session, Username string
 	Register                            bool
+	Delivered                           bool
 	Expires                             time.Time
 }
 type server struct {
@@ -163,6 +164,9 @@ func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	case "/api/native/new":
 		s.nativeNew(w, r)
+		return
+	case "/api/native/broker":
+		s.nativeBroker(w, r)
 		return
 	case "/auth/native/start":
 		s.nativeStart(w, r)
@@ -517,7 +521,7 @@ func (s *server) nativeFinish(w http.ResponseWriter, r *http.Request) {
 	defer s.mu.Unlock()
 	id := r.URL.Query().Get("id")
 	p := s.pairs[id]
-	if p == nil || !p.Expires.After(time.Now()) {
+	if p == nil || !p.Expires.After(time.Now()) || p.Session != "" {
 		fail(w, 400, "Device request expired")
 		return
 	}
@@ -558,7 +562,15 @@ func (s *server) nativeSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	value := p.Session
-	delete(s.pairs, input.ID)
+	// Android can lose the response when switching back from the browser. Keep
+	// the same result briefly for this verifier; never issue a second session or
+	// extend the original link lifetime. Protected access still revalidates it.
+	if !p.Delivered {
+		p.Delivered = true
+		if retryUntil := time.Now().Add(2 * time.Minute); retryUntil.Before(p.Expires) {
+			p.Expires = retryUntil
+		}
+	}
 	respond(w, 200, map[string]string{"session": value})
 }
 

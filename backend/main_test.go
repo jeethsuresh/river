@@ -144,8 +144,39 @@ func TestNativePairingNeedsProofAndExplicitApproval(t *testing.T) {
 	if w.Code != 200 || !strings.Contains(w.Body.String(), token) {
 		t.Fatal("approved device did not receive session")
 	}
+	if retry := poll(proof); retry.Code != 200 || retry.Body.String() != w.Body.String() {
+		t.Fatal("lost approval response cannot be recovered with the same verifier")
+	}
+	w = httptest.NewRecorder()
+	s.ServeHTTP(w, r)
+	if w.Code != 400 || s.pairs[p["id"]].Session != token {
+		t.Fatal("an approved link could be approved again")
+	}
+	if poll(random()).Code != 403 {
+		t.Fatal("delivered session accepted another verifier")
+	}
+	if s.pairs[p["id"]].Expires.After(time.Now().Add(2 * time.Minute)) {
+		t.Fatal("delivery retry window exceeds two minutes")
+	}
+	s.pairs[p["id"]].Expires = time.Now().Add(-time.Second)
 	if poll(proof).Code != 403 {
-		t.Fatal("pairing replay accepted")
+		t.Fatal("expired approval response was returned")
+	}
+}
+
+func TestNativeDeliveryRetryNeverExtendsTheOriginalExpiry(t *testing.T) {
+	s, token, _, _ := fixture(t)
+	proof, id := random(), random()
+	expires := time.Now().Add(10 * time.Second)
+	s.pairs[id] = &pairing{Challenge: challenge(proof), Session: token, Expires: expires}
+	body, _ := json.Marshal(map[string]string{"id": id, "verifier": proof})
+	for range 2 {
+		if w := request(s, "POST", "/api/native/session", string(body), ""); w.Code != 200 {
+			t.Fatal("approved session unavailable", w.Code)
+		}
+		if !s.pairs[id].Expires.Equal(expires) {
+			t.Fatal("delivery extended the original approval expiry")
+		}
 	}
 }
 func TestRouteAndStaticBoundaries(t *testing.T) {

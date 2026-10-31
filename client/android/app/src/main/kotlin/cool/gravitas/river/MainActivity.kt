@@ -11,6 +11,17 @@ import android.os.Looper
 class MainActivity : FlutterActivity() {
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "cool.gravitas.river/auth")
+            .setMethodCallHandler { call, result ->
+                if (call.method != "broker") { result.notImplemented(); return@setMethodCallHandler }
+                val challenge = call.argument<String>("challenge").orEmpty()
+                val state = call.argument<String>("state").orEmpty()
+                val username = call.argument<String>("username")
+                Thread {
+                    val reply = GravitasBroker(AndroidBrokerPlatform(applicationContext)).authorize(challenge, state, username)
+                    Handler(Looper.getMainLooper()).post { result.success(reply) }
+                }.start()
+            }
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "cool.gravitas.river/call")
             .setMethodCallHandler { call, result ->
                 try {
