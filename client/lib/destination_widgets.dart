@@ -254,10 +254,7 @@ class _RiverDestinationViewState extends State<RiverDestinationView> {
                   'Choose a community to browse its full ${kind == 'post' ? 'post' : 'topic'} history, or start something new.',
             ),
           for (final event in feed)
-            Padding(
-              padding: const EdgeInsets.only(bottom: 10),
-              child: entriesCard(event, kind),
-            ),
+            Padding(padding: EdgeInsets.zero, child: entriesCard(event, kind)),
         ] else ...[
           if (visible.isEmpty)
             RiverEmptyState(
@@ -333,71 +330,23 @@ class _RiverDestinationViewState extends State<RiverDestinationView> {
   Widget entriesCard(Json event, String kind) {
     final content = rendered(event);
     final visibility = (event['publication'] as Json?)?['visibility'];
-    final public = visibility == 'public';
-    final body = content['body'] as String? ?? '';
-    return Card(
-      child: InkWell(
-        borderRadius: BorderRadius.circular(12),
-        onTap: () => widget.thread(event['group_id'] as String, event),
-        child: Padding(
-          padding: const EdgeInsets.all(16),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                children: [
-                  Expanded(
-                    child: Text(
-                      event['group_name'] as String? ??
-                          widget.app.group(event['group_id'] as String)?['name']
-                              as String? ??
-                          '',
-                      style: const TextStyle(fontSize: 12, color: riverMuted),
-                    ),
-                  ),
-                  Icon(
-                    kind == 'post' && public
-                        ? Icons.public
-                        : Icons.people_outline,
-                    size: 14,
-                    color: riverMuted,
-                  ),
-                  const SizedBox(width: 4),
-                  Text(
-                    kind == 'post'
-                        ? (public
-                              ? 'Public'
-                              : visibility == 'members'
-                              ? 'Community'
-                              : 'View audience')
-                        : 'Community',
-                    style: const TextStyle(fontSize: 11, color: riverMuted),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 8),
-              Text(
-                content['title'] as String? ?? 'Untitled',
-                style: Theme.of(context).textTheme.titleMedium,
-              ),
-              if (kind == 'post' && body.isNotEmpty) ...[
-                const SizedBox(height: 8),
-                Text(
-                  body,
-                  maxLines: 3,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(color: riverMuted, height: 1.5),
-                ),
-              ],
-              const SizedBox(height: 10),
-              Text(
-                '${widget.app.displayName(event['sender'] as String)} · ${event['reply_count'] ?? 0} ${kind == 'post' ? 'comments' : 'replies'}',
-                style: const TextStyle(fontSize: 12, color: riverMuted),
-              ),
-            ],
-          ),
-        ),
-      ),
+    return EntryPreview(
+      title: content['title'] as String? ?? '',
+      body: content['body'] as String? ?? '',
+      metadata: [
+        widget.app.displayName(event['sender'] as String),
+        event['group_name'] as String? ??
+            widget.app.group(event['group_id'] as String)?['name'] as String? ??
+            '',
+        if (kind == 'post')
+          visibility == 'public'
+              ? 'Public'
+              : visibility == 'members'
+              ? 'Community'
+              : 'View audience',
+        '${event['reply_count'] ?? 0} ${kind == 'post' ? 'comments' : 'replies'}',
+      ],
+      open: () => widget.thread(event['group_id'] as String, event),
     );
   }
 }

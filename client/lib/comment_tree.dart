@@ -46,13 +46,15 @@ class CommentTree extends StatefulWidget {
     super.key,
     required this.events,
     required this.parentOf,
-    required this.builder,
+    this.builder,
+    this.branchBuilder,
     this.replyTarget,
     this.composer,
-  });
+  }) : assert(builder != null || branchBuilder != null);
   final List<Json> events;
   final String? Function(Json) parentOf;
-  final Widget Function(Json) builder;
+  final Widget Function(Json)? builder;
+  final Widget Function(Json, Widget?)? branchBuilder;
   final String? replyTarget;
   final Widget? composer;
   @override
@@ -68,10 +70,33 @@ class _CommentTreeState extends State<CommentTree> {
     void add(CommentBranch branch, int depth) {
       final id = branch.event['event_id'] as String;
       final hidden = collapsed.contains(id);
+      final control = branch.children.isEmpty
+          ? null
+          : TextButton.icon(
+              key: ValueKey('collapse-$id'),
+              style: TextButton.styleFrom(
+                visualDensity: VisualDensity.compact,
+                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                textStyle: const TextStyle(fontFamily: 'Roboto', fontSize: 11),
+                foregroundColor: Theme.of(context).colorScheme.onSurfaceVariant,
+                minimumSize: const Size(0, 24),
+                padding: const EdgeInsets.symmetric(horizontal: 3),
+              ),
+              onPressed: () => setState(() {
+                if (!collapsed.add(id)) collapsed.remove(id);
+              }),
+              icon: Icon(
+                hidden ? Icons.chevron_right : Icons.expand_more,
+                size: 13,
+              ),
+              label: Text(
+                '${hidden ? 'Show' : 'Collapse'} ${branch.descendantCount} ${branch.descendantCount == 1 ? 'reply' : 'replies'}',
+              ),
+            );
       rows.add(
         Padding(
           key: ValueKey('comment-$id'),
-          padding: EdgeInsets.only(left: math.min(depth, 5) * 14.0, bottom: 6),
+          padding: EdgeInsets.only(left: math.min(depth, 5) * 14.0, bottom: 3),
           child: Container(
             decoration: depth == 0
                 ? null
@@ -87,28 +112,13 @@ class _CommentTreeState extends State<CommentTree> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                widget.builder(branch.event),
-                if (branch.children.isNotEmpty)
-                  Align(
-                    alignment: Alignment.centerLeft,
-                    child: TextButton.icon(
-                      key: ValueKey('collapse-$id'),
-                      style: TextButton.styleFrom(
-                        visualDensity: VisualDensity.compact,
-                        padding: const EdgeInsets.symmetric(horizontal: 4),
-                      ),
-                      onPressed: () => setState(() {
-                        if (!collapsed.add(id)) collapsed.remove(id);
-                      }),
-                      icon: Icon(
-                        hidden ? Icons.chevron_right : Icons.expand_more,
-                        size: 16,
-                      ),
-                      label: Text(
-                        '${hidden ? 'Show' : 'Collapse'} ${branch.descendantCount} ${branch.descendantCount == 1 ? 'reply' : 'replies'}',
-                      ),
-                    ),
-                  ),
+                if (widget.branchBuilder != null)
+                  widget.branchBuilder!(branch.event, control)
+                else ...[
+                  widget.builder!(branch.event),
+                  if (control != null)
+                    Align(alignment: Alignment.centerLeft, child: control),
+                ],
                 if (widget.replyTarget == id && widget.composer != null)
                   widget.composer!,
               ],

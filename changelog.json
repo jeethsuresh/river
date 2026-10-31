@@ -1,11 +1,10 @@
 {
   "schemaVersion": 1,
-  "version": "0.12.0",
-  "versionCode": 23,
+  "version": "0.12.1",
+  "versionCode": 24,
   "changes": [
-    "Navigate River through dedicated Chats, Communities, Forums, Posts, and Matrix destinations, with focused lists and actions for each.",
-    "Use a slimmer sidebar, compact room headers, clearer typography, and direct destination navigation on mobile.",
-    "Browse recent forum topics and posts across your communities, then open a community for its full history. Post cards show their audience when available.",
-    "Keep active call controls visible while navigating on mobile, and find external rooms in Matrix with supported messaging actions."
+    "Read messages, discussions, posts, and comments as flat text blocks, with larger body text and compact metadata below the writing.",
+    "Remove avatar headers, padded post cards, and reaction pills from content. Reply, edit, sharing, and reaction controls use a quiet inline caption.",
+    "Show the actual discussion and post bodies in overview feeds, with consistent readable Markdown across feeds, threads, and public posts."
   ]
 }
