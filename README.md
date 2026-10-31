@@ -29,7 +29,11 @@ Next.js River code; Git history retains that implementation.
 - A responsive home and chat UI for phones, tablets and desktop.
 - Browser cookies are encrypted, Secure, HttpOnly, host-only and SameSite=Lax.
   Android stores the same encrypted app-session envelope in platform secure storage.
-- Android uses the system browser and an explicit device-link confirmation with a
+- With the signed Private Store installed and signed in, Android first requests a one-use account
+  code from its pinned Android broker. This reuses already-approved River
+  permissions and the Store's existing login lifetime. A missing account,
+  different username, older Store, or missing consent falls back to the browser.
+  Browser sign-in uses the system browser and an explicit device-link confirmation with a
   verifier challenge and five-minute exchange. The same verifier can recover a
   lost approval response for up to two minutes, within the original expiry;
   retries return the same session and never create or extend a login. Both device

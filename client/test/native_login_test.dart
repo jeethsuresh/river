@@ -19,14 +19,34 @@ class NativeLoginFixture {
   int pollFailures = 0;
   bool sessionUnavailable = false;
   bool sessionRejected = false;
+  Json? brokerResponse;
+  bool brokerRejected = false;
+  int browserLaunches = 0;
+  int brokerExchanges = 0;
   late final api = RiverApi(
     live: false,
     matrixEnabled: true,
     matrixStorage: MemoryMatrixStorage(),
     matrixFactory: (_) async => FakeMatrixTransport(),
-    authLaunch: (_) async => true,
+    authLaunch: (_) async {
+      browserLaunches++;
+      return true;
+    },
+    brokerAuthorize: (challenge, state, username) async {
+      expectSync(challenge.length, 43);
+      expectSync(state.length, 43);
+      return brokerResponse;
+    },
     client: MockClient((request) async {
       switch (request.url.path) {
+        case '/api/native/broker':
+          brokerExchanges++;
+          final body = jsonDecode(request.body) as Map;
+          expectSync(body['code_verifier'], hasLength(43));
+          expectSync(body['sub'], 'alice');
+          return brokerRejected
+              ? http.Response('{"error":"broker_login_failed"}', 403)
+              : http.Response('{"session":"approved-session"}', 200);
         case '/api/native/new':
           return http.Response(
             jsonEncode({
@@ -88,6 +108,54 @@ void main() {
     expect(find.text('🔥'), findsNothing);
     expect(await f.api.storage.read(key: 'river_native_pending'), isNull);
     expect(await f.api.storage.read(key: 'river_session'), 'approved-session');
+    await tester.pumpWidget(const SizedBox());
+  });
+
+  testWidgets(
+    'signed-in Private Store completes account login without a browser',
+    (tester) async {
+      final f = NativeLoginFixture()
+        ..brokerResponse = {
+          'code': 'one-use-code',
+          'sub': 'alice',
+          'session_id': '11111111-1111-4111-8111-111111111111',
+        };
+      await tester.pumpWidget(RiverApp(api: f.api, boot: false));
+      await tester.enterText(find.byType(TextField), 'alice');
+      await tester.tap(find.text('🔥'));
+      await tester.pumpAndSettle();
+      expect(f.api.user, matrixProfile);
+      expect(f.brokerExchanges, 1);
+      expect(f.browserLaunches, 0);
+      expect(
+        find.byKey(const ValueKey('required-matrix-setup')),
+        findsOneWidget,
+      );
+      expect(await f.api.storage.read(key: 'river_native_pending'), isNull);
+      await tester.pumpWidget(const SizedBox());
+    },
+  );
+
+  testWidgets('broker rejection falls back to normal browser approval', (
+    tester,
+  ) async {
+    final f = NativeLoginFixture()
+      ..brokerResponse = {
+        'code': 'one-use-code',
+        'sub': 'alice',
+        'session_id': '11111111-1111-4111-8111-111111111111',
+      }
+      ..brokerRejected = true;
+    await tester.pumpWidget(RiverApp(api: f.api, boot: false));
+    await tester.enterText(find.byType(TextField), 'alice');
+    await tester.tap(find.text('🔥'));
+    await tester.pump();
+    await f.polling.future;
+    f.approval.complete(http.Response('{"session":"approved-session"}', 200));
+    await tester.pumpAndSettle();
+    expect(f.api.user, matrixProfile);
+    expect(f.brokerExchanges, 1);
+    expect(f.browserLaunches, 1);
     await tester.pumpWidget(const SizedBox());
   });
 
@@ -195,4 +263,35 @@ void main() {
     expect(find.text('🔥'), findsOneWidget);
     await tester.pumpWidget(const SizedBox());
   });
+
+  test(
+    'logout during Store authorization cannot restore the account',
+    () async {
+      final approval = Completer<Json?>();
+      final api = RiverApi(
+        live: false,
+        brokerAuthorize: (_, _, _) => approval.future,
+        client: MockClient(
+          (_) async => throw StateError('Unexpected exchange'),
+        ),
+      );
+      final signingIn = api.login(username: 'alice');
+      final rejected = expectLater(
+        signingIn,
+        throwsA(
+          isA<ApiException>().having((e) => e.code, 'code', 'session_changed'),
+        ),
+      );
+      await api.logout();
+      approval.complete({
+        'code': 'one-use',
+        'sub': 'alice',
+        'session_id': 'family',
+      });
+      await rejected;
+      expect(api.user, isNull);
+      expect(await api.storage.read(key: 'river_session'), isNull);
+      api.dispose();
+    },
+  );
 }

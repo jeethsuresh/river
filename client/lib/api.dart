@@ -4,6 +4,7 @@ import 'dart:math';
 
 import 'live_updates.dart';
 import 'performance.dart';
+import 'native_broker.dart';
 import 'connection_health.dart';
 import 'matrix_messaging.dart';
 import 'matrix_timeline.dart';
@@ -55,6 +56,7 @@ class RiverApi extends ChangeNotifier {
     Future<String> Function(String)? matrixStoreLocation,
     bool? matrixEnabled,
     this.authLaunch,
+    this.brokerAuthorize,
   }) : client = client ?? http.Client(),
        liveEnabled = live ?? client == null,
        matrixEnabled = matrixEnabled ?? (live ?? client == null),
@@ -64,6 +66,12 @@ class RiverApi extends ChangeNotifier {
   final bool liveEnabled;
   final bool matrixEnabled;
   final Future<bool> Function(Uri)? authLaunch;
+  final Future<Json?> Function(
+    String challenge,
+    String state,
+    String? username,
+  )?
+  brokerAuthorize;
   Future<void>? _nativeExchange;
   Future<void>? _booting;
   bool _signingIn = false;
@@ -1069,6 +1077,54 @@ class RiverApi extends ChangeNotifier {
     final challenge = base64Url
         .encode(sha256.convert(utf8.encode(proof)).bytes)
         .replaceAll('=', '');
+    final generation = _generation;
+    if (!register) {
+      final broker = await (brokerAuthorize ?? authorizeNativeBroker)(
+        challenge,
+        transactionId() + transactionId().substring(0, 11),
+        username,
+      );
+      if (generation != _generation || _disposed) {
+        throw ApiException(409, 'session_changed');
+      }
+      if (broker != null) {
+        Json? authorized;
+        try {
+          authorized = await request(
+            '/api/native/broker',
+            method: 'POST',
+            body: {
+              'code': broker['code'],
+              'code_verifier': proof,
+              'sub': broker['sub'],
+              'session_id': broker['session_id'],
+              if (username != null) 'username': username,
+            },
+          );
+        } on ApiException catch (e) {
+          if (![400, 403, 404, 405].contains(e.status)) rethrow;
+        }
+        if (authorized != null) {
+          final session = authorized['session'];
+          if (session is! String || session.isEmpty) {
+            throw ApiException(502, 'invalid_response');
+          }
+          await _sessionStorage(() async {
+            if (generation != _generation || _disposed) {
+              throw ApiException(409, 'session_changed');
+            }
+            await storage.write(key: 'river_session', value: session);
+            if (generation != _generation || _disposed) {
+              throw ApiException(409, 'session_changed');
+            }
+            token = session;
+            await storage.delete(key: 'river_native_pending');
+          });
+          await boot();
+          return;
+        }
+      }
+    }
     final pair = await request(
       '/api/native/new',
       method: 'POST',

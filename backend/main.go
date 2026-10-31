@@ -162,6 +162,9 @@ func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case "/api/native/new":
 		s.nativeNew(w, r)
 		return
+	case "/api/native/broker":
+		s.nativeBroker(w, r)
+		return
 	case "/auth/native/start":
 		s.nativeStart(w, r)
 		return
