@@ -70,8 +70,13 @@ centrally authorized MatrixRTC memberships with a LiveKit SFU and Coturn relay.
 See [the parity contract](docs/ORBIT_PARITY.md) and [media setup](deploy/media/README.md).
 Gravitas implements native Matrix client/server and room federation APIs. River connects a local Matrix device through its Apache-2.0 adapter, using native Sliding Sync when advertised and classic sync otherwise. It sends standard messages, threads, reactions, edits and encrypted attachments through that device. Existing Gravitas contacts, delegated space tools, publishing and calls retain their app permissions.
 
-River serves `/.well-known/matrix/client` with the `GRAVITAS_ISSUER` homeserver
-URL, so other Matrix clients can discover Gravitas from `chat.gravitas.cool`.
+In production, `chat.gravitas.cool` serves River's web application alongside the
+Gravitas Matrix API. The IAM-managed Ingress routes `/_matrix` and the exact
+`/.well-known/matrix/client` path to the homeserver. Apex discovery advertises
+`https://chat.gravitas.cool` for client connections and `chat.gravitas.cool:443`
+for federation. River's deployment verifies that its discovery matches the
+apex document, so IAM can configure the transport address separately from the
+identity. Standalone River installations fall back to advertising `GRAVITAS_ISSUER`.
 The production Matrix server name is `gravitas.cool`, matching account IDs such
 as `@alice:gravitas.cool`. Use `gravitas.cool` in the
 [Matrix federation tester](https://federationtester.matrix.org/#gravitas.cool).
