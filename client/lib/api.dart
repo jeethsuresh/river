@@ -1081,11 +1081,18 @@ class RiverApi extends ChangeNotifier {
         .replaceAll('=', '');
     final generation = _generation;
     if (!register) {
-      final broker = await (brokerAuthorize ?? authorizeNativeBroker)(
-        challenge,
-        transactionId() + transactionId().substring(0, 11),
-        username,
-      );
+      final broker =
+          await (brokerAuthorize ??
+              ((challenge, state, username) => authorizeNativeBroker(
+                challenge,
+                state,
+                username,
+                appOrigin: uri('/').origin,
+              )))(
+            challenge,
+            transactionId() + transactionId().substring(0, 11),
+            username,
+          );
       if (generation != _generation || _disposed) {
         throw ApiException(409, 'session_changed');
       }
