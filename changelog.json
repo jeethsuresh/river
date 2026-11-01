@@ -1,12 +1,8 @@
 {
   "schemaVersion": 1,
-  "version": "0.12.2",
-  "versionCode": 25,
+  "version": "0.12.3",
+  "versionCode": 26,
   "changes": [
-    "Show profile icons beside message text and keep short conversations at the bottom, above the composer.",
-    "Use a signed-in Private Store account on Android when River access is already approved; otherwise continue with browser sign-in. Matrix device approval is still required for a new device.",
-    "Retry temporary connection failures while returning from Android browser sign-in.",
-    "Resume loading an approved device session when River reopens, instead of getting stuck at the username screen.",
-    "Show a Retry sign-in option if account loading fails after device approval, and keep sign-in errors visible beside the username."
+    "Use the selected River server for native sign-in and browser authorization. Private Store sign-in on Android remains limited to the trusted production River service."
   ]
 }
