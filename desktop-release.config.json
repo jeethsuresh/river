@@ -1,0 +1,23 @@
+{
+  "name": "River",
+  "directory": "client",
+  "engine": "flutter",
+  "version": "0.12.2",
+  "versionCode": 12002,
+  "flutterVersion": "3.47.7",
+  "flutterRevision": "abaf9c523780a608bd46686fd5e53740a07077f8",
+  "defines": [],
+  "changes": [
+    "River is available as a native macOS, Windows and Linux app with Gravitas sign-in, local encrypted Matrix sessions, spaces and conversations.",
+    "Install and update River from Private Store. Native calls use your desktop microphone and camera permissions.",
+    "Includes the latest message layout and sign-in recovery improvements."
+  ],
+  "schemaVersion": 1,
+  "slug": "river",
+  "repository": "jeethsuresh/river",
+  "entries": {
+    "macos": "River.app",
+    "windows": "river.exe",
+    "linux": "river-launch"
+  }
+}

@@ -340,3 +340,5 @@ also owns the registration button. The Gravitas deployment uses `gravitas.cool`.
 public domain's compatible IAM service over HTTPS. Registration always stays on
 the configured default server. Login transactions and app sessions retain the
 selected issuer, including subsequent session-revocation checks.
+
+Native desktop builds, automatic publishing and Private Store updates: [DESKTOP_RELEASES.md](DESKTOP_RELEASES.md).
