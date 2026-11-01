@@ -42,7 +42,7 @@ var uuidPattern = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]
 var eventPattern = regexp.MustCompile(`^\$[a-zA-Z0-9_.:-]{1,511}$`)
 var txnPattern = regexp.MustCompile(`^[a-zA-Z0-9_-]{1,128}$`)
 
-const scopes = "profile.name matrix.full chats.list chats.read chats.write groups.create groups.manage groups.join spaces.channels contacts.read contacts.manage calls.read calls.join posts.publish"
+const scopes = "profile.name profile.username matrix.full chats.list chats.read chats.write groups.create groups.manage groups.join spaces.channels contacts.read contacts.manage calls.read calls.join posts.publish"
 
 func env(k, def string) string {
 	if v := os.Getenv(k); v != "" {
