@@ -2,14 +2,13 @@
   "name": "River",
   "directory": "client",
   "engine": "flutter",
-  "version": "0.12.3",
-  "versionCode": 12003,
+  "version": "0.12.4",
+  "versionCode": 12004,
   "flutterVersion": "3.47.7",
   "flutterRevision": "abaf9c523780a608bd46686fd5e53740a07077f8",
   "defines": [],
   "changes": [
-    "Sign in with the Gravitas account in desktop Private Store after approving this service.",
-    "Browser sign-in remains available when Private Store is unavailable or this service needs consent. Cancelling Store approval stops the sign-in attempt."
+    "Keep Gravitas sign-in working with separate username permissions."
   ],
   "schemaVersion": 1,
   "slug": "river",
