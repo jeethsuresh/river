@@ -36,6 +36,7 @@ android {
         // You can update the following values to match your application needs.
         // For more information, see: https://flutter.dev/to/review-gradle-config.
         minSdk = 24 // Minimum supported by the pinned Flutter runtime.
+        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode
         versionName = flutter.versionName
@@ -60,4 +61,13 @@ flutter {
     source = "../.."
 }
 
-dependencies { testImplementation("junit:junit:4.13.2") }
+dependencies {
+    testImplementation("junit:junit:4.13.2")
+    // Flutter integration_test adds an older runner to debugRuntimeClasspath.
+    // AGP resolves instrumentation consistently with that classpath, so both
+    // sides must use the same test stack. Release dependencies stay unchanged.
+    debugImplementation("androidx.test:runner:1.7.0")
+    debugImplementation("androidx.test.ext:junit:1.3.0")
+    androidTestImplementation("androidx.test:runner:1.7.0")
+    androidTestImplementation("androidx.test.ext:junit:1.3.0")
+}

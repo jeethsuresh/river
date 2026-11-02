@@ -8,6 +8,7 @@ import 'native_broker.dart';
 import 'connection_health.dart';
 import 'matrix_messaging.dart';
 import 'matrix_timeline.dart';
+import 'store_notifications.dart';
 import 'calls.dart';
 import 'peer_files.dart';
 import 'media.dart' show LinkedImageCache;
@@ -275,7 +276,59 @@ class RiverApi extends ChangeNotifier {
           await _identity.write('river.offline_profile', snapshot);
         }
       });
+      await refreshStoreNotifications();
     }
+  }
+
+  bool get storeNotificationsSupported => StoreNotifications.supported;
+  bool storeNotificationsEnabled = false, notificationStoreInstalled = false;
+  Future<void> refreshStoreNotifications() async {
+    if (user == null) return;
+    final account = accountKey;
+    final result = await StoreNotifications.bind(user!);
+    if (account != accountKey) return;
+    storeNotificationsEnabled = result['enabled'] == true;
+    notificationStoreInstalled = result['storeInstalled'] == true;
+    notifyListeners();
+  }
+
+  Future<void> enableStoreNotifications(bool enabled) async {
+    final account = accountKey;
+    final result = await StoreNotifications.call('enable', {
+      'enabled': enabled,
+    });
+    if (account != accountKey) return;
+    storeNotificationsEnabled = result['enabled'] == true;
+    notificationStoreInstalled = result['storeInstalled'] == true;
+    notifyListeners();
+  }
+
+  Future<void> openStoreNotification(Json notification) async {
+    final account = accountKey;
+    if (notification['subject'] != user?['sub'] ||
+        user?['issuer'] != 'https://gravitas.cool' ||
+        notification['room_id'] is! String) {
+      return;
+    }
+    for (
+      var i = 0;
+      i < 100 && matrix.connecting && account == accountKey;
+      i++
+    ) {
+      await Future<void>.delayed(const Duration(milliseconds: 100));
+    }
+    if (account != accountKey) return;
+    if (matrixConnected) await matrix.syncNow();
+    await refresh();
+    if (account != accountKey) return;
+    final target = groups
+        .where(
+          (g) =>
+              g['room_id'] == notification['room_id'] &&
+              ['join', 'invite'].contains(g['membership']),
+        )
+        .firstOrNull;
+    if (target != null) await open(target['id'] as String);
   }
 
   Future<void> _restoreLocal() async {
@@ -518,6 +571,8 @@ class RiverApi extends ChangeNotifier {
   int get incomingRequests =>
       requests.where((r) => r['direction'] == 'incoming').length;
   void _clear() {
+    unawaited(StoreNotifications.clear());
+    storeNotificationsEnabled = false;
     enterSendsMessages = true;
     _apiConnection.reset();
     if (_matrix != null) unawaited(_matrix!.disconnect());
@@ -683,6 +738,7 @@ class RiverApi extends ChangeNotifier {
     }
     if (generation != _generation) throw ApiException(409, 'session_changed');
     _credentialRevision++;
+    if (user != null) await refreshStoreNotifications();
   }
 
   Json _responseData(http.Response response) {
@@ -1301,6 +1357,7 @@ class RiverApi extends ChangeNotifier {
   }
 
   Future<void> logout() async {
+    await StoreNotifications.clear();
     final renewal = _renewing;
     _generation++;
     if (!kIsWeb) {
@@ -1444,6 +1501,9 @@ class RiverApi extends ChangeNotifier {
           method: 'POST',
           body: {'event_id': event},
         );
+      }
+      if (account == accountKey && matrixRoom(room) != null) {
+        await StoreNotifications.call('read', {'room_id': matrixRoom(room)});
       }
       if (account == accountKey &&
           selected == room &&

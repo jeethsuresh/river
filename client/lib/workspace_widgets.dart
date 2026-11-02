@@ -482,6 +482,31 @@ class AccountPanel extends StatelessWidget {
     padding: const EdgeInsets.all(24),
     children: [
       Text('Your account', style: Theme.of(context).textTheme.headlineMedium),
+      if (app.storeNotificationsSupported)
+        Card(
+          child: SwitchListTile(
+            title: const Text('Message notifications'),
+            subtitle: Text(
+              app.notificationStoreInstalled
+                  ? 'Enable App notifications in Private Store with the same Gravitas account. Message contents stay private.'
+                  : 'Install Private Store and enable App notifications to receive messages while River is closed.',
+            ),
+            value: app.storeNotificationsEnabled,
+            onChanged: (enabled) async {
+              try {
+                await app.enableStoreNotifications(enabled);
+              } catch (_) {
+                if (context.mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text('Unable to update notifications.'),
+                    ),
+                  );
+                }
+              }
+            },
+          ),
+        ),
       ListTile(
         leading: const Icon(Icons.person_outline),
         title: Text(app.user?['username'] as String? ?? ''),

@@ -131,6 +131,16 @@
                   {
                     "name": "GOMEMLIMIT",
                     "value": "96MiB"
+                  },
+                  {
+                    "name": "NOTIFICATION_PROVIDER_KEY",
+                    "valueFrom": {
+                      "secretKeyRef": {
+                        "name": "river-notifications",
+                        "key": "provider-key",
+                        "optional": true
+                      }
+                    }
                   }
                 ],
                 "envFrom": [
