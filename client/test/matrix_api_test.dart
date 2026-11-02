@@ -1,11 +1,13 @@
 import 'dart:convert';
 import 'dart:typed_data';
+
 import 'package:crypto/crypto.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:river/api.dart';
 import 'package:river/matrix_messaging.dart';
+
 import 'matrix_messaging_test.dart'
     show MemoryMatrixStorage, FakeMatrixTransport, matrixProfile;
 
@@ -175,6 +177,69 @@ Future<RiverApi> connected(
 
 void main() {
   test(
+    'an active conversation follows its verified replacement and retains readable history',
+    () async {
+      final engine = UpgradeTransport();
+      final api = await connected(engine, []);
+      await api.open('local');
+      engine.upgraded = true;
+      await api.matrix.syncNow();
+      for (var i = 0; i < 5; i++) {
+        await Future<void>.delayed(Duration.zero);
+      }
+      expect(api.selected, '!replacement:remote');
+      await api.send(api.selected!, 'm.room.message', {
+        'body': 'after upgrade',
+        'msgtype': 'm.text',
+      }, 'upgrade');
+      expect(engine.sentRooms, ['!replacement:remote']);
+      expect(api.group('local')?['name'], startsWith('History:'));
+      await api.open('local');
+      expect(api.events, isNotEmpty);
+      await api.matrix.syncNow();
+      expect(
+        api.selected,
+        'local',
+        reason: 'Explicit historical reading must stay on the old room',
+      );
+      await expectLater(
+        api.send('local', 'm.room.message', {'body': 'wrong room'}, 'old'),
+        throwsStateError,
+      );
+      expect(engine.sentRooms, ['!replacement:remote']);
+      api.dispose();
+    },
+  );
+
+  test(
+    'pending replacements block messages and files while leaving history readable',
+    () async {
+      final engine = UpgradeTransport();
+      final api = await connected(engine, []);
+      await api.open('local');
+      engine.pending = true;
+      await api.matrix.syncNow();
+      expect(api.events, isNotEmpty);
+      await expectLater(
+        api.send('local', 'm.room.message', {'body': 'pending'}, 'pending'),
+        throwsStateError,
+      );
+      await expectLater(
+        api.sendMatrixFile(
+          'local',
+          'file.bin',
+          'application/octet-stream',
+          Uint8List(4),
+        ),
+        throwsStateError,
+      );
+      expect(engine.sentRooms, isEmpty);
+      expect(engine.fileTransactions, isEmpty);
+      api.dispose();
+    },
+  );
+
+  test(
     'acknowledged echoes reconcile in SDK order and departure clears the timeline',
     () async {
       final engine = EchoTransport();
@@ -336,4 +401,38 @@ void main() {
     expect(requests.where((r) => r.method != 'GET'), isEmpty);
     api.dispose();
   });
+}
+
+class UpgradeTransport extends RoomTransport {
+  bool upgraded = false, pending = false;
+  final sentRooms = <String>[];
+  @override
+  Future<MatrixJson> sync() async {
+    final snapshot = await super.sync();
+    final old = (snapshot['rooms'] as List).single;
+    old['upgrade_pending'] = pending;
+    if (upgraded) {
+      old['replacement_room'] = '!replacement:remote';
+      (snapshot['rooms'] as List).add({
+        'room_id': '!replacement:remote',
+        'name': 'Encrypted room',
+        'kind': 'group',
+        'membership': 'join',
+        'encrypted': true,
+        'parents': [],
+      });
+    }
+    return snapshot;
+  }
+
+  @override
+  Future<MatrixJson> send(
+    String room,
+    String type,
+    MatrixJson content,
+    String txn,
+  ) async {
+    sentRooms.add(room);
+    return super.send(room, type, content, txn);
+  }
 }

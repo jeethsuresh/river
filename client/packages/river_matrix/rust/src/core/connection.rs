@@ -32,7 +32,10 @@ use matrix_sdk::{
     room::MessagesOptions,
     ruma::{
         OwnedUserId, RoomId, UserId,
-        events::{StateEventType, key::verification::request::ToDeviceKeyVerificationRequestEvent},
+        events::{
+            StateEventType, key::verification::request::ToDeviceKeyVerificationRequestEvent,
+            room::member::MembershipState,
+        },
     },
     sliding_sync::{SlidingSync, SlidingSyncList, SlidingSyncMode, Version},
 };
@@ -235,6 +238,8 @@ impl MatrixCore {
                                 (StateEventType::RoomEncryption, "".into()),
                                 (StateEventType::RoomPowerLevels, "".into()),
                                 (StateEventType::RoomJoinRules, "".into()),
+                                (StateEventType::RoomTombstone, "".into()),
+                                (StateEventType::RoomMember, "$ME".into()),
                                 (StateEventType::SpaceParent, "*".into()),
                                 (StateEventType::SpaceChild, "*".into()),
                                 (StateEventType::RoomMember, "$LAZY".into()),
@@ -317,6 +322,7 @@ impl MatrixCore {
 
     pub async fn rooms(&self) -> Result<String> {
         self.active()?;
+        let replacements = self.follow_room_upgrades().await;
         let mut rooms = Vec::new();
         for room in self.client.rooms() {
             let membership = match room.state() {
@@ -353,6 +359,8 @@ impl MatrixCore {
                 .unwrap_or_else(|_| room.room_id().to_string());
             rooms.push(json!({
                 "room_id": room.room_id(), "name": name, "membership": membership,
+                "replacement_room": replacements.get(room.room_id()),
+                "upgrade_pending": room.is_tombstoned() && !replacements.contains_key(room.room_id()),
                 "kind": if room.is_space() {"space"} else if room.is_direct().await.unwrap_or(false) {"dm"} else {metadata["kind"].as_str().unwrap_or("group")},
                 "channel_kind": metadata["channel_kind"],
                 "description": room.topic(),
@@ -373,6 +381,15 @@ impl MatrixCore {
         self.client
             .get_room(&RoomId::parse(room)?)
             .context("Room is no longer available")
+    }
+
+    pub(crate) fn writable_room(&self, id: &str) -> Result<Room> {
+        let room = self.room(id)?;
+        ensure!(
+            !room.is_tombstoned(),
+            "This conversation is moving to a compatible room. Try again in a moment."
+        );
+        Ok(room)
     }
 
     pub async fn history(&self, room: String, cursor: Option<String>) -> Result<String> {
@@ -415,7 +432,7 @@ impl MatrixCore {
         content: String,
         transaction: String,
     ) -> Result<String> {
-        let room = self.room(&room)?;
+        let room = self.writable_room(&room)?;
         let content: Value = serde_json::from_str(&content)?;
         ensure!(content.is_object(), "Message content must be an object");
         room.request_encryption_state().await.map_err(sdk_error)?;
@@ -463,9 +480,56 @@ impl MatrixCore {
             }
             "direct" => {
                 let user = UserId::parse(text("user")?)?;
-                let (room, created) = match self.client.get_dm_room(&user) {
+                let replacements = self.follow_room_upgrades().await;
+                // A join can move m.direct on the homeserver before that account
+                // data arrives in sync. Preserve the server's preferred order,
+                // rather than choosing an arbitrary room from the SDK cache.
+                let mut current = None;
+                let mut pending = false;
+                if let Some(raw) = self
+                    .client
+                    .account()
+                    .fetch_account_data(
+                        matrix_sdk::ruma::events::GlobalAccountDataEventType::Direct,
+                    )
+                    .await
+                    .map_err(sdk_error)?
+                {
+                    let direct: Value = serde_json::from_str(raw.json().get())?;
+                    if let Some(ids) = direct[user.as_str()].as_array() {
+                        for id in ids.iter().filter_map(Value::as_str) {
+                            let Ok(id) = RoomId::parse(id) else {
+                                continue;
+                            };
+                            let target = replacements.get(&id).unwrap_or(&id);
+                            if let Some(room) = self.client.get_room(target) {
+                                pending |= room.is_tombstoned();
+                                let joined =
+                                    room.get_member_no_sync(&self.own_user).await?.is_none_or(
+                                        |member| member.membership() == &MembershipState::Join,
+                                    );
+                                if room.state() == RoomState::Joined
+                                    && !room.is_tombstoned()
+                                    && joined
+                                {
+                                    current = Some(room);
+                                    break;
+                                }
+                            } else {
+                                pending = true;
+                            }
+                        }
+                    }
+                }
+                let (room, created) = match current {
                     Some(room) => (room, false),
-                    None => (self.client.create_dm(&user).await.map_err(sdk_error)?, true),
+                    None => {
+                        ensure!(
+                            !pending && self.client.get_dm_rooms(&user).next().is_none(),
+                            "This conversation is moving to a compatible room. Try again in a moment."
+                        );
+                        (self.client.create_dm(&user).await.map_err(sdk_error)?, true)
+                    }
                 };
                 room.request_encryption_state().await.map_err(sdk_error)?;
                 if created {

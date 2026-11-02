@@ -95,13 +95,29 @@ class RiverApi extends ChangeNotifier {
     changed: () {
       if (!_disposed && !_restoringLocal && user != null && active) {
         changes.add(null);
+        final oldSelection = selected == null ? null : matrixRoom(selected!);
         groups = _matrixGroups(groups);
+        if (oldSelection != null && !_viewingHistory) {
+          final replacement = matrix.roomList
+              .where((r) => r['room_id'] == oldSelection)
+              .firstOrNull?['replacement_room'];
+          final target = groups
+              .where(
+                (g) => g['room_id'] == replacement && g['membership'] == 'join',
+              )
+              .firstOrNull;
+          if (target != null) {
+            unawaited(open(target['id'] as String));
+            return;
+          }
+        }
         if (selected != null &&
             !groups.any(
               (g) => g['id'] == selected && g['membership'] == 'join',
             )) {
           _selectionRevision++;
           selected = null;
+          _viewingHistory = false;
           _matrixEvents = [];
           _pendingEchoes.clear();
           events = [];
@@ -413,7 +429,9 @@ class RiverApi extends ChangeNotifier {
         if (old != null) ...old,
         'id': old?['id'] ?? wire,
         'room_id': wire,
-        'name': room['name'],
+        'name': room['replacement_room'] is String
+            ? 'History: ${room['name']}'
+            : room['name'],
         'description': room['description'] ?? old?['description'] ?? '',
         'channel_kind': room['channel_kind'] ?? old?['channel_kind'],
         'membership': room['membership'],
@@ -424,6 +442,8 @@ class RiverApi extends ChangeNotifier {
         'can_manage': room['can_manage'],
         'can_encrypt': room['can_encrypt'],
         'encrypted': room['encrypted'],
+        'replacement_room': room['replacement_room'],
+        'upgrade_pending': room['upgrade_pending'],
         'unread_count': room['unread_count'],
         'matrix_only': old == null,
         'matrix_parents': room['parents'] ?? [],
@@ -843,6 +863,7 @@ class RiverApi extends ChangeNotifier {
       recent = (result['recent'] as List).cast<Json>();
       if (selected != null && !groups.any((g) => g['id'] == selected)) {
         selected = null;
+        _viewingHistory = false;
         _selectionRevision++;
         _matrixEvents = [];
         events = [];
@@ -942,6 +963,7 @@ class RiverApi extends ChangeNotifier {
   }
 
   int _selectionRevision = 0;
+  bool _viewingHistory = false;
 
   Future<void> _loadSelected({bool roster = false}) async {
     final account = accountKey;
@@ -1008,6 +1030,7 @@ class RiverApi extends ChangeNotifier {
     final revision = ++_selectionRevision;
     _historyRevision++;
     selected = id;
+    _viewingHistory = id != null && group(id)?['replacement_room'] is String;
     _matrixEvents = [];
     _pendingEchoes.clear();
     events = [];
@@ -1875,7 +1898,7 @@ class RiverApi extends ChangeNotifier {
       );
     }
     if (!delegatedContent && matrixConnected && wire != null) {
-      await matrix.ensureJoinedRoom(wire);
+      await matrix.ensureWritableRoom(wire);
     }
     if (account != accountKey) throw ApiException(409, 'session_changed');
     final result = !delegatedContent && matrixConnected && wire != null
@@ -1923,6 +1946,7 @@ class RiverApi extends ChangeNotifier {
     if (!matrixConnected || wire == null) {
       throw StateError('Connect Matrix messaging first.');
     }
+    await matrix.ensureWritableRoom(wire);
     final key = 'file:$wire:$name:$mime:${sha256.convert(bytes)}';
     await matrix.transport.sendAttachment(
       wire,

@@ -2,13 +2,14 @@
   "name": "River",
   "directory": "client",
   "engine": "flutter",
-  "version": "0.12.4",
-  "versionCode": 12004,
+  "version": "0.12.5",
+  "versionCode": 12005,
   "flutterVersion": "3.47.7",
   "flutterRevision": "abaf9c523780a608bd46686fd5e53740a07077f8",
   "defines": [],
   "changes": [
-    "Keep Gravitas sign-in working with separate username permissions."
+    "Follow verified conversation replacements when homeserver compatibility changes.",
+    "Keep encrypted history and refuse encryption downgrades or unrelated room invitations."
   ],
   "schemaVersion": 1,
   "slug": "river",
