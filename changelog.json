@@ -5,6 +5,7 @@
   "changes": [
     "Keep conversations working when homeservers upgrade their supported Matrix room versions.",
     "Follow verified replacement conversations automatically while retaining encrypted history.",
-    "Refuse unrelated replacements and encryption downgrades."
+    "Refuse unrelated replacements and encryption downgrades.",
+    "Refresh cached conversation recipients after reconnecting so encrypted messages reach every member."
   ]
 }

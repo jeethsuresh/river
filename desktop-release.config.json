@@ -9,7 +9,8 @@
   "defines": [],
   "changes": [
     "Follow verified conversation replacements when homeserver compatibility changes.",
-    "Keep encrypted history and refuse encryption downgrades or unrelated room invitations."
+    "Keep encrypted history and refuse encryption downgrades or unrelated room invitations.",
+    "Refresh cached conversation recipients after reconnecting so encrypted messages reach every member."
   ],
   "schemaVersion": 1,
   "slug": "river",

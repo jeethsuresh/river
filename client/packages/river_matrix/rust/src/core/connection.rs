@@ -128,6 +128,12 @@ impl MatrixCore {
     }
 
     pub(crate) fn from_client(client: Client, own_user: OwnedUserId, holder: String) -> Self {
+        // A previous server response could have cached an empty or incomplete
+        // roster as complete. Reload members before the next encrypted send;
+        // keep the session, history and encryption keys intact.
+        for room in client.joined_rooms() {
+            room.mark_members_missing();
+        }
         let verification_flows = Arc::new(Mutex::new(Vec::<String>::new()));
         let pending = verification_flows.clone();
         let expected = own_user.clone();

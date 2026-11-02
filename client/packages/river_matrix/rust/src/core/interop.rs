@@ -280,6 +280,92 @@ async fn automatic_room_replacements(first: &MatrixCore) -> Result<()> {
     Ok(())
 }
 
+async fn restored_member_cache(first: &MatrixCore) -> Result<()> {
+    use matrix_sdk::ruma::api::client::membership::invite_user::v3::{
+        InvitationRecipient, InviteUserId, Request,
+    };
+    let peer = device_as(
+        &format!("RIVER-ROSTER-{}", uuid::Uuid::new_v4()),
+        "deactlater",
+    )
+    .await?;
+    // Discover this recipient's new device before deliberately making only
+    // the room roster stale below.
+    step(&[&peer, first]).await?;
+    let mut create = create_room::v3::Request::new();
+    create.initial_state = vec![serde_json::from_value(
+        json!({"type":"m.room.encryption","state_key":"","content":{"algorithm":"m.megolm.v1.aes-sha2"}}),
+    )?];
+    let room = first.client.create_room(create).await?;
+    step(&[first]).await?;
+    assert_eq!(
+        room.members(matrix_sdk::RoomMemberships::ACTIVE)
+            .await?
+            .len(),
+        1
+    );
+    assert!(room.are_members_synced());
+    // Another device can change membership while this device is offline. Use
+    // the raw API so this sender retains its stale, supposedly complete roster.
+    first
+        .client
+        .send(Request::new(
+            room.room_id().to_owned(),
+            InvitationRecipient::UserId(InviteUserId::new(peer.own_user.clone())),
+        ))
+        .await?;
+    step(&[&peer]).await?;
+    peer.client.join_room_by_id(room.room_id()).await?;
+    assert_eq!(
+        room.members_no_sync(matrix_sdk::RoomMemberships::JOIN)
+            .await?
+            .len(),
+        1
+    );
+    let restored = MatrixCore::from_client(
+        first.client.clone(),
+        first.own_user.clone(),
+        uuid::Uuid::new_v4().to_string(),
+    );
+    let sent: Value = serde_json::from_str(
+        &restored
+            .send(
+                room.room_id().to_string(),
+                "m.room.message".into(),
+                json!({"msgtype":"m.text","body":"restored devices reload recipients"}).to_string(),
+                uuid::Uuid::new_v4().to_string(),
+            )
+            .await?,
+    )?;
+    assert_eq!(
+        room.members_no_sync(matrix_sdk::RoomMemberships::JOIN)
+            .await?
+            .len(),
+        2
+    );
+    let mut received = false;
+    for _ in 0..16 {
+        step(&[&peer]).await?;
+        let history: Value =
+            serde_json::from_str(&peer.history(room.room_id().to_string(), None).await?)?;
+        if history["events"].as_array().unwrap().iter().any(|e| {
+            e["event_id"] == sent["event_id"]
+                && e["content"]["body"] == "restored devices reload recipients"
+        }) {
+            received = true;
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(250)).await;
+    }
+    assert!(
+        received,
+        "A restored device must refresh stale recipients before encrypting"
+    );
+    peer.close(true).await?;
+    println!("RIVER MATRIX restored stale member cache and encrypted recipient delivery PASS");
+    Ok(())
+}
+
 async fn direct_room_permissions(first: &MatrixCore) -> Result<()> {
     let peer = device_as(&format!("RIVER-DM-{}", uuid::Uuid::new_v4()), "deactlater").await?;
     step(&[first, &peer]).await?;
@@ -615,6 +701,7 @@ async fn qr_verification_recovers_historical_encrypted_messages() -> Result<()> 
     );
     direct_room_permissions(&first).await?;
     automatic_room_replacements(&first).await?;
+    restored_member_cache(&first).await?;
     first.close(true).await?;
     second.close(true).await?;
     third.close(true).await?;

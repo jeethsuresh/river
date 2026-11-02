@@ -90,7 +90,7 @@ The adapter has native plugin builds for Android, iOS, macOS, Windows and Linux 
 
 ## Local storage and offline viewing
 
-River follows mutually linked room replacements after homeserver compatibility changes. It verifies the replacement and preserves encryption before joining, switches the active conversation, and keeps the old room available as history. Declined invitations and unrelated replacements are not followed.
+River follows mutually linked room replacements after homeserver compatibility changes. It verifies the replacement and preserves encryption before joining, switches the active conversation, and keeps the old room available as history. Declined invitations and unrelated replacements are not followed. Restored sessions refresh cached recipient lists before their next encrypted send.
 
 The Matrix adapter keeps room state and encryption keys in IndexedDB on web and
 SQLite under the application support directory on desktop/mobile. River stores
