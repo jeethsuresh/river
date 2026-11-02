@@ -49,8 +49,9 @@ class _RiverAppState extends State<RiverApp> with WidgetsBindingObserver {
         if (call.method == 'opened' && call.arguments is Map) {
           final notification = await StoreNotifications.call('takeOpen');
           await app.resumeAuthentication();
-          if (notification.isNotEmpty)
+          if (notification.isNotEmpty) {
             await app.openStoreNotification(notification);
+          }
         }
       });
     }
