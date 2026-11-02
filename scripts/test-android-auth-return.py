@@ -92,6 +92,11 @@ with (output / 'emulator.log').open('w') as log:
             device('install', '-r', str(args.apk.resolve()), timeout=120)
             device('shell', 'pm', 'clear', package)
             device('install', '-r', str(args.notification_test_apk.resolve()), timeout=120)
+            device('shell', 'pm', 'revoke', package, 'android.permission.POST_NOTIFICATIONS')
+            denied = device('shell', 'am', 'instrument', '-w', '-r', '-e', 'permissionDenied', 'true', '-e', 'class',
+                            'cool.gravitas.river.StoreNotificationDeliveryTest#respectsSystemPermissionAndExplicitDisable',
+                            package + '.test/androidx.test.runner.AndroidJUnitRunner', timeout=150)
+            assert 'OK (1 test)' in denied and 'FAILURES' not in denied, denied
             result = device('shell', 'am', 'instrument', '-w', '-r', '-e', 'class',
                             'cool.gravitas.river.StoreNotificationDeliveryTest',
                             package + '.test/androidx.test.runner.AndroidJUnitRunner', timeout=150)

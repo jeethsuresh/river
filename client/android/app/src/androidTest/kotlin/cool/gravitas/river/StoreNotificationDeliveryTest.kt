@@ -6,7 +6,6 @@ import android.content.Context
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
-import android.os.ParcelFileDescriptor
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import org.json.JSONObject
@@ -36,15 +35,18 @@ class StoreNotificationDeliveryTest {
         while (!condition() && System.nanoTime() < deadline) Thread.sleep(20)
         assertTrue("Android notification state did not settle", condition())
     }
-    private fun shell(command: String) = ParcelFileDescriptor.AutoCloseInputStream(instrumentation.uiAutomation.executeShellCommand(command)).bufferedReader().use { it.readText() }
+    private val permissionDenied get() = InstrumentationRegistry.getArguments().getString("permissionDenied") == "true"
     @Before fun setup() {
         c.getSharedPreferences("river.push", Context.MODE_PRIVATE).edit().clear().commit()
         StorePush.clear(c)
         session("encrypted-disposable-session")
         StorePush.bind(c, "https://gravitas.cool", subject)
-        if (Build.VERSION.SDK_INT >= 33) instrumentation.uiAutomation.grantRuntimePermission(c.packageName, Manifest.permission.POST_NOTIFICATIONS)
+        if (Build.VERSION.SDK_INT >= 33 && !permissionDenied) {
+            instrumentation.uiAutomation.grantRuntimePermission(c.packageName, Manifest.permission.POST_NOTIFICATIONS)
+        }
         StorePush.enable(c, true)
         await { notifications().isEmpty() }
+        if (!permissionDenied) await { StorePush.allowed(c) }
     }
     @After fun cleanup() {
         StorePush.clear(c)
@@ -97,13 +99,13 @@ class StoreNotificationDeliveryTest {
         StorePush.deliver(c, payload())
         assertTrue(notifications().isEmpty())
         StorePush.enable(c, true)
-        shell("appops set ${c.packageName} POST_NOTIFICATION ignore")
-        try {
-            await { !StorePush.allowed(c) }
+        if (permissionDenied) {
             assertFalse(StorePush.allowed(c))
             StorePush.deliver(c, payload())
             assertTrue(notifications().isEmpty())
-        } finally { shell("appops set ${c.packageName} POST_NOTIFICATION allow") }
+        } else {
+            assertTrue(StorePush.allowed(c))
+        }
     }
     @Test fun rejectsUnsignedBinderCaller() {
         try {
