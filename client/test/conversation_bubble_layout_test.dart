@@ -25,7 +25,16 @@ void main() {
           'members': <Json>[],
         },
       ]
-      ..selected = 'chat';
+      ..selected = 'chat'
+      ..events = [
+        {
+          'event_id': r'$latest',
+          'type': 'm.room.message',
+          'sender': '@bob:home',
+          'origin_server_ts': 1,
+          'content': {'body': 'See you soon'},
+        },
+      ];
     await tester.pumpWidget(RiverApp(api: app, boot: false));
     await tester.pumpAndSettle();
     final composer = find.byType(RichComposer);

@@ -67,7 +67,7 @@ class ConversationBubblesTest {
         val id = ConversationBubbles.id(subject, room)
         assertEquals(id, notification.shortcutId)
         assertNotNull(notification.bubbleMetadata)
-        if (Build.VERSION.SDK_INT >= 31) assertFalse(notification.bubbleMetadata!!.intent.isImmutable)
+        if (Build.VERSION.SDK_INT >= 31) assertFalse(notification.bubbleMetadata!!.intent!!.isImmutable)
         assertEquals(Notification.MessagingStyle::class.java.name, notification.extras.getString("android.template"))
         val shortcut = c.getSystemService(ShortcutManager::class.java).dynamicShortcuts.single { it.id == id }
         assertTrue(shortcut.isDynamic)
