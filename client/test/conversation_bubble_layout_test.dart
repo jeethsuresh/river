@@ -26,7 +26,86 @@ class StartingBubbleApi extends RiverApi {
   Future<void> openStoreNotification(Json notification) async => opens++;
 }
 
+class BubbleNavigationApi extends RiverApi {
+  BubbleNavigationApi()
+    : super(
+        live: false,
+        matrixEnabled: false,
+        matrixStorage: MemoryMatrixStorage(),
+      );
+  @override
+  Future<void> refresh() async {}
+  @override
+  Future<void> resumeAuthentication() async {}
+  @override
+  Future<void> open(String? id) async {
+    selected = id;
+    notifyListeners();
+  }
+}
+
 void main() {
+  testWidgets(
+    'switching to a bubble reveals its chat above an existing route',
+    (tester) async {
+      debugDefaultTargetPlatformOverride = TargetPlatform.android;
+      final messenger =
+          TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+      messenger.setMockMethodCallHandler(
+        StoreNotifications.channel,
+        (_) async => {'subject': 'alice', 'room_id': '!chat:home'},
+      );
+      final app = BubbleNavigationApi()
+        ..loading = false
+        ..user = {
+          'issuer': 'https://gravitas.cool',
+          'sub': 'alice',
+          'user_id': '@alice:home',
+        }
+        ..groups = [
+          {
+            'id': 'chat',
+            'room_id': '!chat:home',
+            'name': 'Weekend plans',
+            'kind': 'dm',
+            'membership': 'join',
+            'members': <Json>[],
+          },
+        ];
+      try {
+        await tester.pumpWidget(RiverApp(api: app, boot: false));
+        await tester.pumpAndSettle();
+        unawaited(
+          tester
+              .state<NavigatorState>(find.byType(Navigator).first)
+              .push<void>(
+                MaterialPageRoute<void>(
+                  builder: (_) => const Scaffold(body: Text('Another thread')),
+                ),
+              ),
+        );
+        await tester.pumpAndSettle();
+        expect(find.text('Another thread'), findsOneWidget);
+        final delivered = Completer<void>();
+        messenger.handlePlatformMessage(
+          StoreNotifications.channel.name,
+          const StandardMethodCodec().encodeMethodCall(
+            const MethodCall('opened', {}),
+          ),
+          (_) => delivered.complete(),
+        );
+        await tester.pumpAndSettle();
+        await delivered.future;
+        expect(find.text('Another thread'), findsNothing);
+        expect(app.selected, 'chat');
+        expect(find.byType(RichComposer), findsOneWidget);
+        await tester.pumpWidget(const SizedBox());
+      } finally {
+        debugDefaultTargetPlatformOverride = null;
+        messenger.setMockMethodCallHandler(StoreNotifications.channel, null);
+      }
+    },
+  );
   testWidgets('an early bubble open waits for account restoration', (
     tester,
   ) async {
