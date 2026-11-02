@@ -41,6 +41,7 @@ class RiverApp extends StatefulWidget {
 class _RiverAppState extends State<RiverApp> with WidgetsBindingObserver {
   late final app = widget.api ?? RiverApi();
   Future<void> _startup = Future.value();
+  int _notificationRequest = 0;
   var _navigator = GlobalKey<NavigatorState>();
   String? _navigationAccount;
   @override
@@ -50,14 +51,7 @@ class _RiverAppState extends State<RiverApp> with WidgetsBindingObserver {
     if (StoreNotifications.supported) {
       StoreNotifications.channel.setMethodCallHandler((call) async {
         if (call.method == 'opened' && call.arguments is Map) {
-          final notification = await StoreNotifications.call('takeOpen');
-          // A bubble can take the shared engine while its first host is still
-          // restoring the authenticated account and encrypted local device.
-          await _startup;
-          await app.resumeAuthentication();
-          if (notification.isNotEmpty) {
-            await _openNotificationConversation(notification);
-          }
+          await openNotification(resumeAuthentication: true);
         }
       });
     }
@@ -67,11 +61,16 @@ class _RiverAppState extends State<RiverApp> with WidgetsBindingObserver {
     }
   }
 
-  Future<void> openNotification() async {
+  Future<void> openNotification({bool resumeAuthentication = false}) async {
+    // A bubble can take the shared engine during its first account restoration.
+    await _startup;
+    if (!mounted) return;
     final notification = await StoreNotifications.call('takeOpen');
-    if (notification.isNotEmpty) {
-      await _openNotificationConversation(notification);
-    }
+    if (notification.isEmpty || !mounted) return;
+    final request = ++_notificationRequest;
+    if (resumeAuthentication) await app.resumeAuthentication();
+    if (!mounted || request != _notificationRequest) return;
+    await _openNotificationConversation(notification);
   }
 
   Future<void> _openNotificationConversation(Json notification) async {
@@ -93,7 +92,8 @@ class _RiverAppState extends State<RiverApp> with WidgetsBindingObserver {
     app.active = state == AppLifecycleState.resumed;
     if (app.active) {
       unawaited(
-        app.resumeAuthentication().then((_) async {
+        _startup.then((_) async {
+          await app.resumeAuthentication();
           await app.refreshStoreNotifications();
           await openNotification();
         }),
