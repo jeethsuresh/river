@@ -507,6 +507,15 @@ class AccountPanel extends StatelessWidget {
             },
           ),
         ),
+      if (app.storeNotificationsSupported && app.storeBubblesSupported)
+        ListTile(
+          leading: const Icon(Icons.bubble_chart_outlined),
+          title: const Text('Conversation bubbles'),
+          subtitle: const Text(
+            'Choose which conversations can float over other apps in Android settings.',
+          ),
+          onTap: app.openStoreBubbleSettings,
+        ),
       ListTile(
         leading: const Icon(Icons.person_outline),
         title: Text(app.user?['username'] as String? ?? ''),

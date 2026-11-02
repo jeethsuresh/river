@@ -1,10 +1,11 @@
 {
   "schemaVersion": 1,
-  "version": "0.12.6",
-  "versionCode": 28,
+  "version": "0.12.7",
+  "versionCode": 29,
   "changes": [
-    "Receive message and invitation notifications through Private Store while River is closed.",
-    "Choose Message notifications in Settings and enable App notifications in Private Store using the same Gravitas account.",
-    "Open the conversation by tapping an alert; message contents stay private."
+    "Open conversations in floating Android bubbles from message notifications on Android 11 or later.",
+    "Choose which conversations can bubble in Android settings from River Settings.",
+    "Keep bubbles open after reading messages and switch between bubbles using the same encrypted messaging session.",
+    "Bubble alerts keep message contents and conversation names private until River opens."
   ]
 }

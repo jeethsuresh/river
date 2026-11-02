@@ -2,13 +2,33 @@ package cool.gravitas.river
 
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
+import io.flutter.embedding.engine.FlutterEngineCache
+import io.flutter.embedding.engine.dart.DartExecutor
 import io.flutter.plugin.common.MethodChannel
+import android.content.Context
 import android.content.Intent
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
 
-class MainActivity : FlutterActivity() {
+open class MainActivity : FlutterActivity() {
+    private var engineEvicted = false
+    override fun provideFlutterEngine(context: Context): FlutterEngine {
+        val cache = FlutterEngineCache.getInstance()
+        return cache.get("river") ?: FlutterEngine(context.applicationContext).also { engine ->
+            // Create lazily: receiving a background Store alert must not start Dart.
+            cache.put("river", engine)
+            engine.dartExecutor.executeDartEntrypoint(DartExecutor.DartEntrypoint.createDefault())
+        }
+    }
+    override fun shouldDestroyEngineWithHost() = false
+    override fun shouldRestoreAndSaveState() = false
+    override fun detachFromFlutterEngine() {
+        engineEvicted = true
+        super.detachFromFlutterEngine()
+        // Keep the Android task: finishing it would remove its bubble. Rebuild
+        // the detached Flutter view only when this document is shown again.
+    }
     private var notifications: MethodChannel? = null
     private var permissionReply: MethodChannel.Result? = null
     private fun notificationOpen(consume: Boolean = true): Map<String, String>? {
@@ -22,6 +42,19 @@ class MainActivity : FlutterActivity() {
         super.onNewIntent(intent)
         setIntent(intent)
         if (notifications != null) notificationOpen(false)?.let { notifications?.invokeMethod("opened", it) }
+    }
+    override fun onResume() {
+        super.onResume()
+        if (engineEvicted) { engineEvicted = false; recreate(); return }
+        // A cached engine already completed boot. Re-expanding a bubble must
+        // route again even if another conversation used the engine meanwhile.
+        if (this is BubbleActivity && intent.hasExtra("room_id")) intent.action = StorePush.OPEN
+        notificationOpen(false)?.let { notifications?.invokeMethod("opened", it) }
+    }
+    override fun onWindowFocusChanged(hasFocus: Boolean) {
+        super.onWindowFocusChanged(hasFocus)
+        // Android can keep two windows resumed in multi-window mode.
+        if (hasFocus && engineEvicted) { engineEvicted = false; recreate() }
     }
     override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
@@ -47,6 +80,11 @@ class MainActivity : FlutterActivity() {
                         "read" -> { call.argument<String>("room_id")?.let { StorePush.read(this, it) }; result.success(null) }
                         "takeOpen" -> result.success(notificationOpen())
                         "status" -> result.success(StorePush.status(this))
+                        "bubbleSettings" -> {
+                            if (Build.VERSION.SDK_INT >= 30) startActivity(Intent(android.provider.Settings.ACTION_APP_NOTIFICATION_BUBBLE_SETTINGS)
+                                .putExtra(android.provider.Settings.EXTRA_APP_PACKAGE, packageName))
+                            result.success(null)
+                        }
                         "enable" -> {
                             val enabled = call.argument<Boolean>("enabled") == true
                             if (enabled && Build.VERSION.SDK_INT >= 33 && checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) != android.content.pm.PackageManager.PERMISSION_GRANTED) {

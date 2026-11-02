@@ -60,6 +60,7 @@ internal object StorePush {
     }
     @Synchronized fun clear(c: Context) {
         c.getSystemService(NotificationManager::class.java).activeNotifications.filter { it.tag?.startsWith("river:") == true }.forEach { c.getSystemService(NotificationManager::class.java).cancel(it.tag, it.id) }
+        ConversationBubbles.clear(c)
         // Preserve only this device's explicit per-account opt-in.
         val editor = prefs(c).edit()
         prefs(c).all.keys.filter { !it.startsWith("enabled:") }.forEach { editor.remove(it) }
@@ -70,7 +71,7 @@ internal object StorePush {
         return (Build.VERSION.SDK_INT < 33 || c.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED) &&
             manager.areNotificationsEnabled() && (Build.VERSION.SDK_INT < 26 || manager.getNotificationChannel(CHANNEL)?.importance != NotificationManager.IMPORTANCE_NONE)
     }
-    fun status(c: Context): Map<String, Any> = mapOf("enabled" to (prefs(c).getBoolean("enabled:${prefs(c).getString("subject", "")}", false) && allowed(c)), "storeInstalled" to trusted(c))
+    fun status(c: Context): Map<String, Any> = mapOf("enabled" to (prefs(c).getBoolean("enabled:${prefs(c).getString("subject", "")}", false) && allowed(c)), "storeInstalled" to trusted(c), "bubblesSupported" to (Build.VERSION.SDK_INT >= 30))
     @Synchronized fun enable(c: Context, value: Boolean) {
         val subject = prefs(c).getString("subject", null) ?: return
         check(prefs(c).edit().putBoolean("enabled:$subject", value).commit())
@@ -87,7 +88,13 @@ internal object StorePush {
         } catch (_: Exception) { /* Optional distributor; chat remains available. */ }
     }
     fun read(c: Context, room: String) {
-        c.getSystemService(NotificationManager::class.java).cancel("river:room:" + digest(room.toByteArray()), 1)
+        val manager = c.getSystemService(NotificationManager::class.java)
+        val tag = "river:room:" + digest(room.toByteArray())
+        val notification = manager.activeNotifications.firstOrNull { it.tag == tag && it.id == 1 }
+        // Cancelling a bubbled notification closes the chat window itself.
+        if (Build.VERSION.SDK_INT >= 30 && notification != null &&
+            notification.notification.flags and Notification.FLAG_BUBBLE != 0) return
+        manager.cancel(tag, 1)
     }
     @Synchronized fun deliver(c: Context, raw: String) {
         require(raw.toByteArray().size <= 8192)
@@ -108,9 +115,11 @@ internal object StorePush {
             .putExtra("subject", subject).putExtra("room_id", room).addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP)
         val open = PendingIntent.getActivity(c, 0, intent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
         val builder = if (Build.VERSION.SDK_INT >= 26) Notification.Builder(c, CHANNEL) else Notification.Builder(c)
-        manager.notify("river:$key", 1, builder.setSmallIcon(R.drawable.ic_notification).setContentTitle("River")
+        builder.setSmallIcon(R.drawable.ic_notification).setContentTitle("River")
             .setContentText("New conversation activity").setContentIntent(open).setAutoCancel(true).setOnlyAlertOnce(false)
-            .setCategory(Notification.CATEGORY_MESSAGE).setVisibility(Notification.VISIBILITY_PRIVATE).build())
+            .setCategory(Notification.CATEGORY_MESSAGE).setVisibility(Notification.VISIBILITY_PRIVATE)
+        ConversationBubbles.decorate(c, builder, subject, room)
+        manager.notify("river:$key", 1, builder.build())
         val editor = p.edit().putLong(key, sequence)
         if (p.all.size >= 1024) p.all.keys.filter { it.startsWith("room:") && it != key }.take(128).forEach { editor.remove(it) }
         check(editor.commit())

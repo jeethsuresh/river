@@ -10,6 +10,14 @@ Native payload fields are `kind: "matrix.event"`, `issuer`, `subject`, `room_id`
 
 The receiver uses `android.app.Application` and does not start Flutter, sync or a second network connection to display an alert. Private Store's shared foreground listener handles background networking. These notifications currently support Android; the Store protocol does not provide desktop or browser push delivery.
 
+## Conversation bubbles
+
+On Android 11 or later, message notifications offer Android's bubble control. Enable message notifications first, then choose **Settings → Conversation bubbles** in River to select Android's app-wide bubble preference, or use the bubble button on a conversation notification. Android and the user's per-conversation choice decide whether an alert floats; River does not auto-expand bubbles. Earlier Android versions retain ordinary notifications.
+
+Each alert publishes an account-specific, long-lived conversation shortcut with `Person` and `MessagingStyle` metadata. The label and message remain generic because Store delivers identifiers only. Names, history and decrypted content become available through River's existing authenticated conversation view when the bubble opens. Opening uses the same account and membership validation as a normal notification tap.
+
+Resizable bubble documents and the fullscreen window reuse one lazily created Flutter engine and Matrix device. When a new document takes the engine, the previous document keeps its Android task and recreates its detached Flutter view when shown again; the running app state and drafts remain in Dart. Read receipts dismiss ordinary alerts while preserving active bubbles. Signing out removes bubbles and conversation shortcuts. The Android emulator checks metadata, distinct conversation identities, read behavior, and switching real Flutter hosts alongside the notification tests.
+
 ## Hosted configuration
 
 Configure one distinct random credential of at least 32 characters in:

@@ -282,6 +282,11 @@ class RiverApi extends ChangeNotifier {
 
   bool get storeNotificationsSupported => StoreNotifications.supported;
   bool storeNotificationsEnabled = false, notificationStoreInstalled = false;
+  bool storeBubblesSupported = false;
+  Future<void> openStoreBubbleSettings() async {
+    await StoreNotifications.call('bubbleSettings');
+  }
+
   Future<void> refreshStoreNotifications() async {
     if (user == null) return;
     final account = accountKey;
@@ -289,6 +294,7 @@ class RiverApi extends ChangeNotifier {
     if (account != accountKey) return;
     storeNotificationsEnabled = result['enabled'] == true;
     notificationStoreInstalled = result['storeInstalled'] == true;
+    storeBubblesSupported = result['bubblesSupported'] == true;
     notifyListeners();
   }
 
@@ -300,9 +306,11 @@ class RiverApi extends ChangeNotifier {
     if (account != accountKey) return;
     storeNotificationsEnabled = result['enabled'] == true;
     notificationStoreInstalled = result['storeInstalled'] == true;
+    storeBubblesSupported = result['bubblesSupported'] == true;
     notifyListeners();
   }
 
+  int _notificationOpenRevision = 0;
   Future<void> openStoreNotification(Json notification) async {
     final account = accountKey;
     if (notification['subject'] != user?['sub'] ||
@@ -310,6 +318,7 @@ class RiverApi extends ChangeNotifier {
         notification['room_id'] is! String) {
       return;
     }
+    final revision = ++_notificationOpenRevision;
     for (
       var i = 0;
       i < 100 && matrix.connecting && account == accountKey;
@@ -317,10 +326,11 @@ class RiverApi extends ChangeNotifier {
     ) {
       await Future<void>.delayed(const Duration(milliseconds: 100));
     }
-    if (account != accountKey) return;
+    if (account != accountKey || revision != _notificationOpenRevision) return;
     if (matrixConnected) await matrix.syncNow();
+    if (account != accountKey || revision != _notificationOpenRevision) return;
     await refresh();
-    if (account != accountKey) return;
+    if (account != accountKey || revision != _notificationOpenRevision) return;
     final target = groups
         .where(
           (g) =>
