@@ -40,6 +40,10 @@ class RiverApp extends StatefulWidget {
 
 class _RiverAppState extends State<RiverApp> with WidgetsBindingObserver {
   late final app = widget.api ?? RiverApi();
+  Future<void> _startup = Future.value();
+  int _notificationRequest = 0;
+  var _navigator = GlobalKey<NavigatorState>();
+  String? _navigationAccount;
   @override
   void initState() {
     super.initState();
@@ -47,20 +51,40 @@ class _RiverAppState extends State<RiverApp> with WidgetsBindingObserver {
     if (StoreNotifications.supported) {
       StoreNotifications.channel.setMethodCallHandler((call) async {
         if (call.method == 'opened' && call.arguments is Map) {
-          final notification = await StoreNotifications.call('takeOpen');
-          await app.resumeAuthentication();
-          if (notification.isNotEmpty) {
-            await app.openStoreNotification(notification);
-          }
+          await openNotification(resumeAuthentication: true);
         }
       });
     }
-    if (widget.boot) unawaited(app.boot().then((_) => openNotification()));
+    if (widget.boot) {
+      _startup = app.boot();
+      unawaited(_startup.then((_) => openNotification()));
+    }
   }
 
-  Future<void> openNotification() async {
+  Future<void> openNotification({bool resumeAuthentication = false}) async {
+    // A bubble can take the shared engine during its first account restoration.
+    await _startup;
+    if (!mounted) return;
     final notification = await StoreNotifications.call('takeOpen');
-    if (notification.isNotEmpty) await app.openStoreNotification(notification);
+    if (notification.isEmpty || !mounted) return;
+    final request = ++_notificationRequest;
+    if (resumeAuthentication) await app.resumeAuthentication();
+    if (!mounted || request != _notificationRequest) return;
+    await _openNotificationConversation(notification);
+  }
+
+  Future<void> _openNotificationConversation(Json notification) async {
+    final account = app.accountKey;
+    await app.openStoreNotification(notification);
+    if (mounted &&
+        account == app.accountKey &&
+        app.user?['issuer'] == 'https://gravitas.cool' &&
+        notification['subject'] == app.user?['sub'] &&
+        app.selected != null &&
+        app.matrixRoom(app.selected!) == notification['room_id']) {
+      // A shared engine can still have a thread or dialog over its chat shell.
+      _navigator.currentState?.popUntil((route) => route.isFirst);
+    }
   }
 
   @override
@@ -68,7 +92,8 @@ class _RiverAppState extends State<RiverApp> with WidgetsBindingObserver {
     app.active = state == AppLifecycleState.resumed;
     if (app.active) {
       unawaited(
-        app.resumeAuthentication().then((_) async {
+        _startup.then((_) async {
+          await app.resumeAuthentication();
           await app.refreshStoreNotifications();
           await openNotification();
         }),
@@ -89,23 +114,31 @@ class _RiverAppState extends State<RiverApp> with WidgetsBindingObserver {
   @override
   Widget build(BuildContext context) => AnimatedBuilder(
     animation: app,
-    builder: (_, _) => MaterialApp(
-      key: ValueKey(app.accountKey),
-      title: 'River',
-      builder: (context, child) => LinkedImageScope(
-        cache: app.linkedImages,
-        networkAvailable: !app.networkUnavailable,
-        child: child!,
-      ),
-      localizationsDelegates: FlutterQuillLocalizations.localizationsDelegates,
-      debugShowCheckedModeBanner: false,
-      theme: riverTheme(),
-      home: app.loading
-          ? const Scaffold(body: Center(child: CircularProgressIndicator()))
-          : app.requiresMatrixSetup
-          ? MatrixSetup(app: app)
-          : deepLink() ?? RiverShell(key: ValueKey(app.accountKey), app: app),
-    ),
+    builder: (_, _) {
+      if (_navigationAccount != app.accountKey) {
+        _navigationAccount = app.accountKey;
+        _navigator = GlobalKey<NavigatorState>();
+      }
+      return MaterialApp(
+        key: ValueKey(app.accountKey),
+        navigatorKey: _navigator,
+        title: 'River',
+        builder: (context, child) => LinkedImageScope(
+          cache: app.linkedImages,
+          networkAvailable: !app.networkUnavailable,
+          child: child!,
+        ),
+        localizationsDelegates:
+            FlutterQuillLocalizations.localizationsDelegates,
+        debugShowCheckedModeBanner: false,
+        theme: riverTheme(),
+        home: app.loading
+            ? const Scaffold(body: Center(child: CircularProgressIndicator()))
+            : app.requiresMatrixSetup
+            ? MatrixSetup(app: app)
+            : deepLink() ?? RiverShell(key: ValueKey(app.accountKey), app: app),
+      );
+    },
   );
   Widget? deepLink() {
     final parts = Uri.base.pathSegments;

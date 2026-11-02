@@ -58,7 +58,9 @@ class StoreNotificationDeliveryTest {
         StorePush.deliver(c, payload())
         await { notifications().size == 1 }
         val first = notifications().single()
-        assertEquals("River", first.notification.extras.getString("android.title"))
+        // MessagingStyle derives its title from the generic conversation Person.
+        assertEquals(if (Build.VERSION.SDK_INT >= 30) "Conversation" else "River",
+            first.notification.extras.getCharSequence("android.title").toString())
         assertEquals("New conversation activity", first.notification.extras.getString("android.text"))
         assertEquals(c.packageName, first.notification.contentIntent.creatorPackage)
         if (Build.VERSION.SDK_INT >= 31) assertTrue(first.notification.contentIntent.isImmutable)

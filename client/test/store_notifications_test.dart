@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'package:crypto/crypto.dart';
 import 'package:flutter/foundation.dart';
@@ -10,8 +11,48 @@ import 'package:river/store_notifications.dart';
 import 'matrix_api_test.dart' show RoomTransport;
 import 'matrix_messaging_test.dart' show MemoryMatrixStorage;
 
+class SwitchingNotificationsApi extends RiverApi {
+  SwitchingNotificationsApi() : super(live: false, matrixEnabled: false);
+  final firstRefresh = Completer<void>();
+  int refreshes = 0;
+  @override
+  Future<void> refresh() async {
+    if (++refreshes == 1) await firstRefresh.future;
+  }
+
+  @override
+  Future<void> open(String? id) async => selected = id;
+}
+
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
+  test(
+    'switching bubbles ignores a delayed earlier conversation open',
+    () async {
+      final api = SwitchingNotificationsApi()
+        ..user = {'issuer': 'https://gravitas.cool', 'sub': 'alice'}
+        ..groups = [
+          for (final id in ['first', 'second'])
+            {'id': id, 'room_id': '!$id:remote', 'membership': 'join'},
+        ];
+      try {
+        final first = api.openStoreNotification({
+          'subject': 'alice',
+          'room_id': '!first:remote',
+        });
+        await api.openStoreNotification({
+          'subject': 'alice',
+          'room_id': '!second:remote',
+        });
+        expect(api.selected, 'second');
+        api.firstRefresh.complete();
+        await first;
+        expect(api.selected, 'second');
+      } finally {
+        api.dispose();
+      }
+    },
+  );
   test(
     'Android binds notifications to the validated account and clears before logout',
     () async {
@@ -22,7 +63,11 @@ void main() {
             calls.add(call);
             return call.method == 'clear'
                 ? null
-                : {'enabled': true, 'storeInstalled': true};
+                : {
+                    'enabled': true,
+                    'storeInstalled': true,
+                    'bubblesSupported': true,
+                  };
           });
       final api = RiverApi(live: false, matrixEnabled: false);
       try {
@@ -34,8 +79,11 @@ void main() {
           'subject': 'alice',
         });
         expect(api.storeNotificationsEnabled, isTrue);
+        expect(api.storeBubblesSupported, isTrue);
         await api.enableStoreNotifications(false);
         expect(calls.last.arguments, {'enabled': false});
+        await api.openStoreBubbleSettings();
+        expect(calls.last.method, 'bubbleSettings');
         // Intercept secure storage so this test has no platform credential store.
         const storage = MethodChannel(
           'plugins.it_nomads.com/flutter_secure_storage',

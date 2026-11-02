@@ -102,6 +102,11 @@ with (output / 'emulator.log').open('w') as log:
                             package + '.test/androidx.test.runner.AndroidJUnitRunner', timeout=150)
             assert 'OK (4 tests)' in result and 'FAILURES' not in result, result
             print('ANDROID PUSH PASS native alerts, replay, session binding, unsigned IPC', flush=True)
+            bubbles = device('shell', 'am', 'instrument', '-w', '-r', '-e', 'class',
+                             'cool.gravitas.river.ConversationBubblesTest',
+                             package + '.test/androidx.test.runner.AndroidJUnitRunner', timeout=180)
+            assert 'OK (3 tests)' in bubbles and 'FAILURES' not in bubbles, bubbles
+            print('ANDROID BUBBLES PASS shortcuts, read preservation, shared Flutter engine', flush=True)
             device('shell', 'am', 'force-stop', package)
             device('shell', 'pm', 'clear', package)
         from android_matrix_fixture import Fixture, FIXTURE
