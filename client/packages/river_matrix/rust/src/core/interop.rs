@@ -180,17 +180,32 @@ async fn automatic_room_replacements(first: &MatrixCore) -> Result<()> {
                 )
                 .await?,
         )?;
-        step(&[first, &peer]).await?;
-        let after: Value =
-            serde_json::from_str(&first.history(target.room_id().to_string(), None).await?)?;
-        assert!(
-            after["events"]
-                .as_array()
-                .unwrap()
-                .iter()
-                .any(|e| e["event_id"] == delivered["event_id"]
-                    && e["content"]["body"] == "River sends through the replacement")
-        );
+        if encrypted {
+            let members = target
+                .members_no_sync(matrix_sdk::RoomMemberships::JOIN)
+                .await?;
+            assert_eq!(
+                members.len(),
+                2,
+                "Encryption must load both replacement members"
+            );
+        }
+        let mut received = false;
+
+        for _ in 0..16 {
+            step(&[first, &peer]).await?;
+            let after: Value =
+                serde_json::from_str(&first.history(target.room_id().to_string(), None).await?)?;
+            if after["events"].as_array().unwrap().iter().any(|e| {
+                e["event_id"] == delivered["event_id"]
+                    && e["content"]["body"] == "River sends through the replacement"
+            }) {
+                received = true;
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(250)).await;
+        }
+        assert!(received, "Replacement delivery encrypted={encrypted}");
         assert!(
             first
                 .send(

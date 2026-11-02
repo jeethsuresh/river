@@ -504,10 +504,13 @@ impl MatrixCore {
                             let target = replacements.get(&id).unwrap_or(&id);
                             if let Some(room) = self.client.get_room(target) {
                                 pending |= room.is_tombstoned();
-                                let joined =
-                                    room.get_member_no_sync(&self.own_user).await?.is_none_or(
-                                        |member| member.membership() == &MembershipState::Join,
-                                    );
+                                let joined = room
+                                    .get_member_no_sync(&self.own_user)
+                                    .await
+                                    .map_err(sdk_error)?
+                                    .is_none_or(|member| {
+                                        member.membership() == &MembershipState::Join
+                                    });
                                 if room.state() == RoomState::Joined
                                     && !room.is_tombstoned()
                                     && joined
