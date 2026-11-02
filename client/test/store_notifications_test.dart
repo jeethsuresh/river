@@ -63,7 +63,11 @@ void main() {
             calls.add(call);
             return call.method == 'clear'
                 ? null
-                : {'enabled': true, 'storeInstalled': true};
+                : {
+                    'enabled': true,
+                    'storeInstalled': true,
+                    'bubblesSupported': true,
+                  };
           });
       final api = RiverApi(live: false, matrixEnabled: false);
       try {
@@ -75,8 +79,11 @@ void main() {
           'subject': 'alice',
         });
         expect(api.storeNotificationsEnabled, isTrue);
+        expect(api.storeBubblesSupported, isTrue);
         await api.enableStoreNotifications(false);
         expect(calls.last.arguments, {'enabled': false});
+        await api.openStoreBubbleSettings();
+        expect(calls.last.method, 'bubbleSettings');
         // Intercept secure storage so this test has no platform credential store.
         const storage = MethodChannel(
           'plugins.it_nomads.com/flutter_secure_storage',
