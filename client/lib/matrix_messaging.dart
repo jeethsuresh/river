@@ -632,6 +632,19 @@ class MatrixMessaging extends ChangeNotifier {
     }
   }
 
+  Future<void> ensureWritableRoom(String room) async {
+    await ensureJoinedRoom(room);
+    if (roomList.any(
+      (r) =>
+          r['room_id'] == room &&
+          (r['upgrade_pending'] == true || r['replacement_room'] is String),
+    )) {
+      throw StateError(
+        'This conversation is moving to a compatible room. Try again in a moment.',
+      );
+    }
+  }
+
   // Foreground mutations share the current long poll instead of queuing a
   // second full poll behind it. There is one credential write per result.
   Future<MatrixJson> _syncOnce(int generation) {

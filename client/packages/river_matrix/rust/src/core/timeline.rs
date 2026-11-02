@@ -41,7 +41,7 @@ impl MatrixCore {
 
     pub(crate) async fn reaction(&self, data: &Value) -> Result<()> {
         let room_id = data["room"].as_str().context("Missing room")?;
-        let room = self.room(room_id)?;
+        let room = self.writable_room(room_id)?;
         let event = EventId::parse(data["event"].as_str().context("Missing event")?)?;
         let key = data["key"].as_str().context("Missing reaction")?;
         ensure!(!key.is_empty() && key.len() <= 2056, "Invalid reaction");

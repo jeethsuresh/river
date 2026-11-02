@@ -20,7 +20,7 @@ impl MatrixCore {
             bytes.len() <= 32 * 1024 * 1024,
             "Attachments must be at most 32 MiB"
         );
-        let room = self.room(&room)?;
+        let room = self.writable_room(&room)?;
         room.request_encryption_state().await.map_err(sdk_error)?;
         let mime: mime::Mime = content_type.parse()?;
         let config = AttachmentConfig::new().txn_id(transaction.into());

@@ -81,6 +81,291 @@ fn image(code: &Value) -> Result<Vec<u8>> {
     Ok(png.into_inner())
 }
 
+async fn automatic_room_replacements(first: &MatrixCore) -> Result<()> {
+    use matrix_sdk::ruma::{
+        RoomVersionId, api::client::room::upgrade_room,
+        events::room::tombstone::RoomTombstoneEventContent,
+    };
+    let peer = device_as(
+        &format!("RIVER-UPGRADE-{}", uuid::Uuid::new_v4()),
+        "deactlater",
+    )
+    .await?;
+    step(&[first, &peer]).await?;
+    for encrypted in [false, true] {
+        let mut create = create_room::v3::Request::new();
+        create.room_version = Some(RoomVersionId::V11);
+        create.invite = vec![peer.own_user.clone()];
+        if encrypted {
+            create.initial_state = vec![serde_json::from_value(
+                json!({"type":"m.room.encryption","state_key":"","content":{"algorithm":"m.megolm.v1.aes-sha2"}}),
+            )?];
+        }
+        let old = first.client.create_room(create).await?;
+        step(&[first, &peer]).await?;
+        peer.client.join_room_by_id(old.room_id()).await?;
+        for (core, target) in [(first, &peer.own_user), (&peer, &first.own_user)] {
+            core.client
+                .account()
+                .mark_as_dm(old.room_id(), &[target.clone()])
+                .await?;
+        }
+        step(&[first, &peer]).await?;
+        let sent: Value = serde_json::from_str(
+            &first
+                .send(
+                    old.room_id().to_string(),
+                    "m.room.message".into(),
+                    json!({"msgtype":"m.text","body":"history survives the version upgrade"})
+                        .to_string(),
+                    uuid::Uuid::new_v4().to_string(),
+                )
+                .await?,
+        )?;
+        step(&[first, &peer]).await?;
+        let response = first
+            .client
+            .send(upgrade_room::v3::Request::new(
+                old.room_id().to_owned(),
+                RoomVersionId::V12,
+            ))
+            .await?;
+        for _ in 0..8 {
+            step(&[first, &peer]).await?;
+            if peer
+                .client
+                .get_room(&response.replacement_room)
+                .is_some_and(|r| r.state() == matrix_sdk::RoomState::Joined)
+            {
+                break;
+            }
+        }
+        let target = peer
+            .client
+            .get_room(&response.replacement_room)
+            .context("Replacement missing")?;
+        assert_eq!(
+            target.state(),
+            matrix_sdk::RoomState::Joined,
+            "River must accept a mutually linked replacement"
+        );
+        target.request_encryption_state().await?;
+        assert_eq!(target.encryption_state().is_encrypted(), encrypted);
+        let snapshot: Value = serde_json::from_str(&peer.rooms().await?)?;
+        let historical = snapshot["rooms"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|r| r["room_id"] == old.room_id().as_str())
+            .context("Historical room missing")?;
+        assert_eq!(
+            historical["replacement_room"],
+            response.replacement_room.as_str()
+        );
+        let opened: Value = serde_json::from_str(
+            &peer
+                .action(json!({"action":"direct","user":first.own_user}).to_string())
+                .await
+                .with_context(|| format!("Open replacement direct (encrypted={encrypted})"))?,
+        )?;
+        assert_eq!(opened["room_id"], response.replacement_room.as_str());
+        let delivered: Value = serde_json::from_str(
+            &peer
+                .send(
+                    target.room_id().to_string(),
+                    "m.room.message".into(),
+                    json!({"msgtype":"m.text","body":"River sends through the replacement"})
+                        .to_string(),
+                    uuid::Uuid::new_v4().to_string(),
+                )
+                .await?,
+        )?;
+        if encrypted {
+            let members = target
+                .members_no_sync(matrix_sdk::RoomMemberships::JOIN)
+                .await?;
+            assert_eq!(
+                members.len(),
+                2,
+                "Encryption must load both replacement members"
+            );
+        }
+        let mut received = false;
+
+        for _ in 0..16 {
+            step(&[first, &peer]).await?;
+            let after: Value =
+                serde_json::from_str(&first.history(target.room_id().to_string(), None).await?)?;
+            if after["events"].as_array().unwrap().iter().any(|e| {
+                e["event_id"] == delivered["event_id"]
+                    && e["content"]["body"] == "River sends through the replacement"
+            }) {
+                received = true;
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(250)).await;
+        }
+        assert!(received, "Replacement delivery encrypted={encrypted}");
+        assert!(
+            first
+                .send(
+                    old.room_id().to_string(),
+                    "m.room.message".into(),
+                    json!({"body":"must not go to old room"}).to_string(),
+                    uuid::Uuid::new_v4().to_string()
+                )
+                .await
+                .is_err()
+        );
+        let history: Value =
+            serde_json::from_str(&peer.history(old.room_id().to_string(), None).await?)?;
+        assert!(
+            history["events"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|e| e["event_id"] == sent["event_id"]
+                    && e["content"]["body"] == "history survives the version upgrade")
+        );
+        target.leave().await?;
+        step(&[first, &peer]).await?;
+        peer.rooms().await?;
+        assert_eq!(
+            target.state(),
+            matrix_sdk::RoomState::Left,
+            "A declined replacement must not be rejoined"
+        );
+    }
+    for downgrade in [false, true] {
+        let mut create = create_room::v3::Request::new();
+        create.room_version = Some(RoomVersionId::V11);
+        create.invite = vec![peer.own_user.clone()];
+        if downgrade {
+            create.initial_state = vec![serde_json::from_value(
+                json!({"type":"m.room.encryption","state_key":"","content":{"algorithm":"m.megolm.v1.aes-sha2"}}),
+            )?];
+        }
+        let old = first.client.create_room(create).await?;
+        step(&[first, &peer]).await?;
+        peer.client.join_room_by_id(old.room_id()).await?;
+        step(&[first, &peer]).await?;
+        let mut candidate = create_room::v3::Request::new();
+        candidate.room_version = Some(RoomVersionId::V12);
+        candidate.invite = vec![peer.own_user.clone()];
+        if downgrade {
+            candidate.creation_content = Some(serde_json::from_value(
+                json!({"predecessor":{"room_id":old.room_id()}}),
+            )?);
+        }
+        let candidate = first.client.create_room(candidate).await?;
+        old.send_state_event(RoomTombstoneEventContent::new(
+            "Test replacement".into(),
+            candidate.room_id().to_owned(),
+        ))
+        .await?;
+        step(&[first, &peer]).await?;
+        assert_ne!(
+            peer.client
+                .get_room(candidate.room_id())
+                .context("Candidate invite missing")?
+                .state(),
+            matrix_sdk::RoomState::Joined,
+            "Unrelated or plaintext replacements must not remain joined"
+        );
+    }
+    peer.close(true).await?;
+    println!(
+        "RIVER MATRIX automatic replacements, encrypted history, declined invites and downgrade rejection PASS"
+    );
+    Ok(())
+}
+
+async fn restored_member_cache(first: &MatrixCore) -> Result<()> {
+    use matrix_sdk::ruma::api::client::membership::invite_user::v3::{
+        InvitationRecipient, InviteUserId, Request,
+    };
+    let peer = device_as(
+        &format!("RIVER-ROSTER-{}", uuid::Uuid::new_v4()),
+        "deactlater",
+    )
+    .await?;
+    // Discover this recipient's new device before deliberately making only
+    // the room roster stale below.
+    step(&[&peer, first]).await?;
+    let mut create = create_room::v3::Request::new();
+    create.initial_state = vec![serde_json::from_value(
+        json!({"type":"m.room.encryption","state_key":"","content":{"algorithm":"m.megolm.v1.aes-sha2"}}),
+    )?];
+    let room = first.client.create_room(create).await?;
+    step(&[first]).await?;
+    assert_eq!(
+        room.members(matrix_sdk::RoomMemberships::ACTIVE)
+            .await?
+            .len(),
+        1
+    );
+    assert!(room.are_members_synced());
+    // Another device can change membership while this device is offline. Use
+    // the raw API so this sender retains its stale, supposedly complete roster.
+    first
+        .client
+        .send(Request::new(
+            room.room_id().to_owned(),
+            InvitationRecipient::UserId(InviteUserId::new(peer.own_user.clone())),
+        ))
+        .await?;
+    step(&[&peer]).await?;
+    peer.client.join_room_by_id(room.room_id()).await?;
+    assert_eq!(
+        room.members_no_sync(matrix_sdk::RoomMemberships::JOIN)
+            .await?
+            .len(),
+        1
+    );
+    let restored = MatrixCore::from_client(
+        first.client.clone(),
+        first.own_user.clone(),
+        uuid::Uuid::new_v4().to_string(),
+    );
+    let sent: Value = serde_json::from_str(
+        &restored
+            .send(
+                room.room_id().to_string(),
+                "m.room.message".into(),
+                json!({"msgtype":"m.text","body":"restored devices reload recipients"}).to_string(),
+                uuid::Uuid::new_v4().to_string(),
+            )
+            .await?,
+    )?;
+    assert_eq!(
+        room.members_no_sync(matrix_sdk::RoomMemberships::JOIN)
+            .await?
+            .len(),
+        2
+    );
+    let mut received = false;
+    for _ in 0..16 {
+        step(&[&peer]).await?;
+        let history: Value =
+            serde_json::from_str(&peer.history(room.room_id().to_string(), None).await?)?;
+        if history["events"].as_array().unwrap().iter().any(|e| {
+            e["event_id"] == sent["event_id"]
+                && e["content"]["body"] == "restored devices reload recipients"
+        }) {
+            received = true;
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(250)).await;
+    }
+    assert!(
+        received,
+        "A restored device must refresh stale recipients before encrypting"
+    );
+    peer.close(true).await?;
+    println!("RIVER MATRIX restored stale member cache and encrypted recipient delivery PASS");
+    Ok(())
+}
+
 async fn direct_room_permissions(first: &MatrixCore) -> Result<()> {
     let peer = device_as(&format!("RIVER-DM-{}", uuid::Uuid::new_v4()), "deactlater").await?;
     step(&[first, &peer]).await?;
@@ -415,6 +700,8 @@ async fn qr_verification_recovers_historical_encrypted_messages() -> Result<()> 
         "Recovery-key device did not decrypt historical messages"
     );
     direct_room_permissions(&first).await?;
+    automatic_room_replacements(&first).await?;
+    restored_member_cache(&first).await?;
     first.close(true).await?;
     second.close(true).await?;
     third.close(true).await?;

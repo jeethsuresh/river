@@ -1,8 +1,11 @@
 {
   "schemaVersion": 1,
-  "version": "0.12.3",
-  "versionCode": 26,
+  "version": "0.12.5",
+  "versionCode": 27,
   "changes": [
-    "Use the selected River server for native sign-in and browser authorization. Private Store sign-in on Android remains limited to the trusted production River service."
+    "Keep conversations working when homeservers upgrade their supported Matrix room versions.",
+    "Follow verified replacement conversations automatically while retaining encrypted history.",
+    "Refuse unrelated replacements and encryption downgrades.",
+    "Refresh cached conversation recipients after reconnecting so encrypted messages reach every member."
   ]
 }
