@@ -96,7 +96,9 @@ jobs:
           flutter pub get --enforce-lockfile
           flutter build apk --debug --no-pub
           ./android/gradlew --no-daemon -p android testDebugUnitTest
+          ./android/gradlew --no-daemon -p android assembleDebugAndroidTest
           cp build/app/outputs/flutter-apk/app-debug.apk "$RUNNER_TEMP/river-auth-return.apk"
+          cp build/app/outputs/apk/androidTest/debug/app-debug-androidTest.apk "$RUNNER_TEMP/river-push-tests.apk"
           flutter build apk --debug --no-pub --target tool/matrix_android_auth_smoke.dart
           cp build/app/outputs/flutter-apk/app-debug.apk "$RUNNER_TEMP/river-matrix-auth.apk"
       - name: Verify Android auth returns and Matrix login across a cold restart
@@ -118,7 +120,7 @@ jobs:
           # Keep emulator discovery independent of the command-line tools'
           # default preferences directory, which differs between SDK releases.
           printf 'avd.ini.encoding=UTF-8\npath=%s\ntarget=android-35\n' "$ANDROID_AVD_HOME/river-auth-return.avd" > "$ANDROID_AVD_HOME/river-auth-return.ini"
-          python3 scripts/test-android-auth-return.py --apk "$RUNNER_TEMP/river-auth-return.apk" --matrix-apk "$RUNNER_TEMP/river-matrix-auth.apk" --avd river-auth-return
+          python3 scripts/test-android-auth-return.py --apk "$RUNNER_TEMP/river-auth-return.apk" --matrix-apk "$RUNNER_TEMP/river-matrix-auth.apk" --notification-test-apk "$RUNNER_TEMP/river-push-tests.apk" --avd river-auth-return
   image:
     needs: [android, matrix-platforms, matrix-interop]
     runs-on: ubuntu-24.04

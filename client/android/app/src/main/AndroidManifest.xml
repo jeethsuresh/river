@@ -1,5 +1,6 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <uses-permission android:name="android.permission.INTERNET"/>
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
     <uses-feature android:name="android.hardware.camera" android:required="false"/>
     <uses-permission android:name="android.permission.CAMERA"/>
     <uses-permission android:name="android.permission.RECORD_AUDIO"/>
@@ -15,6 +16,7 @@
         android:label="River"
         android:name="${applicationName}"
         android:icon="@drawable/ic_river">
+        <provider android:name=".StoreNotifications" android:authorities="cool.gravitas.river.notifications" android:exported="true"/>
         <service android:name=".RiverCallService" android:exported="false" android:foregroundServiceType="microphone|camera|mediaProjection"/>
         <activity
             android:name=".MainActivity"
@@ -62,6 +64,7 @@
     <queries>
         <package android:name="dev.jeeth.privatestore"/>
         <provider android:authorities="dev.jeeth.privatestore.gravitas"/>
+        <provider android:authorities="dev.jeeth.privatestore.notifications"/>
         <intent>
             <action android:name="android.intent.action.PROCESS_TEXT"/>
             <data android:mimeType="text/plain"/>

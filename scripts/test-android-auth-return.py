@@ -11,6 +11,7 @@ parser = argparse.ArgumentParser()
 parser.add_argument('--apk', required=True, type=Path)
 parser.add_argument('--avd', required=True)
 parser.add_argument('--matrix-apk', required=True, type=Path)
+parser.add_argument('--notification-test-apk', type=Path)
 args = parser.parse_args()
 sdk = Path(os.environ['ANDROID_HOME'])
 adb = str(sdk / 'platform-tools/adb')
@@ -87,6 +88,17 @@ with (output / 'emulator.log').open('w') as log:
         else:
             raise AssertionError('Android emulator boot timed out')
         device('shell', 'input', 'keyevent', '82')
+        if args.notification_test_apk:
+            device('install', '-r', str(args.apk.resolve()), timeout=120)
+            device('shell', 'pm', 'clear', package)
+            device('install', '-r', str(args.notification_test_apk.resolve()), timeout=120)
+            result = device('shell', 'am', 'instrument', '-w', '-r', '-e', 'class',
+                            'cool.gravitas.river.StoreNotificationDeliveryTest',
+                            package + '.test/androidx.test.runner.AndroidJUnitRunner', timeout=150)
+            assert 'OK (4 tests)' in result and 'FAILURES' not in result, result
+            print('ANDROID PUSH PASS native alerts, replay, session binding, unsigned IPC', flush=True)
+            device('shell', 'am', 'force-stop', package)
+            device('shell', 'pm', 'clear', package)
         from android_matrix_fixture import Fixture, FIXTURE
         with Fixture() as fixture:
             device('shell', 'am', 'force-stop', package)

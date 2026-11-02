@@ -4,6 +4,7 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 
 import 'api.dart';
+import 'store_notifications.dart';
 import 'username_login.dart';
 import 'publishing_widgets.dart';
 import 'friends_view.dart';
@@ -43,19 +44,44 @@ class _RiverAppState extends State<RiverApp> with WidgetsBindingObserver {
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
-    if (widget.boot) unawaited(app.boot());
+    if (StoreNotifications.supported) {
+      StoreNotifications.channel.setMethodCallHandler((call) async {
+        if (call.method == 'opened' && call.arguments is Map) {
+          final notification = await StoreNotifications.call('takeOpen');
+          await app.resumeAuthentication();
+          if (notification.isNotEmpty)
+            await app.openStoreNotification(notification);
+        }
+      });
+    }
+    if (widget.boot) unawaited(app.boot().then((_) => openNotification()));
+  }
+
+  Future<void> openNotification() async {
+    final notification = await StoreNotifications.call('takeOpen');
+    if (notification.isNotEmpty) await app.openStoreNotification(notification);
   }
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     app.active = state == AppLifecycleState.resumed;
-    if (app.active) unawaited(app.resumeAuthentication());
+    if (app.active) {
+      unawaited(
+        app.resumeAuthentication().then((_) async {
+          await app.refreshStoreNotifications();
+          await openNotification();
+        }),
+      );
+    }
   }
 
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     app.dispose();
+    if (StoreNotifications.supported) {
+      StoreNotifications.channel.setMethodCallHandler(null);
+    }
     super.dispose();
   }
 

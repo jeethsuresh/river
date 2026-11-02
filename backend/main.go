@@ -98,6 +98,10 @@ func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("X-Frame-Options", "DENY")
 	w.Header().Set("Referrer-Policy", "no-referrer")
 	w.Header().Set("Permissions-Policy", "camera=(self), microphone=(self), display-capture=(self)")
+	if strings.HasPrefix(r.URL.Path, "/api/notifications/providers/") {
+		s.notificationProvider(w, r)
+		return
+	}
 	switch r.URL.Path {
 	case "/.well-known/matrix/client":
 		s.matrixDiscovery(w, r)
