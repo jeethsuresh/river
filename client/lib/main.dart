@@ -40,6 +40,7 @@ class RiverApp extends StatefulWidget {
 
 class _RiverAppState extends State<RiverApp> with WidgetsBindingObserver {
   late final app = widget.api ?? RiverApi();
+  Future<void> _startup = Future.value();
   @override
   void initState() {
     super.initState();
@@ -48,6 +49,9 @@ class _RiverAppState extends State<RiverApp> with WidgetsBindingObserver {
       StoreNotifications.channel.setMethodCallHandler((call) async {
         if (call.method == 'opened' && call.arguments is Map) {
           final notification = await StoreNotifications.call('takeOpen');
+          // A bubble can take the shared engine while its first host is still
+          // restoring the authenticated account and encrypted local device.
+          await _startup;
           await app.resumeAuthentication();
           if (notification.isNotEmpty) {
             await app.openStoreNotification(notification);
@@ -55,7 +59,10 @@ class _RiverAppState extends State<RiverApp> with WidgetsBindingObserver {
         }
       });
     }
-    if (widget.boot) unawaited(app.boot().then((_) => openNotification()));
+    if (widget.boot) {
+      _startup = app.boot();
+      unawaited(_startup.then((_) => openNotification()));
+    }
   }
 
   Future<void> openNotification() async {
