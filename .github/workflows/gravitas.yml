@@ -96,7 +96,7 @@ jobs:
           flutter pub get --enforce-lockfile
           flutter build apk --debug --no-pub
           ./android/gradlew --no-daemon -p android testDebugUnitTest
-          ./android/gradlew --no-daemon -p android assembleDebugAndroidTest
+          ./android/gradlew --no-daemon -p android :app:assembleDebugAndroidTest
           cp build/app/outputs/flutter-apk/app-debug.apk "$RUNNER_TEMP/river-auth-return.apk"
           cp build/app/outputs/apk/androidTest/debug/app-debug-androidTest.apk "$RUNNER_TEMP/river-push-tests.apk"
           flutter build apk --debug --no-pub --target tool/matrix_android_auth_smoke.dart
