@@ -71,6 +71,7 @@ class NotificationPreviewService : JobService() {
     private var current: JobParameters? = null
     private var busy = false
     override fun onStartJob(params: JobParameters): Boolean {
+        running = this
         current = params
         drain()
         return true
@@ -98,13 +99,23 @@ class NotificationPreviewService : JobService() {
         current = null
         return StorePush.pending(this).isNotEmpty()
     }
+    override fun onDestroy() {
+        if (running === this) running = null
+        super.onDestroy()
+    }
     companion object {
         private const val JOB = 4203
+        private var running: NotificationPreviewService? = null
         fun schedule(c: Context) {
             val app = c.applicationContext
             Handler(Looper.getMainLooper()).post {
                 val scheduler = app.getSystemService(JobScheduler::class.java)
-                if (scheduler.getPendingJob(JOB) != null) return@post
+                val service = running
+                if (service?.current != null) { service.drain(); return@post }
+                // jobFinished is delivered asynchronously to the scheduler.
+                // A live service with no current job must replace that stale
+                // pending record so an arrival during completion is not lost.
+                if (service == null && scheduler.getPendingJob(JOB) != null) return@post
                 val builder = JobInfo.Builder(JOB, ComponentName(app, NotificationPreviewService::class.java))
                     .setRequiredNetworkType(JobInfo.NETWORK_TYPE_ANY)
                 try {

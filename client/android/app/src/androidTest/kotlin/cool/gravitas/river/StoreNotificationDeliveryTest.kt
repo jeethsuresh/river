@@ -167,6 +167,13 @@ class StoreNotificationDeliveryTest {
         }
         val engine = FlutterEngineCache.getInstance().get("river")!!
         await(40) { StorePush.pending(c).isEmpty() }
+        // Exercise fresh arrivals at the completion boundary of the shared
+        // background job, without creating another engine or an Activity.
+        for (sequence in 11L..13L) {
+            StorePush.deliver(c, payload(sequence))
+            await(40) { StorePush.pending(c).isEmpty() }
+            assertSame(engine, FlutterEngineCache.getInstance().get("river"))
+        }
         var rendered = false
         instrumentation.runOnMainSync { rendered = engine.renderer.isDisplayingFlutterUi }
         assertFalse("Background decryption must not start the app UI", rendered)
