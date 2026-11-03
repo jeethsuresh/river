@@ -490,6 +490,74 @@ async fn direct_room_permissions(first: &MatrixCore) -> Result<()> {
     Ok(())
 }
 
+async fn encrypted_notification_previews(first: &MatrixCore) -> Result<()> {
+    let peer = device_as(
+        &format!("RIVER-NOTIFY-{}", uuid::Uuid::new_v4()),
+        "deactlater",
+    )
+    .await?;
+    step(&[first, &peer]).await?;
+    let mut create = create_room::v3::Request::new();
+    create.name = Some("Notification friends".into());
+    create.invite = vec![peer.own_user.clone()];
+    create.initial_state = vec![serde_json::from_value(
+        json!({"type":"m.room.encryption","state_key":"",
+        "content":{"algorithm":"m.megolm.v1.aes-sha2"}}),
+    )?];
+    let room = first.client.create_room(create).await?;
+    step(&[first, &peer]).await?;
+    peer.client.join_room_by_id(room.room_id()).await?;
+    step(&[&peer, first]).await?;
+    let sent: Value = serde_json::from_str(
+        &first
+            .send(
+                room.room_id().to_string(),
+                "m.room.message".into(),
+                json!({"msgtype":"m.text","body":"Hello 🌊🔐 from another device"}).to_string(),
+                uuid::Uuid::new_v4().to_string(),
+            )
+            .await?,
+    )?;
+    let event = sent["event_id"].as_str().unwrap();
+    // Do not sync the recipient: the notification operation must fetch its
+    // to-device room key itself using the ordinary shared SDK sync.
+    let result: Value = serde_json::from_str(
+        &peer
+            .action(
+                json!({"action":"notification","room":room.room_id(),"event":event}).to_string(),
+            )
+            .await?,
+    )?;
+    assert_eq!(result["title"], "Notification friends");
+    assert_eq!(result["body"], "Hello 🌊🔐 from another device");
+    let raw = first
+        .client
+        .send(
+            matrix_sdk::ruma::api::client::room::get_room_event::v3::Request::new(
+                room.room_id().to_owned(),
+                matrix_sdk::ruma::EventId::parse(event)?,
+            ),
+        )
+        .await?;
+    assert_eq!(
+        serde_json::from_str::<Value>(raw.event.json().get())?["type"],
+        "m.room.encrypted"
+    );
+    let own: Value =
+        serde_json::from_str(&first.notification(room.room_id().as_str(), event).await?)?;
+    assert!(own.as_object().unwrap().is_empty());
+    room.redact(&matrix_sdk::ruma::EventId::parse(event)?, None, None)
+        .await?;
+    let removed: Value =
+        serde_json::from_str(&peer.notification(room.room_id().as_str(), event).await?)?;
+    assert!(removed.as_object().unwrap().is_empty());
+    peer.close(true).await?;
+    println!(
+        "RIVER MATRIX encrypted notification fetch, to-device key sync, emoji preview and redaction PASS"
+    );
+    Ok(())
+}
+
 #[tokio::test]
 #[ignore = "requires the isolated Gravitas/Synapse fixture; run integration/matrix/run.sh"]
 async fn qr_verification_recovers_historical_encrypted_messages() -> Result<()> {
@@ -702,6 +770,7 @@ async fn qr_verification_recovers_historical_encrypted_messages() -> Result<()> 
     direct_room_permissions(&first).await?;
     automatic_room_replacements(&first).await?;
     restored_member_cache(&first).await?;
+    encrypted_notification_previews(&first).await?;
     first.close(true).await?;
     second.close(true).await?;
     third.close(true).await?;

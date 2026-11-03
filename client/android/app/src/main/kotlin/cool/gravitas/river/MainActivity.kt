@@ -2,8 +2,6 @@ package cool.gravitas.river
 
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
-import io.flutter.embedding.engine.FlutterEngineCache
-import io.flutter.embedding.engine.dart.DartExecutor
 import io.flutter.plugin.common.MethodChannel
 import android.content.Context
 import android.content.Intent
@@ -14,12 +12,7 @@ import android.os.Looper
 open class MainActivity : FlutterActivity() {
     private var engineEvicted = false
     override fun provideFlutterEngine(context: Context): FlutterEngine {
-        val cache = FlutterEngineCache.getInstance()
-        return cache.get("river") ?: FlutterEngine(context.applicationContext).also { engine ->
-            // Create lazily: receiving a background Store alert must not start Dart.
-            cache.put("river", engine)
-            engine.dartExecutor.executeDartEntrypoint(DartExecutor.DartEntrypoint.createDefault())
-        }
+        return NotificationRuntime.engine(context, show = true)
     }
     override fun shouldDestroyEngineWithHost() = false
     override fun shouldRestoreAndSaveState() = false

@@ -5,6 +5,7 @@ mod credential_refresh_test;
 mod interop;
 mod local;
 mod media;
+mod notification;
 mod security;
 #[cfg(all(test, not(target_family = "wasm")))]
 mod sync_recovery_test;

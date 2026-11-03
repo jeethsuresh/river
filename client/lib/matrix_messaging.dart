@@ -368,7 +368,11 @@ class MatrixMessaging extends ChangeNotifier {
     if (!_disposed) super.notifyListeners();
   }
 
-  Future<void> bind(MatrixJson profile, {bool synchronize = true}) async {
+  Future<void> bind(
+    MatrixJson profile, {
+    bool synchronize = true,
+    bool loadRooms = true,
+  }) async {
     final account = '${profile['issuer']}|${profile['sub']}';
     if (accountKey == account && (connected || connecting)) return;
     await disconnect();
@@ -405,7 +409,7 @@ class MatrixMessaging extends ChangeNotifier {
         _configuration = config;
         final engine = _durable(raw, generation);
         try {
-          final snapshot = await engine.rooms();
+          final snapshot = loadRooms ? await engine.rooms() : {'rooms': []};
           _guard(generation);
           _transport = engine;
           roomList = (snapshot['rooms'] as List).cast<MatrixJson>();

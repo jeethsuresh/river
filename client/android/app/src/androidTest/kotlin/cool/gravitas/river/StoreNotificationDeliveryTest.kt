@@ -15,7 +15,7 @@ import org.junit.Test
 import org.junit.Assert.*
 import org.junit.runner.RunWith
 
-/** Disposable emulator only. Real OS notifications; no Activity or Flutter. */
+/** Disposable emulator only. Real OS notifications and background preview jobs. */
 @RunWith(AndroidJUnit4::class)
 class StoreNotificationDeliveryTest {
     private val instrumentation = InstrumentationRegistry.getInstrumentation()
@@ -115,5 +115,42 @@ class StoreNotificationDeliveryTest {
             fail("River's own UID must not impersonate signed Private Store")
         } catch (_: SecurityException) { }
         assertTrue(notifications().isEmpty())
+    }
+
+    @Test fun richPreviewsStayPrivateAndCannotReviveReadOrNewerAlerts() {
+        val preview = mapOf("title" to "Friends", "sender" to "Bob", "body" to "Hello 🌊🔐")
+        lateinit var first: JSONObject
+        instrumentation.runOnMainSync {
+            StorePush.deliver(c, payload())
+            first = StorePush.pending(c).single()
+            StorePush.enrich(c, first, preview)
+            StorePush.finishPreview(c, first)
+        }
+        await { notifications().singleOrNull()?.notification?.extras?.getString("android.text")?.contains("Hello 🌊🔐") == true }
+        val rich = notifications().single().notification
+        assertEquals(android.app.Notification.VISIBILITY_PRIVATE, rich.visibility)
+        assertEquals("River", rich.publicVersion.extras.getCharSequence("android.title").toString())
+        assertEquals("New conversation activity", rich.publicVersion.extras.getString("android.text"))
+        assertTrue(rich.flags and android.app.Notification.FLAG_ONLY_ALERT_ONCE != 0)
+        instrumentation.runOnMainSync {
+            StorePush.deliver(c, payload(11))
+            StorePush.enrich(c, first, preview)
+        }
+        await { notifications().singleOrNull()?.notification?.extras?.getString("android.text") == "New conversation activity" }
+        instrumentation.runOnMainSync {
+            StorePush.deliver(c, payload(12))
+            val latest = StorePush.pending(c).single()
+            StorePush.read(c, "!room:gravitas.cool")
+            StorePush.enrich(c, latest, preview)
+        }
+        await { notifications().isEmpty() }
+        instrumentation.runOnMainSync {
+            StorePush.deliver(c, payload(13))
+            val signedOut = StorePush.pending(c).single()
+            StorePush.clear(c)
+            StorePush.enrich(c, signedOut, preview)
+        }
+        await { notifications().isEmpty() }
+        assertTrue(StorePush.pending(c).isEmpty())
     }
 }
