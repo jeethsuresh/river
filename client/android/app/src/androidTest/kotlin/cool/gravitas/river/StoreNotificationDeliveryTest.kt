@@ -3,6 +3,7 @@ package cool.gravitas.river
 import android.Manifest
 import android.app.NotificationManager
 import android.content.Context
+import android.content.Intent
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
@@ -14,6 +15,7 @@ import org.junit.Before
 import org.junit.Test
 import org.junit.Assert.*
 import org.junit.runner.RunWith
+import io.flutter.embedding.engine.FlutterEngineCache
 
 /** Disposable emulator only. Real OS notifications and background preview jobs. */
 @RunWith(AndroidJUnit4::class)
@@ -30,8 +32,8 @@ class StoreNotificationDeliveryTest {
         .put("kind", "matrix.event").put("issuer", "https://gravitas.cool").put("subject", owner)
         .put("room_id", "!room:gravitas.cool").put("event_id", "$" + sequence).put("sequence", sequence).toString()
     private fun notifications() = manager.activeNotifications.filter { it.tag?.startsWith("river:") == true }
-    private fun await(condition: () -> Boolean) {
-        val deadline = System.nanoTime() + 10_000_000_000L
+    private fun await(seconds: Long = 10, condition: () -> Boolean) {
+        val deadline = System.nanoTime() + seconds * 1_000_000_000L
         while (!condition() && System.nanoTime() < deadline) Thread.sleep(20)
         assertTrue("Android notification state did not settle", condition())
     }
@@ -152,5 +154,40 @@ class StoreNotificationDeliveryTest {
         }
         await { notifications().isEmpty() }
         assertTrue(StorePush.pending(c).isEmpty())
+    }
+
+    @Test fun backgroundJobStartsHeadlessAndOpeningRiverPromotesTheSameEngine() {
+        StorePush.deliver(c, payload())
+        var running = false
+        await(40) {
+            instrumentation.runOnMainSync {
+                running = FlutterEngineCache.getInstance().get("river")?.dartExecutor?.isExecutingDart == true
+            }
+            running
+        }
+        val engine = FlutterEngineCache.getInstance().get("river")!!
+        var rendered = false
+        instrumentation.runOnMainSync { rendered = engine.renderer.isDisplayingFlutterUi }
+        assertFalse("Background decryption must not start the app UI", rendered)
+        await(40) { StorePush.pending(c).isEmpty() }
+        assertEquals("New conversation activity", notifications().single().notification.extras.getString("android.text"))
+        // The stand-in ciphertext above is only for native binding. Foreground
+        // startup uses an empty real credential store in this disposable test.
+        session(null)
+        val activity = instrumentation.startActivitySync(Intent(c, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+        try {
+            await(40) {
+                instrumentation.runOnMainSync { rendered = engine.renderer.isDisplayingFlutterUi }
+                rendered
+            }
+            assertSame(engine, FlutterEngineCache.getInstance().get("river"))
+            val booted = java.util.concurrent.atomic.AtomicBoolean(false)
+            instrumentation.runOnMainSync {
+                NotificationRuntime.preview(c, JSONObject().put("subject", subject).put("room_id", "!room:gravitas.cool").put("event_id", "$" + "10")) {
+                    booted.set(true)
+                }
+            }
+            await(40) { booted.get() }
+        } finally { instrumentation.runOnMainSync { activity.finish() } }
     }
 }
