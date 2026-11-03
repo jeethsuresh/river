@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -656,6 +657,11 @@ class _RiverShellState extends State<RiverShell> {
                 ? null
                 : mobileDestinations(),
             drawer: wide ? null : Drawer(child: SafeArea(child: navigation())),
+            // Android's system Back gesture owns the edge swipe. Letting the
+            // drawer also recognize it can open it before Back is committed,
+            // causing that same gesture to continue navigation as well.
+            drawerEnableOpenDragGesture:
+                kIsWeb || Theme.of(context).platform != TargetPlatform.android,
             body: SafeArea(
               bottom: false,
               child: Row(
