@@ -333,7 +333,7 @@ class MatrixMessaging extends ChangeNotifier {
     operation = () async {
       try {
         final result = await engine.action({'action': 'avatar', 'url': url});
-        final bytes = base64Decode(result['data'] as String);
+        final bytes = base64Decode(base64.normalize(result['data'] as String));
         if (generation != _generation ||
             bytes.isEmpty ||
             bytes.length > 2 * 1024 * 1024) {

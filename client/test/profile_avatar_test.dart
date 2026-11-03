@@ -25,7 +25,8 @@ class PictureTransport extends RoomTransport {
     downloads.add(payload);
     await gate?.future;
     if (fail) throw StateError('Picture unavailable');
-    return {'data': base64Encode(result ?? png)};
+    // Ruma's Base64 serialization intentionally omits padding.
+    return {'data': base64Encode(result ?? png).replaceAll('=', '')};
   }
 
   @override
