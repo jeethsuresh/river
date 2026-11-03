@@ -53,7 +53,7 @@ Next.js River code; Git history retains that implementation.
   the choice per account on the device. Ctrl/Cmd+Enter remains available, and
   mobile Enter inserts a new line. This applies to messages in visual and Markdown
   modes; post and discussion editors keep their multiline behavior.
-- Conversation drafts and pending attachments stay with their room while navigating.
+- Conversation drafts stay with their room while navigating.
   Failed sends retain their transaction ID and offer Retry, including when the
   homeserver accepted a message but its response was lost.
 - Every protected request validates the central session proof; central logout and
