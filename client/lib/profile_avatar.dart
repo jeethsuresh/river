@@ -110,15 +110,9 @@ class _RiverProfileAvatarState extends State<RiverProfileAvatar> {
                     border: Border.all(color: Colors.white, width: 1.5),
                     borderRadius: BorderRadius.circular(4),
                   ),
-                  child: const Text(
-                    '[m]',
-                    style: TextStyle(
-                      fontFamily: 'monospace',
-                      fontSize: 9,
-                      height: 1.2,
-                      color: Colors.white,
-                      fontWeight: FontWeight.w700,
-                    ),
+                  child: const CustomPaint(
+                    size: Size(14, 12),
+                    painter: _MatrixMark(),
                   ),
                 ),
               ),
@@ -127,4 +121,40 @@ class _RiverProfileAvatarState extends State<RiverProfileAvatar> {
       ),
     );
   }
+}
+
+class _MatrixMark extends CustomPainter {
+  const _MatrixMark();
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    canvas.scale(size.width / 14, size.height / 12);
+    final paint = Paint()
+      ..color = Colors.white
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 1.2;
+    canvas.drawPath(
+      Path()
+        ..moveTo(3, 1)
+        ..lineTo(1, 1)
+        ..lineTo(1, 11)
+        ..lineTo(3, 11)
+        ..moveTo(11, 1)
+        ..lineTo(13, 1)
+        ..lineTo(13, 11)
+        ..lineTo(11, 11)
+        ..moveTo(4, 9)
+        ..lineTo(4, 4)
+        ..moveTo(4, 6)
+        ..cubicTo(4, 4, 7, 4, 7, 6)
+        ..lineTo(7, 9)
+        ..moveTo(7, 6)
+        ..cubicTo(7, 4, 10, 4, 10, 6)
+        ..lineTo(10, 9),
+      paint,
+    );
+  }
+
+  @override
+  bool shouldRepaint(_MatrixMark oldDelegate) => false;
 }
