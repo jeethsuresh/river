@@ -6,11 +6,23 @@ import io.flutter.plugin.common.MethodChannel
 import android.content.Context
 import android.content.Intent
 import android.os.Build
+import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 
 open class MainActivity : FlutterActivity() {
     private var engineEvicted = false
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        setFrameworkHandlesBack(true)
+    }
+    override fun setFrameworkHandlesBack(frameworkHandlesBack: Boolean) {
+        // A retained engine can send its navigation state before this host is
+        // attached, or keep the same state when the app/bubble window changes.
+        // Always deliver Back to Dart; it opens the sidebar, pops an overlay,
+        // or calls SystemNavigator.pop to leave this Activity as appropriate.
+        super.setFrameworkHandlesBack(true)
+    }
     override fun provideFlutterEngine(context: Context): FlutterEngine {
         return NotificationRuntime.engine(context, show = true)
     }

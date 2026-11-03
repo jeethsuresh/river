@@ -12,6 +12,7 @@ parser.add_argument('--apk', required=True, type=Path)
 parser.add_argument('--avd', required=True)
 parser.add_argument('--matrix-apk', required=True, type=Path)
 parser.add_argument('--notification-test-apk', type=Path)
+parser.add_argument('--back-apk', type=Path)
 args = parser.parse_args()
 sdk = Path(os.environ['ANDROID_HOME'])
 adb = str(sdk / 'platform-tools/adb')
@@ -107,6 +108,19 @@ with (output / 'emulator.log').open('w') as log:
                              package + '.test/androidx.test.runner.AndroidJUnitRunner', timeout=180)
             assert 'OK (3 tests)' in bubbles and 'FAILURES' not in bubbles, bubbles
             print('ANDROID BUBBLES PASS shortcuts, read preservation, shared Flutter engine', flush=True)
+            device('shell', 'am', 'force-stop', package)
+            device('shell', 'pm', 'clear', package)
+        if args.back_apk:
+            assert args.notification_test_apk, 'Back gesture checks require the instrumentation APK'
+            device('install', '-r', str(args.back_apk.resolve()), timeout=120)
+            device('shell', 'pm', 'clear', package)
+            gestures = device('shell', 'am', 'instrument', '-w', '-r', '-e', 'class',
+                              'cool.gravitas.river.BackNavigationTest',
+                              package + '.test/androidx.test.runner.AndroidJUnitRunner', timeout=180)
+            assert 'OK (3 tests)' in gestures and 'FAILURES' not in gestures, gestures
+            print('ANDROID BACK PASS left/right OS swipes, cancellation, one action per gesture, retained-engine host recreation', flush=True)
+            device('shell', 'cmd', 'overlay', 'enable-exclusive', '--category', '--user', '0',
+                   'com.android.internal.systemui.navbar.threebutton')
             device('shell', 'am', 'force-stop', package)
             device('shell', 'pm', 'clear', package)
         from android_matrix_fixture import Fixture, FIXTURE

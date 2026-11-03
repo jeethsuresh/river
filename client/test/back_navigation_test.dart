@@ -132,8 +132,26 @@ void main() {
         expect(find.byType(RiverShell), findsNothing);
         expect(tester.takeException(), isNull);
       },
+      variant: TargetPlatformVariant.only(
+        opening == 'edge swipe' ? TargetPlatform.iOS : TargetPlatform.android,
+      ),
     );
   }
+
+  testWidgets('Android edge touches wait for the system Back callback', (
+    tester,
+  ) async {
+    await phone(tester);
+    await pushShell(tester, signedIn(kind: 'dm'));
+    await tester.dragFrom(const Offset(1, 400), const Offset(300, 0));
+    await tester.pumpAndSettle();
+    expect(shell(tester).isDrawerOpen, isFalse);
+    await back(tester);
+    expect(shell(tester).isDrawerOpen, isTrue);
+    expect(find.byType(RiverShell), findsOneWidget);
+    await back(tester);
+    expect(find.text('Previous view'), findsOneWidget);
+  }, variant: TargetPlatformVariant.only(TargetPlatform.android));
 
   testWidgets('dismissing the sidebar rearms the first Back', (tester) async {
     await phone(tester);
