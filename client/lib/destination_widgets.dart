@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'api.dart';
 import 'content_widgets.dart';
 import 'river_design.dart';
+import 'profile_avatar.dart';
 
 bool isMatrixGroup(RiverApi app, Json group) =>
     group['matrix_only'] == true ||
@@ -13,24 +14,16 @@ bool supportsRiverEntries(RiverApi app, Json group) =>
     !isMatrixGroup(app, group) &&
     group['encrypted'] != true;
 
-String roomDestination(RiverApi app, Json group) => isMatrixGroup(app, group)
-    ? 'Matrix'
-    : ['dm', 'group'].contains(group['kind'])
-    ? 'Chats'
-    : 'Communities';
+String roomDestination(RiverApi app, Json group) =>
+    ['dm', 'group'].contains(group['kind']) ? 'Chats' : 'Communities';
 
 List<Json> destinationGroups(RiverApi app, String destination) {
   final groups = app.groups.where((g) {
     if (!['join', 'invite', 'knock'].contains(g['membership'])) return false;
-    final external = isMatrixGroup(app, g);
     return switch (destination) {
-      'Chats' => !external && ['dm', 'group'].contains(g['kind']),
-      'Matrix' =>
-        external &&
-            g['parent_id'] == null &&
-            !['call_chat', 'post_comments'].contains(g['kind']),
+      'Chats' => ['dm', 'group'].contains(g['kind']),
       'Forums' || 'Posts' => supportsRiverEntries(app, g),
-      _ => !external && g['kind'] == 'space',
+      _ => g['kind'] == 'space',
     };
   }).toList();
   groups.sort((a, b) {
@@ -153,11 +146,7 @@ class _RiverDestinationViewState extends State<RiverDestinationView> {
               onPressed: entries
                   ? widget.compose
                   : () => widget.create(
-                      destination == 'Communities'
-                          ? 'space'
-                          : destination == 'Matrix'
-                          ? 'matrix'
-                          : 'dm',
+                      destination == 'Communities' ? 'space' : 'dm',
                     ),
               icon: Icon(entries ? Icons.edit_outlined : Icons.add, size: 18),
               label: Text(switch (destination) {
@@ -188,32 +177,6 @@ class _RiverDestinationViewState extends State<RiverDestinationView> {
           onChanged: (v) => setState(() => query = v.trim()),
         ),
         const SizedBox(height: 18),
-        if (destination == 'Matrix') ...[
-          const Card(
-            child: Padding(
-              padding: EdgeInsets.all(14),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    'Connected through Matrix',
-                    style: TextStyle(fontWeight: FontWeight.w600),
-                  ),
-                  SizedBox(height: 4),
-                  Text(
-                    'Messages, threads, reactions, and attachments. Encryption follows each room’s settings. River calls, forums, and publishing are available in River communities.',
-                    style: TextStyle(
-                      fontSize: 12,
-                      color: riverMuted,
-                      height: 1.5,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-          const SizedBox(height: 16),
-        ],
         if (entries) ...[
           Text(
             'YOUR COMMUNITIES',
@@ -286,9 +249,11 @@ class _RiverDestinationViewState extends State<RiverDestinationView> {
                     horizontal: 14,
                     vertical: 6,
                   ),
-                  leading: RiverAvatar(
+                  leading: RiverProfileAvatar(
+                    app: app,
                     name: g['name'] as String,
-                    icon: destination == 'Matrix' ? Icons.hub_outlined : null,
+                    avatarUrl: g['avatar_url'] as String?,
+                    matrix: isMatrixGroup(app, g),
                   ),
                   title: Text(
                     g['name'] as String,
@@ -303,7 +268,7 @@ class _RiverDestinationViewState extends State<RiverDestinationView> {
                         ? '${app.channels(g['id'] as String).length} ${app.channels(g['id'] as String).length == 1 ? 'room' : 'rooms'} · ${(g['members'] as List? ?? []).length} members'
                         : (g['unread_preview'] as String? ?? '').isNotEmpty
                         ? g['unread_preview'] as String
-                        : destination == 'Matrix'
+                        : isMatrixGroup(app, g)
                         ? (g['encrypted'] == true
                               ? 'Encrypted Matrix room'
                               : 'Matrix room')
@@ -367,7 +332,14 @@ class MatrixRoomList extends StatelessWidget {
       for (final room in app.channels(space))
         ListTile(
           dense: true,
-          leading: const Icon(Icons.tag, size: 17),
+          leading: RiverProfileAvatar(
+            app: app,
+            name: room['name'] as String,
+            avatarUrl: room['avatar_url'] as String?,
+            matrix: true,
+            icon: Icons.tag,
+            size: 26,
+          ),
           title: Text(
             room['name'] as String,
             maxLines: 1,

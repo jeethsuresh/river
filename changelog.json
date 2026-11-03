@@ -1,9 +1,10 @@
 {
   "schemaVersion": 1,
-  "version": "0.12.9",
-  "versionCode": 31,
+  "version": "0.13.0",
+  "versionCode": 32,
   "changes": [
-    "Use the Back gesture to open the sidebar on phone layouts.",
-    "Use Back again while the sidebar is open to continue the usual back navigation."
+    "Show Matrix chats in Chats and Matrix spaces in Communities, with a Matrix badge on their profile pictures.",
+    "Remove the separate Matrix destination from the sidebar and bottom navigation.",
+    "Load Matrix contact and space profile pictures, with cached pictures and initials when a picture is unavailable."
   ]
 }

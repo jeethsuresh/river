@@ -316,6 +316,49 @@ class MatrixMessaging extends ChangeNotifier {
   Object? _credentialOwner;
   final _unsavedSessions = <String, MatrixJson>{};
   List<MatrixJson> roomList = [];
+  final _avatars = <String, Uint8List>{};
+  final _avatarRequests = <String, Future<Uint8List?>>{};
+  int _avatarBytes = 0;
+
+  Future<Uint8List?> avatar(String url) async {
+    if (!connected || !url.startsWith('mxc://')) return null;
+    final cached = _avatars.remove(url);
+    if (cached != null) {
+      _avatars[url] = cached;
+      return cached;
+    }
+    if (_avatarRequests[url] case final pending?) return pending;
+    final generation = _generation, engine = transport;
+    late final Future<Uint8List?> operation;
+    operation = () async {
+      try {
+        final result = await engine.action({'action': 'avatar', 'url': url});
+        final bytes = base64Decode(base64.normalize(result['data'] as String));
+        if (generation != _generation ||
+            bytes.isEmpty ||
+            bytes.length > 2 * 1024 * 1024) {
+          return null;
+        }
+        while (_avatarBytes + bytes.length > 8 * 1024 * 1024 &&
+            _avatars.isNotEmpty) {
+          _avatarBytes -= _avatars.remove(_avatars.keys.first)!.length;
+        }
+        _avatars[url] = bytes;
+        _avatarBytes += bytes.length;
+        return bytes;
+      } catch (_) {
+        // Optional profile media must never block a timeline or sign-in.
+        return null;
+      } finally {
+        if (identical(_avatarRequests[url], operation)) {
+          _avatarRequests.remove(url);
+        }
+      }
+    }();
+    _avatarRequests[url] = operation;
+    return operation;
+  }
+
   String? error;
   bool connecting = false, _active = true, _disposed = false;
   late final _connection = ConnectionHealth(notifyListeners);
@@ -822,6 +865,9 @@ class MatrixMessaging extends ChangeNotifier {
     _credentialOwner = null;
     _profile = null;
     roomList = [];
+    _avatars.clear();
+    _avatarRequests.clear();
+    _avatarBytes = 0;
     connecting = false;
     error = null;
     _connection.reset();

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'api.dart';
+import 'profile_avatar.dart';
 
 class FriendsView extends StatefulWidget {
   const FriendsView({
@@ -109,7 +110,11 @@ class _FriendsViewState extends State<FriendsView> {
       children: [
         Row(
           children: [
-            const CircleAvatar(child: Icon(Icons.person_outline)),
+            RiverProfileAvatar(
+              app: app,
+              name: p['username'] as String,
+              avatarUrl: app.personAvatar(p['user_id'] as String),
+            ),
             const SizedBox(width: 12),
             Expanded(
               child: Column(

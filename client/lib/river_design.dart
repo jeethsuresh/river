@@ -111,7 +111,6 @@ const riverDestinations = [
   ),
   (name: 'Forums', icon: Icons.forum_outlined, description: 'Topics & replies'),
   (name: 'Posts', icon: Icons.article_outlined, description: 'Read & publish'),
-  (name: 'Matrix', icon: Icons.hub_outlined, description: 'Beyond River'),
 ];
 
 class RiverAvatar extends StatelessWidget {

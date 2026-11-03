@@ -13,6 +13,7 @@ import 'rich_composer.dart';
 import 'media.dart';
 import 'media_widgets.dart';
 import 'river_design.dart';
+import 'profile_avatar.dart';
 
 const reactionEmojis = [
   '👍',
@@ -352,9 +353,14 @@ class ContentCard extends StatelessWidget {
                 'Profile picture for ${app.displayName(event['sender'] as String)}',
             image: true,
             excludeSemantics: true,
-            child: RiverAvatar(
+            child: RiverProfileAvatar(
               key: ValueKey('content-avatar-${event['event_id']}'),
+              app: app,
               name: app.displayName(event['sender'] as String),
+              avatarUrl: app.personAvatar(
+                event['sender'] as String,
+                room: event['group_id'] as String?,
+              ),
               size: 30,
             ),
           ),

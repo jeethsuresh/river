@@ -8,7 +8,8 @@ import 'package:river/main.dart';
 import 'package:river/destination_widgets.dart';
 import 'package:river/content_widgets.dart';
 import 'package:river/rich_composer.dart';
-import 'package:river/workspace_widgets.dart';
+import 'package:river/profile_avatar.dart';
+import 'package:river/river_design.dart';
 import 'matrix_messaging_test.dart' show MemoryMatrixStorage;
 import 'ui_refresh_test.dart' show ReviewRoom;
 
@@ -98,33 +99,80 @@ Future<void> destination(WidgetTester tester, String name, double width) async {
 }
 
 void main() {
+  for (final width in [360.0, 1440.0]) {
+    testWidgets('Matrix chat opens as a normal conversation at $width', (
+      tester,
+    ) async {
+      await tester.binding.setSurfaceSize(Size(width, 900));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+      final app = fixture();
+      await tester.pumpWidget(RiverApp(api: app, boot: false));
+      await tester.pumpAndSettle();
+      await destination(tester, 'Chats', width);
+      await tester.tap(
+        find.descendant(
+          of: find.byType(RiverDestinationView),
+          matching: find.text('External friend'),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(app.selected, 'External friend');
+      expect(find.byType(RichComposer), findsOneWidget);
+      expect(find.text('Conversation · 0 members'), findsOneWidget);
+      expect(
+        find.text('Matrix · messages, threads, and attachments'),
+        findsNothing,
+      );
+      expect(find.byKey(const ValueKey('mobile-Matrix')), findsNothing);
+      expect(find.byKey(const ValueKey('destination-Matrix')), findsNothing);
+      expect(find.byTooltip('Matrix'), findsWidgets);
+      expect(find.byTooltip('Join call'), findsNothing);
+      final avatars = tester.widgetList<RiverProfileAvatar>(
+        find.byType(RiverProfileAvatar),
+      );
+      expect(
+        avatars
+            .where((a) => a.name == 'External friend')
+            .every((a) => a.matrix),
+        isTrue,
+      );
+      expect(tester.takeException(), isNull);
+      await tester.pumpWidget(const SizedBox());
+    });
+  }
   test(
-    'room classification separates River chats, communities and external rooms',
+    'room classification includes Matrix chats and spaces in normal destinations',
     () {
       final app = fixture();
       expect(destinationGroups(app, 'Chats').map((g) => g['id']), [
+        'External friend',
         'Study group',
         'Weekend plans',
       ]);
       expect(destinationGroups(app, 'Communities').map((g) => g['id']), [
         'Design collective',
+        'Open source',
         'Private community',
       ]);
-      expect(destinationGroups(app, 'Matrix').map((g) => g['id']), [
-        'External friend',
-        'Open source',
+      expect(riverDestinations.map((d) => d.name), [
+        'Chats',
+        'Communities',
+        'Forums',
+        'Posts',
       ]);
+      expect(roomDestination(app, app.group('External friend')!), 'Chats');
+      expect(roomDestination(app, app.group('Open source')!), 'Communities');
       for (final name in ['Forums', 'Posts']) {
         expect(destinationGroups(app, name).map((g) => g['id']), [
           'Design collective',
         ]);
       }
-      expect(roomDestination(app, app.group('Matrix project')!), 'Matrix');
+      expect(roomDestination(app, app.group('Matrix project')!), 'Communities');
       app.dispose();
     },
   );
   for (final width in [360.0, 768.0, 1440.0]) {
-    testWidgets('five destinations show focused content at $width', (
+    testWidgets('four destinations include Matrix with badges at $width', (
       tester,
     ) async {
       await tester.binding.setSurfaceSize(Size(width, 1000));
@@ -132,13 +180,7 @@ void main() {
       final app = fixture();
       await tester.pumpWidget(RiverApp(api: app, boot: false));
       await tester.pumpAndSettle();
-      for (final name in [
-        'Chats',
-        'Communities',
-        'Forums',
-        'Posts',
-        'Matrix',
-      ]) {
+      for (final name in ['Chats', 'Communities', 'Forums', 'Posts']) {
         await destination(tester, name, width);
         expect(app.selected, isNull);
         expect(
@@ -149,7 +191,13 @@ void main() {
         );
         if (name == 'Chats') {
           expect(find.text('Weekend plans'), findsWidgets);
-          expect(find.text('External friend'), findsNothing);
+          expect(find.text('External friend'), findsWidgets);
+          expect(find.byTooltip('Matrix'), findsWidgets);
+          expect(find.byKey(const ValueKey('mobile-Matrix')), findsNothing);
+          expect(
+            find.byKey(const ValueKey('destination-Matrix')),
+            findsNothing,
+          );
           await tester.tap(find.widgetWithText(FilterChip, 'Unread'));
           await tester.pumpAndSettle();
           expect(
@@ -176,20 +224,9 @@ void main() {
           expect(find.text('Hidden left post'), findsNothing);
           expect(find.text('Hidden Matrix post'), findsNothing);
         }
-        if (name == 'Matrix') {
-          expect(find.text('External friend'), findsWidgets);
-          expect(find.text('Weekend plans'), findsNothing);
-          await tester.tap(find.text('Connect with Matrix').last);
-          await tester.pumpAndSettle();
-          expect(
-            tester
-                .widget<ConversationPicker>(find.byType(ConversationPicker))
-                .matrixOnly,
-            isTrue,
-          );
-          expect(find.text('Start conversation'), findsNothing);
-          await tester.tap(find.text('Cancel'));
-          await tester.pumpAndSettle();
+        if (name == 'Communities') {
+          expect(find.text('Open source'), findsWidgets);
+          expect(find.byTooltip('Matrix'), findsWidgets);
         }
         expect(tester.takeException(), isNull);
       }
@@ -310,13 +347,7 @@ void main() {
         ..target = {'id': 'voice', 'name': 'Design lounge'};
       await tester.pumpWidget(RiverApp(api: app, boot: false));
       await tester.pumpAndSettle();
-      for (final name in [
-        'Chats',
-        'Communities',
-        'Forums',
-        'Posts',
-        'Matrix',
-      ]) {
+      for (final name in ['Chats', 'Communities', 'Forums', 'Posts']) {
         await destination(tester, name, 390);
         expect(find.byTooltip('Leave call'), findsOneWidget);
         expect(find.text('Design lounge'), findsOneWidget);

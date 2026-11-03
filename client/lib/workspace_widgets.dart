@@ -6,6 +6,7 @@ import 'call_widgets.dart';
 import 'matrix_security_widgets.dart';
 import 'content_widgets.dart';
 import 'publishing_widgets.dart';
+import 'profile_avatar.dart';
 
 class SubgroupDetails extends StatefulWidget {
   const SubgroupDetails({
@@ -272,6 +273,13 @@ class _ConversationPickerState extends State<ConversationPicker> {
                         ),
                       ))
                         CheckboxListTile(
+                          secondary: RiverProfileAvatar(
+                            app: widget.app,
+                            name: friend['username'] as String,
+                            avatarUrl: widget.app.personAvatar(
+                              friend['user_id'] as String,
+                            ),
+                          ),
                           value: selected.contains(friend['user_id']),
                           title: Text(friend['username'] as String),
                           subtitle: Text(
