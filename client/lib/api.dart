@@ -10,9 +10,11 @@ import 'matrix_messaging.dart';
 import 'matrix_timeline.dart';
 import 'store_notifications.dart';
 import 'calls.dart';
-import 'peer_files.dart';
 import 'media.dart' show LinkedImageCache;
-import 'file_models.dart' show FileScope;
+import 'attachment_limits.dart';
+import 'cache_io.dart'
+    if (dart.library.js_interop) 'cache_web.dart'
+    as media_store;
 
 import 'package:crypto/crypto.dart';
 import 'package:flutter/foundation.dart';
@@ -255,16 +257,15 @@ class RiverApi extends ChangeNotifier {
     }
   }
 
-  Future<void> _initializeFiles() async {
-    if (!liveEnabled || files != null || user == null) return;
+  Future<void> _initializeMediaCache() async {
+    if (!liveEnabled || linkedImages != null || user == null) return;
     final account = accountKey;
-    final next = await PeerFiles.create(this, uri('/'), account!);
-    if (account != accountKey) {
-      next.dispose();
-      return;
-    }
-    files = next;
-    linkedImages = LinkedImageCache(next.cache.store);
+    final namespace = sha256.convert(
+      utf8.encode('${uri('/').origin}:$account'),
+    );
+    final store = await media_store.createStore('$namespace');
+    if (account != accountKey) return;
+    linkedImages = LinkedImageCache(store);
   }
 
   Future<void> _rememberIdentity() async {
@@ -432,7 +433,7 @@ class RiverApi extends ChangeNotifier {
       recent = ((cached?['recent'] as List?) ?? []).cast<Json>();
       selected = cached?['selected'] as String?;
       if (!groups.any((g) => g['id'] == selected)) selected = null;
-      await _initializeFiles();
+      await _initializeMediaCache();
       if (selected != null) await _loadHistory(selected!);
       loading = false;
       notifyListeners();
@@ -627,7 +628,6 @@ class RiverApi extends ChangeNotifier {
   LiveUpdates? _live;
   final changes = StreamController<void>.broadcast();
   Set<String> online = {};
-  PeerFiles? files;
   RiverCalls? _calls;
   RiverCalls get calls => _calls ??= RiverCalls(this);
   List<Json> activeCalls = [];
@@ -687,12 +687,7 @@ class RiverApi extends ChangeNotifier {
     _live = null;
     unawaited(_calls?.leave());
     activeCalls = [];
-    final oldFiles = files;
-    files = null;
     linkedImages = null;
-    if (oldFiles != null) {
-      unawaited(oldFiles.close().then((_) => oldFiles.dispose()));
-    }
     online = {};
     groups = [];
     _matrixEvents = [];
@@ -737,7 +732,6 @@ class RiverApi extends ChangeNotifier {
     final transition = _active != value;
     if (transition) _apiConnection.reset();
     _active = value;
-    files?.setActive(value);
     _matrix?.active = value;
     if (!value) {
       _live?.close();
@@ -968,7 +962,7 @@ class RiverApi extends ChangeNotifier {
           }),
         );
       }
-      await _initializeFiles();
+      await _initializeMediaCache();
       await refresh();
     } catch (e) {
       error = _backgroundError(e);
@@ -1004,7 +998,7 @@ class RiverApi extends ChangeNotifier {
           user = profile;
           await loadMessagingPreferences();
           await matrix.bind(profile);
-          await _initializeFiles();
+          await _initializeMediaCache();
         }
         _offlineSession = false;
         await _rememberIdentity();
@@ -1037,12 +1031,6 @@ class RiverApi extends ChangeNotifier {
       notifyListeners();
       await Future.wait<void>([
         _loadSelected(),
-        (() async {
-          await files?.setScopes([
-            for (final g in groups.where((g) => g['membership'] == 'join'))
-              FileScope('room', g['id'] as String),
-          ], active: active);
-        })(),
         (() async {
           try {
             final social = await request('/api/friends');
@@ -2057,11 +2045,11 @@ class RiverApi extends ChangeNotifier {
         'Reconnect Matrix messaging to send to this encrypted room.',
       );
     }
-    if (encrypted(id) &&
-        (content['cool.gravitas.river.attachments'] as List? ?? [])
-            .isNotEmpty) {
+    final legacyFiles = content['cool.gravitas.river.attachments'];
+    if (legacyFiles != null &&
+        (legacyFiles is! List || legacyFiles.isNotEmpty)) {
       throw StateError(
-        'Remove the pending legacy files and attach them again for encrypted delivery.',
+        'Peer attachments are no longer supported. Attach the file again with Matrix.',
       );
     }
     if (!delegatedContent && matrixConnected && wire != null) {
@@ -2109,6 +2097,9 @@ class RiverApi extends ChangeNotifier {
     Uint8List bytes,
   ) async {
     requireNetwork();
+    if (bytes.isEmpty || bytes.length > maxAttachmentBytes) {
+      throw StateError('Choose a non-empty file up to 32 MiB.');
+    }
     final wire = matrixRoom(id), account = accountKey;
     if (!matrixConnected || wire == null) {
       throw StateError('Connect Matrix messaging first.');
@@ -2221,10 +2212,6 @@ class RiverApi extends ChangeNotifier {
     _live?.close();
     _calls?.dispose();
     _matrix?.dispose();
-    final oldFiles = files;
-    if (oldFiles != null) {
-      unawaited(oldFiles.close().then((_) => oldFiles.dispose()));
-    }
     changes.close();
     client.close();
     super.dispose();

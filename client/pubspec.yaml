@@ -1,7 +1,7 @@
 name: river
 publish_to: none
 description: River — Gravitas spaces and conversations.
-version: 0.13.0+32
+version: 0.13.1+33
 environment:
   sdk: ^3.10.0
 dependencies:
@@ -21,9 +21,7 @@ dependencies:
   flutter_webrtc: 1.6.2+hotfix.4
   file_picker: 11.0.3
   path_provider: ^2.1.5
-  uuid: ^4.6.0
   mime: ^2.1.0
-  web_socket_channel: ^3.0.3
   web: ^1.1.1
 dev_dependencies:
   integration_test:

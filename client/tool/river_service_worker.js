@@ -1,6 +1,6 @@
 'use strict';
 // Generated from the release's static asset hashes. This cache contains no
-// API/auth responses, Matrix data, linked images, peer files or sticker bytes.
+// API/auth responses, Matrix data, linked images or sticker bytes.
 const CACHE = __RIVER_CACHE__;
 const RESOURCES = __RIVER_RESOURCES__;
 const CORE = __RIVER_CORE__;

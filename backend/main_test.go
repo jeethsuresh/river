@@ -294,3 +294,16 @@ func TestChannelAndFriendRelayRoutes(t *testing.T) {
 		}
 	}
 }
+
+func TestRetiredPeerFileRoutes(t *testing.T) {
+	s, token, _, _ := fixture(t)
+	for _, path := range []string{
+		"/api/groups/11111111-1111-4111-8111-111111111111/files",
+		"/api/groups/11111111-1111-4111-8111-111111111111/files?file_id=11111111-1111-4111-8111-111111111112",
+		"/api/groups/11111111-1111-4111-8111-111111111111/files/signal",
+	} {
+		if w := request(s, "GET", path, "", token); w.Code != http.StatusNotFound {
+			t.Fatalf("retired route %s returned %d: %s", path, w.Code, w.Body.String())
+		}
+	}
+}

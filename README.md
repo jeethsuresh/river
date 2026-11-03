@@ -53,7 +53,7 @@ Next.js River code; Git history retains that implementation.
   the choice per account on the device. Ctrl/Cmd+Enter remains available, and
   mobile Enter inserts a new line. This applies to messages in visual and Markdown
   modes; post and discussion editors keep their multiline behavior.
-- Conversation drafts and pending attachments stay with their room while navigating.
+- Conversation drafts stay with their room while navigating.
   Failed sends retain their transaction ID and offer Retry, including when the
   homeserver accepted a message but its response was lost.
 - Every protected request validates the central session proof; central logout and
@@ -65,7 +65,7 @@ No admin, IAM signing key or Matrix password is deployed to River.
 
 The shared client also includes live updates/presence, friend-selected group
 conversations, catch-up and participating threads, public posts/blogs with independent
-comment policies, peer file attachments and calling. The Go process brokers
+comment policies, Matrix file attachments and calling. The Go process brokers
 centrally authorized MatrixRTC memberships with a LiveKit SFU and Coturn relay.
 See [the parity contract](docs/ORBIT_PARITY.md) and [media setup](deploy/media/README.md).
 Gravitas implements native Matrix client/server and room federation APIs. River connects a local Matrix device through its Apache-2.0 adapter, using native Sliding Sync when advertised and classic sync otherwise. It sends standard messages, threads, reactions, edits and encrypted attachments through that device. Existing Gravitas contacts, delegated space tools, publishing and calls retain their app permissions.
@@ -95,7 +95,7 @@ River follows mutually linked room replacements after homeserver compatibility c
 The Matrix adapter keeps room state and encryption keys in IndexedDB on web and
 SQLite under the application support directory on desktop/mobile. River stores
 viewed chat timelines, loaded thread pages, room navigation metadata, composer
-drafts, pending attachment references and retry transaction IDs in that same
+drafts and retry transaction IDs in that same
 account/device state database. Generic SDK custom values bypass ordinary store
 encryption, so River wraps these records with the SDK storage cipher and the
 existing device store secret. Records are bound to their room and scope.
@@ -113,11 +113,12 @@ connection; this is not an automatic outgoing message queue. Earlier history
 and threads that have not been loaded require a connection. Logout or an
 explicit session rejection clears the visible profile and its startup identity.
 
-Linked images/GIFs are fetched anonymously, validated and cached beside peer file
-attachments: browser Cache API on web, application support files on native.
-The image index uses URL hashes and verifies saved bytes. Its separate 128 MiB
-budget evicts oldest images without removing peer attachments; the latter retain
-their existing 256 MiB budget. Saved stickers remain a separate device library.
+Linked images/GIFs are fetched anonymously, validated and cached in the browser
+Cache API on web and application support files on native. The image index uses
+URL hashes, verifies saved bytes and evicts oldest images within a 128 MiB budget.
+Saved stickers remain a separate device library. Matrix attachments use the SDK
+media cache; peer transfers and signaling have been removed. Old peer attachment
+messages keep their filenames and ask the sender to attach the file again.
 Local database/storage errors are shown without discarding the in-memory draft.
 A single saved timeline or thread record is limited to 16 MiB; a larger record
 reports a local save error while its online view remains usable.
@@ -315,8 +316,9 @@ See [the parity contract](docs/ORBIT_PARITY.md) for the source baseline and feat
 coverage. Run the Go race/vet checks, Flutter analysis/widget tests, web release
 build and signed Android build before publishing. CI also builds Android from
 the pinned SDK; PRs never receive release signing material. The opt-in local media
-fixture and shared browser/Android scenarios check real SFU media, TURN relay and
-peer-file bytes without production accounts or real microphone/camera data.
+fixture and shared browser/Android scenarios check real SFU media and TURN relay
+without production accounts or real microphone/camera data. Matrix integration
+checks cover encrypted file upload and download at the 32 MiB boundary.
 
 Production media needs the separate manual [media setup](deploy/media/README.md).
 Backend and web changes merged to `main` deploy automatically after CI passes; complete the relevant tests before merging.

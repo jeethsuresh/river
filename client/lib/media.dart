@@ -88,7 +88,7 @@ class SavedSticker {
   String get id => sha256.convert(utf8.encode(url)).toString();
 }
 
-/// Saved sticker bytes are deliberately outside the room attachment cache.
+/// Saved sticker bytes are deliberately outside the linked-image cache.
 /// They remain available offline and never acquire an image conversion action.
 class StickerLibrary {
   StickerLibrary(this.openStore);
@@ -176,9 +176,8 @@ class StickerLibrary {
   );
 }
 
-/// Public linked images use the same platform byte store as peer attachments.
-/// They have a separate index/budget so loading images cannot evict files that
-/// this device is advertising to peers. URL identities and bytes are verified.
+/// Public linked images use an account-isolated platform byte store with a
+/// bounded budget. URL identities and saved bytes are verified.
 class LinkedImageCache {
   LinkedImageCache(this.store, {this.budget = 128 * 1024 * 1024});
   final platform.ByteStore store;

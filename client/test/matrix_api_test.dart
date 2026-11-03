@@ -166,6 +166,9 @@ Future<RiverApi> connected(
           200,
         );
       }
+      if (request.url.path == '/api/groups/local/events') {
+        return http.Response('{"events":[]}', 200);
+      }
       return http.Response('{"friends":[],"requests":[],"blocked":[]}', 200);
     }),
   );

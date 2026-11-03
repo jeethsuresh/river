@@ -35,7 +35,6 @@ type server struct {
 	mu          sync.Mutex
 	pairs       map[string]*pairing
 	matrixLinks map[string]*matrixLink
-	files       *signalHub
 }
 
 var uuidPattern = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)
@@ -224,10 +223,6 @@ func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			s.rtcUpdate(w, r, session, room)
 			return
 		}
-		if room := fileSignalRoom(r); room != "" {
-			s.fileSignal(w, r, session, room)
-			return
-		}
 		switch r.URL.Path {
 		case "/api/matrix/link":
 			s.matrixNew(w, r, session)
@@ -362,9 +357,6 @@ func proxyRoute(r *http.Request) (string, bool) {
 	}
 	if len(parts) == 4 && parts[3] == "publication" && r.Method == "POST" {
 		return "/app/v1/groups/" + parts[2] + "/publication", true
-	}
-	if len(parts) == 4 && parts[3] == "files" && r.Method == "GET" {
-		return "/app/v1/groups/" + parts[2] + "/files", true
 	}
 	if len(parts) == 4 && parts[3] == "invitations" && r.Method == "POST" {
 		return "/app/v1/groups/" + parts[2] + "/invitations", true

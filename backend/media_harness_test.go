@@ -38,30 +38,18 @@ func TestLocalMediaHarness(t *testing.T) {
 	var authMu sync.Mutex
 	var mu sync.Mutex
 	leases := map[string]bool{}
-	var manifests []any
 	s.auth.HTTP.Transport = roundTripFunc(func(r *http.Request) (*http.Response, error) {
 		if r.URL.Path == "/oauth/session" {
 			raw, _ := json.Marshal(map[string]any{"active": true, "iss": s.auth.Issuer, "sub": "alice", "app_origin": s.auth.AppURL, "session_id": decoded.Authorization.SessionID, "exp": decoded.Authorization.CheckExpires})
 			return &http.Response{StatusCode: 200, Header: http.Header{"Content-Type": []string{"application/json"}}, Body: io.NopCloser(strings.NewReader(string(raw)))}, nil
 		}
-		if strings.Contains(r.URL.Path, "/rtc") || strings.HasPrefix(r.URL.Path, "/rtc/leases/") || strings.HasSuffix(r.URL.Path, "/files") {
+		if strings.Contains(r.URL.Path, "/rtc") || strings.HasPrefix(r.URL.Path, "/rtc/leases/") {
 			body := map[string]any{}
 			mu.Lock()
 			if r.URL.Path == "/app/v1/rtc" {
 				body = map[string]any{"allow_ice": true, "allow_calls": true}
 			} else if strings.HasPrefix(r.URL.Path, "/rtc/leases/") {
 				body["active"] = leases[strings.TrimPrefix(r.URL.Path, "/rtc/leases/")]
-			} else if strings.HasSuffix(r.URL.Path, "/files") {
-				if id := r.URL.Query().Get("file_id"); id != "" {
-					for _, v := range manifests {
-						m, _ := v.(map[string]any)
-						if m["id"] == id {
-							body["attachment"] = m
-						}
-					}
-				} else {
-					body["attachments"] = manifests
-				}
 			} else {
 				var input map[string]string
 				_ = json.NewDecoder(r.Body).Decode(&input)
@@ -98,18 +86,6 @@ func TestLocalMediaHarness(t *testing.T) {
 		}
 		if r.Method == "OPTIONS" {
 			w.WriteHeader(204)
-			return
-		}
-		if r.URL.Path == "/test/files" && r.Method == "POST" {
-			var manifest map[string]any
-			if json.NewDecoder(io.LimitReader(r.Body, 10000)).Decode(&manifest) != nil {
-				w.WriteHeader(400)
-				return
-			}
-			mu.Lock()
-			manifests = append(manifests, manifest)
-			mu.Unlock()
-			respond(w, 200, map[string]bool{"ok": true})
 			return
 		}
 		if r.URL.Path == "/test/stop" {
