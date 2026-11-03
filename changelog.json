@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "version": "0.13.0",
-  "versionCode": 31,
+  "versionCode": 32,
   "changes": [
     "Show Matrix chats in Chats and Matrix spaces in Communities, with a Matrix badge on their profile pictures.",
     "Remove the separate Matrix destination from the sidebar and bottom navigation.",
