@@ -1,7 +1,15 @@
 use anyhow::{Context, Result, ensure};
 use matrix_sdk::{
     attachment::AttachmentConfig,
-    ruma::events::room::message::{MessageType, RoomMessageEventContent},
+    media::{MediaFormat, MediaRequestParameters, MediaThumbnailSettings},
+    ruma::{
+        OwnedMxcUri,
+        events::room::{
+            MediaSource,
+            message::{MessageType, RoomMessageEventContent},
+        },
+        serde::Base64,
+    },
 };
 use serde_json::json;
 
@@ -51,5 +59,54 @@ impl MatrixCore {
             "Attachment exceeds this device's download limit"
         );
         Ok(bytes)
+    }
+
+    /// Avatars use the authenticated SDK media cache on web and native. Keep
+    /// access tokens out of image URLs and request a small, static thumbnail.
+    pub(crate) async fn avatar(&self, url: &str) -> Result<String> {
+        self.active()?;
+        let url: OwnedMxcUri = url.into();
+        url.validate()?;
+        let source = MediaSource::Plain(url);
+        let media = self.client.media();
+        let work = async {
+            let thumbnail = media
+                .get_media_content(
+                    &MediaRequestParameters {
+                        source: source.clone(),
+                        format: MediaFormat::Thumbnail(MediaThumbnailSettings::new(
+                            96u32.into(),
+                            96u32.into(),
+                        )),
+                    },
+                    true,
+                )
+                .await;
+            let bytes = match thumbnail {
+                Ok(bytes) => bytes,
+                // Some homeservers only provide the original. This also uses
+                // authenticated SDK media access and its persistent cache.
+                Err(_) => media
+                    .get_media_content(
+                        &MediaRequestParameters {
+                            source,
+                            format: MediaFormat::File,
+                        },
+                        true,
+                    )
+                    .await
+                    .map_err(sdk_error)?,
+            };
+            ensure!(
+                bytes.len() <= 2 * 1024 * 1024,
+                "Avatar exceeds this device's download limit"
+            );
+            Ok::<_, anyhow::Error>(bytes)
+        };
+        let bytes =
+            matrix_sdk_common::timeout::timeout(work, std::time::Duration::from_secs(15)).await??;
+        self.active()?;
+        let data: Base64 = Base64::new(bytes);
+        Ok(json!({"data": data}).to_string())
     }
 }

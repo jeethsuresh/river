@@ -13,6 +13,7 @@ import 'content_widgets.dart';
 import 'workspace_widgets.dart';
 import 'home_widgets.dart';
 import 'river_design.dart';
+import 'profile_avatar.dart';
 import 'destination_widgets.dart';
 import 'attachment_widgets.dart';
 import 'matrix_attachment_widgets.dart';
@@ -465,7 +466,8 @@ class _RiverShellState extends State<RiverShell> {
       );
       if (created == true && mounted) {
         setState(() {
-          section = kind == 'matrix' ? 'Matrix' : 'Chats';
+          final group = app.selected == null ? null : app.group(app.selected!);
+          section = group == null ? 'Chats' : roomDestination(app, group);
           filter = 'Chat';
         });
       }
@@ -966,24 +968,17 @@ class _RiverShellState extends State<RiverShell> {
                   navHeading(
                     switch (activeDestination) {
                       'Chats' => 'CONVERSATIONS',
-                      'Matrix' => 'MATRIX ROOMS',
                       'Forums' || 'Posts' => 'BY COMMUNITY',
                       _ => 'YOUR COMMUNITIES',
                     },
-                    add: () => create(
-                      activeDestination == 'Chats'
-                          ? 'dm'
-                          : activeDestination == 'Matrix'
-                          ? 'matrix'
-                          : 'space',
-                    ),
+                    add: () =>
+                        create(activeDestination == 'Chats' ? 'dm' : 'space'),
                   ),
                   for (final g in destinationGroups(app, activeDestination))
                     navigationGroup(g, g['kind'] == 'space' ? 'space' : 'dm'),
                   if (destinationGroups(app, activeDestination).isEmpty)
                     empty(switch (activeDestination) {
                       'Chats' => 'Start a conversation with a friend.',
-                      'Matrix' => 'Connect to people beyond River.',
                       _ => 'Your communities will appear here.',
                     }),
                 ],
@@ -1005,8 +1000,12 @@ class _RiverShellState extends State<RiverShell> {
           ),
           const Divider(),
           ListTile(
-            leading: RiverAvatar(
+            leading: RiverProfileAvatar(
+              app: app,
               name: app.user?['username'] as String? ?? '',
+              avatarUrl: app.personAvatar(
+                app.user?['user_id'] as String? ?? '',
+              ),
               size: 30,
             ),
             title: Text(
@@ -1050,8 +1049,6 @@ class _RiverShellState extends State<RiverShell> {
           IconButton(
             tooltip: activeDestination == 'Chats'
                 ? 'New conversation'
-                : activeDestination == 'Matrix'
-                ? 'Connect with Matrix'
                 : 'New space',
             constraints: const BoxConstraints.tightFor(width: 30, height: 30),
             padding: EdgeInsets.zero,
@@ -1066,13 +1063,17 @@ class _RiverShellState extends State<RiverShell> {
     children: [
       ListTile(
         selected: app.selected == g['id'],
-        leading: Icon(
-          g['membership'] == 'invite'
+        leading: RiverProfileAvatar(
+          app: app,
+          name: g['name'] as String,
+          avatarUrl: g['avatar_url'] as String?,
+          matrix: isMatrixGroup(app, g),
+          icon: g['membership'] == 'invite'
               ? Icons.mark_email_unread_outlined
               : kind == 'space'
               ? Icons.grid_view_outlined
               : Icons.chat_bubble_outline,
-          size: 20,
+          size: 28,
         ),
         title: Text(g['name'] as String, overflow: TextOverflow.ellipsis),
         subtitle: g['membership'] == 'invite' ? const Text('Invitation') : null,
@@ -1207,8 +1208,10 @@ class _RiverShellState extends State<RiverShell> {
                 ),
               for (final m in (g['members'] as List).cast<Json>())
                 ListTile(
-                  leading: const CircleAvatar(
-                    child: Icon(Icons.person_outline),
+                  leading: RiverProfileAvatar(
+                    app: app,
+                    name: m['username'] as String,
+                    avatarUrl: m['avatar_url'] as String?,
                   ),
                   title: Text(m['username'] as String),
                   trailing:
@@ -1335,6 +1338,14 @@ class _RiverShellState extends State<RiverShell> {
                     icon: const Icon(Icons.arrow_back),
                   ),
                   const SizedBox(width: 8),
+                  RiverProfileAvatar(
+                    app: app,
+                    name: g['name'] as String,
+                    avatarUrl: g['avatar_url'] as String?,
+                    matrix: matrixOnly,
+                    size: 32,
+                  ),
+                  const SizedBox(width: 10),
                   Expanded(
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
@@ -1349,9 +1360,7 @@ class _RiverShellState extends State<RiverShell> {
                           ),
                         ),
                         Text(
-                          '${matrixOnly
-                              ? 'Matrix'
-                              : ['dm', 'group'].contains(g['kind'])
+                          '${['dm', 'group'].contains(g['kind'])
                               ? 'Conversation'
                               : g['kind'] == 'channel'
                               ? 'Chatroom'
@@ -1645,22 +1654,6 @@ class _RiverShellState extends State<RiverShell> {
             ],
           ),
         ),
-        if (matrixOnly)
-          const Padding(
-            padding: EdgeInsets.symmetric(horizontal: 16, vertical: 6),
-            child: Row(
-              children: [
-                Icon(Icons.hub_outlined, size: 14, color: muted),
-                SizedBox(width: 6),
-                Expanded(
-                  child: Text(
-                    'Matrix · messages, threads, and attachments',
-                    style: TextStyle(fontSize: 11, color: muted),
-                  ),
-                ),
-              ],
-            ),
-          ),
         if (newMessages && !directory && !voiceRoom)
           TextButton.icon(
             onPressed: () {

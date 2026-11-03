@@ -12,7 +12,7 @@ import 'package:river/content_widgets.dart';
 import 'package:river/home_widgets.dart';
 import 'package:river/main.dart';
 import 'package:river/rich_composer.dart';
-import 'package:river/river_design.dart';
+import 'package:river/profile_avatar.dart';
 import 'package:river/workspace_widgets.dart';
 import 'matrix_messaging_test.dart' show MemoryMatrixStorage;
 
@@ -364,7 +364,7 @@ void main() {
         expect(find.text('Alice Chen'), findsOneWidget);
         expect(find.text('@alice:home'), findsNothing);
         final avatar = find.byKey(const ValueKey('content-avatar-Hello'));
-        expect(tester.widget<RiverAvatar>(avatar).name, 'Alice Chen');
+        expect(tester.widget<RiverProfileAvatar>(avatar).name, 'Alice Chen');
         expect(
           tester.getTopLeft(avatar).dx,
           lessThan(tester.getTopLeft(find.text('Hello')).dx),

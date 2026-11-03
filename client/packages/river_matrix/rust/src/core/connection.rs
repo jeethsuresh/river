@@ -363,11 +363,54 @@ impl MatrixCore {
                 .await
                 .map(|v| v.to_string())
                 .unwrap_or_else(|_| room.room_id().to_string());
+            let direct = room.is_direct().await.unwrap_or(false);
+            let heroes = room.heroes().await;
+            let mut profiles: Vec<Value> = heroes
+                .iter()
+                .map(|h| {
+                    json!({
+                        "user_id": h.user_id, "username": h.display_name,
+                        "avatar_url": h.avatar_url,
+                    })
+                })
+                .collect();
+            let mut avatar = room.avatar_url().or_else(|| {
+                if direct {
+                    heroes
+                        .iter()
+                        .find(|h| h.user_id != self.own_user)
+                        .and_then(|h| h.avatar_url.clone())
+                } else {
+                    None
+                }
+            });
+            // Named direct rooms may have no heroes in /sync. Read their
+            // already-cached members without adding network work to room sync.
+            if direct && (avatar.is_none() || profiles.is_empty()) {
+                let members = room
+                    .members_no_sync(RoomMemberships::JOIN | RoomMemberships::INVITE)
+                    .await
+                    .unwrap_or_default();
+                for member in members.iter().filter(|m| m.user_id() != self.own_user) {
+                    if avatar.is_none() {
+                        avatar = member.avatar_url().map(ToOwned::to_owned);
+                    }
+                    if !profiles
+                        .iter()
+                        .any(|p| p["user_id"] == member.user_id().as_str())
+                    {
+                        profiles.push(json!({"user_id": member.user_id(),
+                            "username": member.display_name(), "avatar_url": member.avatar_url()}));
+                    }
+                }
+            }
             rooms.push(json!({
                 "room_id": room.room_id(), "name": name, "membership": membership,
+                "avatar_url": avatar,
+                "heroes": profiles,
                 "replacement_room": replacements.get(room.room_id()),
                 "upgrade_pending": room.is_tombstoned() && !replacements.contains_key(room.room_id()),
-                "kind": if room.is_space() {"space"} else if room.is_direct().await.unwrap_or(false) {"dm"} else {metadata["kind"].as_str().unwrap_or("group")},
+                "kind": if room.is_space() {"space"} else if direct {"dm"} else {metadata["kind"].as_str().unwrap_or("group")},
                 "channel_kind": metadata["channel_kind"],
                 "description": room.topic(),
                 "parents": parents, "encrypted": room.encryption_state().is_encrypted(),
@@ -426,7 +469,7 @@ impl MatrixCore {
             .await
             .map_err(sdk_error)?
         {
-            members.push(json!({"user_id": member.user_id(), "username": member.display_name().unwrap_or(member.user_id().localpart()), "membership": member.membership()}));
+            members.push(json!({"user_id": member.user_id(), "username": member.display_name().unwrap_or(member.user_id().localpart()), "membership": member.membership(), "avatar_url": member.avatar_url()}));
         }
         Ok(json!({"members": members}).to_string())
     }
@@ -458,6 +501,7 @@ impl MatrixCore {
             data[key].as_str().with_context(|| format!("Missing {key}"))
         };
         match text("action")? {
+            "avatar" => return self.avatar(text("url")?).await,
             "notification" => return self.notification(text("room")?, text("event")?).await,
             "local_read" => return self.local_data(&data, false).await,
             "local_write" => return self.local_data(&data, true).await,

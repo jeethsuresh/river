@@ -499,6 +499,7 @@ class RiverApi extends ChangeNotifier {
       ...friends,
       ...otherContacts,
       for (final g in groups) ...(g['members'] as List? ?? []).cast<Json>(),
+      for (final g in groups) ...(g['heroes'] as List? ?? []).cast<Json>(),
     ];
     for (final person in people) {
       if (person['user_id'] == id || person['username'] == id) {
@@ -516,8 +517,28 @@ class RiverApi extends ChangeNotifier {
     return local.replaceAll(RegExp(r'[._]'), ' ');
   }
 
+  String? personAvatar(String id, {String? room}) {
+    final people = <Json>[
+      if (room != null)
+        ...(group(room)?['members'] as List? ?? []).cast<Json>(),
+      if (user != null) user!,
+      ...friends,
+      ...otherContacts,
+      for (final g in groups) ...(g['members'] as List? ?? []).cast<Json>(),
+      for (final g in groups) ...(g['heroes'] as List? ?? []).cast<Json>(),
+    ];
+    for (final person in people) {
+      if (person['user_id'] == id || person['username'] == id) {
+        final avatar = person['avatar_url'];
+        if (avatar is String && avatar.startsWith('mxc://')) return avatar;
+      }
+    }
+    return null;
+  }
+
   String get _favouritesKey =>
       'river.favourites.${sha256.convert(utf8.encode(accountKey ?? ''))}';
+
   Future<Set<String>> favouritePeople() async {
     final value = await _identity.read(_favouritesKey);
     return value == null
@@ -550,6 +571,18 @@ class RiverApi extends ChangeNotifier {
         byWire.remove(wire);
         continue;
       }
+      final profiles = (room['heroes'] as List? ?? []).cast<Json>();
+      final members = (old?['members'] as List? ?? []).cast<Json>().map((
+        member,
+      ) {
+        final profile = profiles
+            .where((p) => p['user_id'] == member['user_id'])
+            .firstOrNull;
+        return <String, dynamic>{
+          ...member,
+          if (profile != null) 'avatar_url': profile['avatar_url'],
+        };
+      }).toList();
       byWire[wire] = {
         if (old != null) ...old,
         'id': old?['id'] ?? wire,
@@ -558,10 +591,12 @@ class RiverApi extends ChangeNotifier {
             ? 'History: ${room['name']}'
             : room['name'],
         'description': room['description'] ?? old?['description'] ?? '',
+        'avatar_url': room['avatar_url'],
+        'heroes': profiles,
         'channel_kind': room['channel_kind'] ?? old?['channel_kind'],
         'membership': room['membership'],
         'kind': old?['kind'] ?? room['kind'],
-        'members': old?['members'] ?? <Json>[],
+        'members': members,
         'owner_id': room['can_manage'] == true ? (user?['sub']) : null,
         'owner': room['can_manage'] == true,
         'can_manage': room['can_manage'],
@@ -570,7 +605,7 @@ class RiverApi extends ChangeNotifier {
         'replacement_room': room['replacement_room'],
         'upgrade_pending': room['upgrade_pending'],
         'unread_count': room['unread_count'],
-        'matrix_only': old == null,
+        'matrix_only': old == null || old['matrix_only'] == true,
         'matrix_parents': room['parents'] ?? [],
       };
     }
