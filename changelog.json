@@ -1,10 +1,9 @@
 {
   "schemaVersion": 1,
-  "version": "0.12.8",
-  "versionCode": 30,
+  "version": "0.12.9",
+  "versionCode": 31,
   "changes": [
-    "Show conversation names, senders and message previews in Android notifications and bubbles by decrypting messages on this device.",
-    "Keep notification delivery end-to-end encrypted: Private Store receives only room and event identifiers.",
-    "Keep a generic alert when offline or message keys are unavailable, and hide previews from the public lock screen."
+    "Use the Back gesture to open the sidebar on phone layouts.",
+    "Use Back again while the sidebar is open to continue the usual back navigation."
   ]
 }

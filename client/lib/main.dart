@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import 'api.dart';
 import 'store_notifications.dart';
@@ -334,7 +335,34 @@ class _RiverShellState extends State<RiverShell> {
   }
 
   final scaffold = GlobalKey<ScaffoldState>();
+  bool continuingBack = false;
   bool sending = false;
+
+  Future<void> handleBack(Object? result) async {
+    if (continuingBack) return;
+    final shell = scaffold.currentState;
+    if (shell == null) return;
+    if (!shell.isDrawerOpen) {
+      shell.openDrawer();
+      return;
+    }
+
+    final navigator = Navigator.of(context);
+    final route = ModalRoute.of(context);
+    // Remove the drawer's local history before continuing the original Back.
+    // Otherwise the second gesture would only close the drawer.
+    shell.closeDrawer();
+    setState(() => continuingBack = true);
+    await WidgetsBinding.instance.endOfFrame;
+    try {
+      if (mounted && route?.isCurrent == true) {
+        if (!await navigator.maybePop(result)) await SystemNavigator.pop();
+      }
+    } finally {
+      if (mounted) setState(() => continuingBack = false);
+    }
+  }
+
   @override
   void dispose() {
     timeline.dispose();
@@ -607,35 +635,41 @@ class _RiverShellState extends State<RiverShell> {
             ),
           ],
         );
-        return Scaffold(
-          key: scaffold,
-          appBar: wide || group?['membership'] == 'join'
-              ? null
-              : AppBar(
-                  title: Text(
-                    group?['name'] as String? ?? 'River',
-                    style: const TextStyle(fontWeight: FontWeight.w800),
-                  ),
-                  actions: [
-                    IconButton(
-                      tooltip: 'Refresh',
-                      onPressed: () => app.refresh(),
-                      icon: const Icon(Icons.refresh),
+        return PopScope<Object?>(
+          canPop: wide || continuingBack,
+          onPopInvokedWithResult: (didPop, result) {
+            if (!didPop && !wide) unawaited(handleBack(result));
+          },
+          child: Scaffold(
+            key: scaffold,
+            appBar: wide || group?['membership'] == 'join'
+                ? null
+                : AppBar(
+                    title: Text(
+                      group?['name'] as String? ?? 'River',
+                      style: const TextStyle(fontWeight: FontWeight.w800),
                     ),
-                  ],
-                ),
-          bottomNavigationBar: wide || group != null
-              ? null
-              : mobileDestinations(),
-          drawer: wide ? null : Drawer(child: SafeArea(child: navigation())),
-          body: SafeArea(
-            bottom: false,
-            child: Row(
-              children: [
-                if (wide) SizedBox(width: 248, child: navigation()),
-                if (wide) const VerticalDivider(width: 1),
-                Expanded(child: body),
-              ],
+                    actions: [
+                      IconButton(
+                        tooltip: 'Refresh',
+                        onPressed: () => app.refresh(),
+                        icon: const Icon(Icons.refresh),
+                      ),
+                    ],
+                  ),
+            bottomNavigationBar: wide || group != null
+                ? null
+                : mobileDestinations(),
+            drawer: wide ? null : Drawer(child: SafeArea(child: navigation())),
+            body: SafeArea(
+              bottom: false,
+              child: Row(
+                children: [
+                  if (wide) SizedBox(width: 248, child: navigation()),
+                  if (wide) const VerticalDivider(width: 1),
+                  Expanded(child: body),
+                ],
+              ),
             ),
           ),
         );
