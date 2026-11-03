@@ -128,7 +128,7 @@ class StoreNotificationDeliveryTest {
             StorePush.enrich(c, first, preview)
             StorePush.finishPreview(c, first)
         }
-        await { notifications().singleOrNull()?.notification?.extras?.getString("android.text")?.contains("Hello 🌊🔐") == true }
+        await { notifications().singleOrNull()?.notification?.extras?.getCharSequence("android.text")?.toString()?.contains("Hello 🌊🔐") == true }
         val rich = notifications().single().notification
         assertEquals(android.app.Notification.VISIBILITY_PRIVATE, rich.visibility)
         assertEquals("River", rich.publicVersion.extras.getCharSequence("android.title").toString())
@@ -166,10 +166,10 @@ class StoreNotificationDeliveryTest {
             running
         }
         val engine = FlutterEngineCache.getInstance().get("river")!!
+        await(40) { StorePush.pending(c).isEmpty() }
         var rendered = false
         instrumentation.runOnMainSync { rendered = engine.renderer.isDisplayingFlutterUi }
         assertFalse("Background decryption must not start the app UI", rendered)
-        await(40) { StorePush.pending(c).isEmpty() }
         assertEquals("New conversation activity", notifications().single().notification.extras.getString("android.text"))
         // The stand-in ciphertext above is only for native binding. Foreground
         // startup uses an empty real credential store in this disposable test.
