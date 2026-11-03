@@ -82,6 +82,37 @@ void main() {
   final namespace = sha256.convert(utf8.encode('https://gravitas.cool|alice'));
   final key = 'river_matrix.session.$namespace';
 
+  test('a background alert never resumes unfinished Matrix sign-in', () async {
+    final storage = MemoryMatrixStorage();
+    storage.values['river.offline_profile'] = jsonEncode({
+      'origin': 'https://chat.gravitas.cool',
+      'profile': profile,
+    });
+    storage.values['river_matrix.pending.$namespace'] = jsonEncode({
+      'id': 'unfinished-link',
+      'expires_at': DateTime.now().millisecondsSinceEpoch ~/ 1000 + 300,
+    });
+    var requests = 0;
+    final api = RiverApi(
+      live: false,
+      matrixEnabled: true,
+      matrixStorage: storage,
+      matrixFactory: (_) async => throw StateError('No saved Matrix device'),
+      client: MockClient((_) async {
+        requests++;
+        return http.Response('{}', 500);
+      }),
+    )..active = false;
+    try {
+      expect(await api.notificationPreview(ticket, restore: true), isEmpty);
+      expect(requests, 0);
+      expect(api.matrix.connecting, isFalse);
+      expect(storage.values['river_matrix.pending.$namespace'], isNotNull);
+    } finally {
+      api.dispose();
+    }
+  });
+
   test(
     'cold preview restores only the saved device and saves rotated credentials on errors',
     () async {

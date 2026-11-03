@@ -372,6 +372,7 @@ class MatrixMessaging extends ChangeNotifier {
     MatrixJson profile, {
     bool synchronize = true,
     bool loadRooms = true,
+    bool resumeLink = true,
   }) async {
     final account = '${profile['issuer']}|${profile['sub']}';
     if (accountKey == account && (connected || connecting)) return;
@@ -425,7 +426,7 @@ class MatrixMessaging extends ChangeNotifier {
           await engine.close(generation < _revokeBefore);
           rethrow;
         }
-      } else {
+      } else if (resumeLink) {
         final pending = await storage.read(_pendingKey);
         _guard(generation);
         if (pending != null) {

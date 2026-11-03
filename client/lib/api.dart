@@ -343,7 +343,12 @@ class RiverApi extends ChangeNotifier {
     }
     if (restore && !matrix.connected && !matrix.connecting) {
       matrix.active = false;
-      await matrix.bind(user!, synchronize: false, loadRooms: false);
+      await matrix.bind(
+        user!,
+        synchronize: false,
+        loadRooms: false,
+        resumeLink: false,
+      );
     }
     // Foreground boot may still be opening the same saved device.
     for (
