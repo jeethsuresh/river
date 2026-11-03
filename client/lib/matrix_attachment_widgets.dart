@@ -3,13 +3,15 @@ import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:mime/mime.dart';
 import 'api.dart';
+import 'attachment_limits.dart';
 import 'media_widgets.dart';
 
 Future<void> sendMatrixAttachment(
   BuildContext context,
   RiverApi app,
-  String room,
-) async {
+  String room, {
+  bool Function()? canSend,
+}) async {
   final engine = app.matrix.transport;
   final wire = app.matrixRoom(room);
   final account = app.accountKey;
@@ -17,8 +19,8 @@ Future<void> sendMatrixAttachment(
   final picked = await FilePicker.pickFiles(withData: true);
   if (picked == null || !context.mounted) return;
   final file = picked.files.single;
-  if (file.size > 32 * 1024 * 1024 || file.bytes == null) {
-    throw StateError('Choose a file smaller than 32 MiB.');
+  if (file.size < 1 || file.size > maxAttachmentBytes || file.bytes == null) {
+    throw StateError('Choose a non-empty file up to 32 MiB.');
   }
   final confirmed = await showDialog<bool>(
     context: context,
@@ -39,7 +41,7 @@ Future<void> sendMatrixAttachment(
       ],
     ),
   );
-  if (confirmed != true) return;
+  if (confirmed != true || canSend?.call() == false) return;
   if (account != app.accountKey || app.matrix.transport != engine) {
     throw StateError('Your account changed.');
   }

@@ -138,6 +138,34 @@ void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
   setUp(() => FlutterSecureStorage.setMockInitialValues({}));
 
+  testWidgets(
+    'old attachment drafts keep their text and explain reattachment',
+    (tester) async {
+      final fixture = Fixture();
+      await fixture.seed();
+      final api = fixture.api();
+      await api.boot();
+      await api.saveDraft('!one:example.org', {
+        'text': 'Kept text',
+        'files': [
+          {'name': 'old.bin'},
+        ],
+      });
+      await tester.pumpWidget(RiverApp(api: api, boot: false));
+      await tester.pumpAndSettle();
+      expect(
+        find.textContaining('Old peer attachments were removed'),
+        findsOneWidget,
+      );
+      expect((await api.draft('!one:example.org'))!['text'], 'Kept text');
+      expect(
+        (await api.draft('!one:example.org'))!.containsKey('files'),
+        false,
+      );
+      await tester.pumpWidget(const SizedBox());
+    },
+  );
+
   for (final width in [390.0, 1200.0]) {
     testWidgets(
       'offline restart restores rooms, paged history and drafts at width $width',

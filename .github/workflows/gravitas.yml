@@ -20,7 +20,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           repository: jeethsuresh/iam-server
-          ref: e51f0115696c3e39d44bf303ef0e4ba24a3a28b5
+          ref: 525d49c6c42832d94943ae561f910eeb7104c59d
           path: .matrix-server
           persist-credentials: false
       - name: Build disposable protocol peers and River client

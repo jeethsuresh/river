@@ -726,12 +726,25 @@ async fn qr_verification_recovers_historical_encrypted_messages() -> Result<()> 
         recovered,
         "Historical encrypted message was not recovered from backup"
     );
+    let attachment = vec![0x5a; 32 * 1024 * 1024];
+    assert!(
+        first
+            .send_attachment(
+                room_id.clone(),
+                "too-large.bin".into(),
+                "application/octet-stream".into(),
+                vec![0x5a; attachment.len() + 1],
+                format!("oversize-{prefix}"),
+            )
+            .await
+            .is_err()
+    );
     let sent = first
         .send_attachment(
             room_id.clone(),
             "proof.txt".into(),
             "text/plain".into(),
-            b"encrypted attachment".to_vec(),
+            attachment.clone(),
             format!("file-{prefix}"),
         )
         .await?;
@@ -751,7 +764,7 @@ async fn qr_verification_recovers_historical_encrypted_messages() -> Result<()> 
         second
             .download_attachment(file["content"].to_string())
             .await?,
-        b"encrypted attachment"
+        attachment
     );
     // A third device exercises the separate recovery-key path without QR.
     let third = device(&format!("RIVER-C-{prefix}")).await?;

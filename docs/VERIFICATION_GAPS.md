@@ -60,13 +60,13 @@ Sources: [LiveKit room API](https://docs.livekit.io/reference/other/roomservice-
 [1.13.10 allocator](https://github.com/livekit/livekit/blob/v1.13.10/pkg/service/roomallocator.go),
 [1.13.10 admission check](https://github.com/livekit/livekit/blob/v1.13.10/pkg/rtc/room.go).
 
-## 5. Peer-file stress and storage pressure
+## 5. Attachment storage pressure
 
-Actual 256KiB transfer, hash verification and retained-peer recovery passed.
-Exercise the five-file, 25MiB/file, 50MiB/message boundaries over real transport,
-poor networks and full storage. Exercise the 256MiB local cache and actual
-browser/Android storage eviction. Losing every peer copy has no recovery by
-design; River does not promise server file backup.
+Matrix attachments use server storage and a 32 MiB limit per file. Boundary,
+encryption and recipient download tests cover the standard transport. Exercise
+large concurrent uploads and downloads over poor networks and monitor homeserver
+storage capacity. Historical peer files have no server copy and must be attached
+again by a member who still has the original.
 
 ## 6. Complete production account journeys
 

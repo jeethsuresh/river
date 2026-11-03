@@ -2,15 +2,14 @@
   "name": "River",
   "directory": "client",
   "engine": "flutter",
-  "version": "0.13.0",
-  "versionCode": 13000,
+  "version": "0.13.1",
+  "versionCode": 13001,
   "flutterVersion": "3.47.7",
   "flutterRevision": "abaf9c523780a608bd46686fd5e53740a07077f8",
   "defines": [],
   "changes": [
-    "Show Matrix chats in Chats and Matrix spaces in Communities, with a Matrix badge on their profile pictures.",
-    "Remove the separate Matrix destination from the sidebar and bottom navigation.",
-    "Load Matrix contact and space profile pictures, with cached pictures and initials when a picture is unavailable."
+    "Send chat and call-chat attachments through Matrix, with a 32 MiB limit per file.",
+    "Remove peer file transfers; ask senders to attach old peer files again to make them available."
   ],
   "schemaVersion": 1,
   "slug": "river",

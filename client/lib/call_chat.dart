@@ -3,7 +3,7 @@ import 'package:flutter/material.dart';
 import 'api.dart';
 import 'rich_composer.dart';
 import 'content_widgets.dart';
-import 'file_models.dart';
+import 'matrix_attachment_widgets.dart';
 
 class CallChatScreen extends StatefulWidget {
   const CallChatScreen({super.key, required this.api, required this.room});
@@ -14,7 +14,7 @@ class CallChatScreen extends StatefulWidget {
 }
 
 class _CallChatScreenState extends State<CallChatScreen> {
-  final events = <Json>[], attachments = <Json>[];
+  final events = <Json>[];
   final draft = TextEditingController();
   StreamSubscription<void>? changes;
   String? cursor, error, payload;
@@ -35,7 +35,6 @@ class _CallChatScreenState extends State<CallChatScreen> {
       setState(() {
         if (!allowed) {
           events.clear();
-          attachments.clear();
         }
       });
     }
@@ -89,18 +88,12 @@ class _CallChatScreenState extends State<CallChatScreen> {
   }
 
   Future<void> send() async {
-    if (sending ||
-        !allowed ||
-        (draft.text.trim().isEmpty && attachments.isEmpty)) {
+    if (sending || !allowed || draft.text.trim().isEmpty) {
       return;
     }
-    final body = draft.text.trim(), sentFiles = List<Json>.of(attachments);
-    final c = <String, dynamic>{
-      'msgtype': 'm.text',
-      'body': body.isEmpty ? 'Shared ${attachments.length} file(s)' : body,
-      if (attachments.isNotEmpty) 'cool.gravitas.river.attachments': sentFiles,
-    };
-    final key = '$body:${attachments.map((a) => a['id']).join(',')}';
+    final body = draft.text.trim();
+    final c = <String, dynamic>{'msgtype': 'm.text', 'body': body};
+    final key = body;
     if (key != payload) {
       payload = key;
       txn = transactionId();
@@ -108,16 +101,8 @@ class _CallChatScreenState extends State<CallChatScreen> {
     setState(() => sending = true);
     try {
       await widget.api.send(widget.room, 'm.room.message', c, txn);
-      for (final file in sentFiles) {
-        await widget.api.files?.publish(file);
-      }
       if (!mounted) return;
       if (draft.text.trim() == body) draft.clear();
-      setState(
-        () => attachments.removeWhere(
-          (a) => sentFiles.any((f) => a['id'] == f['id']),
-        ),
-      );
       await load();
     } catch (e) {
       if (mounted) setState(() => error = '$e · Your draft is kept.');
@@ -127,16 +112,25 @@ class _CallChatScreenState extends State<CallChatScreen> {
   }
 
   Future<void> pick() async {
-    final files = widget.api.files;
-    if (files == null) return;
+    if (sending || !allowed || !widget.api.matrixConnected) return;
+    final account = widget.api.accountKey;
+    setState(() => sending = true);
     try {
-      final added = await files.pick(
-        FileScope('room', widget.room),
-        existing: attachments,
+      if (widget.api.matrixRoom(widget.room) == null) {
+        await widget.api.refresh();
+      }
+      if (!mounted || !allowed || account != widget.api.accountKey) return;
+      await sendMatrixAttachment(
+        context,
+        widget.api,
+        widget.room,
+        canSend: () => mounted && allowed && account == widget.api.accountKey,
       );
-      if (mounted) setState(() => attachments.addAll(added));
+      await load();
     } catch (e) {
       if (mounted) setState(() => error = '$e');
+    } finally {
+      if (mounted) setState(() => sending = false);
     }
   }
 
@@ -203,24 +197,13 @@ class _CallChatScreenState extends State<CallChatScreen> {
                   padding: const EdgeInsets.all(12),
                   child: Column(
                     children: [
-                      for (final f in attachments)
-                        ListTile(
-                          title: Text(f['name'] as String),
-                          trailing: IconButton(
-                            tooltip: 'Remove attachment',
-                            onPressed: sending
-                                ? null
-                                : () => setState(() => attachments.remove(f)),
-                            icon: const Icon(Icons.close),
-                          ),
-                        ),
                       Row(
                         children: [
                           Expanded(
                             child: RichComposer(
                               controller: draft,
                               label: 'Message callers',
-                              onAttach: sending || attachments.length >= 5
+                              onAttach: sending || !widget.api.matrixConnected
                                   ? null
                                   : pick,
                               onSubmit: sending ? null : send,

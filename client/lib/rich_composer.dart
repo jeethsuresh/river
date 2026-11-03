@@ -1,5 +1,5 @@
 // The clipboard switch is experimental in pinned flutter_quill 11.6.0.
-// Keep it off so pasted HTML cannot inject remote embeds into a peer-only editor.
+// Keep it off so pasted HTML cannot inject remote embeds into a message editor.
 // ignore_for_file: experimental_member_use
 import 'dart:async';
 import 'package:flutter/foundation.dart';
@@ -145,7 +145,7 @@ class _RichComposerState extends State<RichComposer> {
           ? q.Document()
           : q.Document.fromDelta(toDelta.convert(loaded)),
       selection: const TextSelection.collapsed(offset: 0),
-      // Files use River's peer transport. Rich clipboard HTML must not embed
+      // Files use Matrix media uploads. Rich clipboard HTML must not embed
       // remote images, unsupported formatting, or hidden tracking content.
       config: const q.QuillControllerConfig(
         clipboardConfig: q.QuillClipboardConfig(enableExternalRichPaste: false),

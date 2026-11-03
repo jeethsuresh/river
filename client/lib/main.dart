@@ -16,11 +16,9 @@ import 'home_widgets.dart';
 import 'river_design.dart';
 import 'profile_avatar.dart';
 import 'destination_widgets.dart';
-import 'attachment_widgets.dart';
 import 'matrix_attachment_widgets.dart';
 import 'matrix_setup.dart';
 import 'call_widgets.dart';
-import 'file_models.dart' show FileScope;
 import 'rich_composer.dart';
 import 'media_widgets.dart';
 
@@ -191,7 +189,6 @@ class _RiverShellState extends State<RiverShell> {
   String section = 'Home', filter = 'Chat', conversationQuery = '';
   bool searchOpen = false, spaceChat = false;
   final draft = TextEditingController();
-  final attachments = <Json>[];
   final timeline = ScrollController();
   String? renderedList, renderedLast;
   bool newMessages = false;
@@ -235,7 +232,6 @@ class _RiverShellState extends State<RiverShell> {
 
   Json composerSnapshot() => {
     'text': draft.text,
-    'files': List<Json>.of(attachments),
     'txn': retryTxn,
     'payload': retryPayload,
   };
@@ -259,9 +255,7 @@ class _RiverShellState extends State<RiverShell> {
     _lastDraftWrites[room] = encoded;
     await app.saveDraft(
       room,
-      draft.text.isEmpty && attachments.isEmpty && retryTxn == null
-          ? null
-          : value,
+      draft.text.isEmpty && retryTxn == null ? null : value,
     );
     if (app.cacheError != null && _lastDraftWrites[room] == encoded) {
       _lastDraftWrites.remove(room);
@@ -269,11 +263,7 @@ class _RiverShellState extends State<RiverShell> {
   }
 
   String? composerRoom;
-  final drafts =
-      <
-        String,
-        ({String text, List<Json> files, String? txn, String? payload})
-      >{};
+  final drafts = <String, ({String text, String? txn, String? payload})>{};
 
   void bindComposer() {
     final id = app.selected;
@@ -290,7 +280,6 @@ class _RiverShellState extends State<RiverShell> {
     if (composerRoom != null) {
       drafts[composerRoom!] = (
         text: draft.text,
-        files: List.of(attachments),
         txn: retryTxn,
         payload: retryPayload,
       );
@@ -298,9 +287,6 @@ class _RiverShellState extends State<RiverShell> {
     final saved = drafts.remove(room);
     composerRoom = room;
     draft.text = saved?.text ?? '';
-    attachments
-      ..clear()
-      ..addAll(saved?.files ?? []);
     retryTxn = saved?.txn;
     retryPayload = saved?.payload;
     _bindingComposer = false;
@@ -320,13 +306,20 @@ class _RiverShellState extends State<RiverShell> {
             setState(() {
               _bindingComposer = true;
               draft.text = value['text'] as String? ?? '';
-              attachments
-                ..clear()
-                ..addAll(((value['files'] as List?) ?? []).cast<Json>());
               retryTxn = value['txn'] as String?;
               retryPayload = value['payload'] as String?;
               _bindingComposer = false;
             });
+            if ((value['files'] as List?)?.isNotEmpty ?? false) {
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(
+                  content: Text(
+                    'Old peer attachments were removed from this draft. Attach the files again.',
+                  ),
+                ),
+              );
+              await persistComposer();
+            }
           } catch (_) {
             // Keep an editable composer when local storage cannot be opened.
           }
@@ -1776,14 +1769,6 @@ class _RiverShellState extends State<RiverShell> {
               padding: const EdgeInsets.all(8),
               child: Column(
                 children: [
-                  if (attachments.isNotEmpty && viewFilter == 'Chat')
-                    PendingAttachments(
-                      files: attachments,
-                      remove: (f) => setState(() {
-                        attachments.remove(f);
-                        composerChanged();
-                      }),
-                    ),
                   if (viewFilter != 'Chat')
                     FilledButton.icon(
                       onPressed: () => showDialog<bool>(
@@ -1810,28 +1795,15 @@ class _RiverShellState extends State<RiverShell> {
                             onAttach:
                                 sending ||
                                     needsMessaging ||
-                                    (!app.matrixConnected && app.files == null)
+                                    !app.matrixConnected
                                 ? null
-                                : () => action(() async {
-                                    if (app.matrixConnected) {
-                                      await sendMatrixAttachment(
-                                        context,
-                                        app,
-                                        g['id'] as String,
-                                      );
-                                      return;
-                                    }
-                                    final picked = await app.files!.pick(
-                                      FileScope('room', g['id'] as String),
-                                      existing: attachments,
-                                    );
-                                    if (mounted && app.selected == g['id']) {
-                                      setState(() {
-                                        attachments.addAll(picked);
-                                        composerChanged();
-                                      });
-                                    }
-                                  }),
+                                : () => action(
+                                    () => sendMatrixAttachment(
+                                      context,
+                                      app,
+                                      g['id'] as String,
+                                    ),
+                                  ),
                             label: 'Message',
                             hint: 'Message ${g['name']}…',
                             onSubmit: sending || needsMessaging
@@ -1892,14 +1864,10 @@ class _RiverShellState extends State<RiverShell> {
   Future<void> send(Json g) async {
     final room = composerRoom, account = app.accountKey;
     final body = draft.text.trim();
-    if ((body.isEmpty && attachments.isEmpty) || sending) return;
+    if (body.isEmpty || sending) return;
     const type = 'm.room.message';
     final content = <String, dynamic>{
-      'body': body.isEmpty
-          ? attachments.map((f) => f['name']).join(', ')
-          : body,
-      if (attachments.isNotEmpty)
-        'cool.gravitas.river.attachments': List<Json>.from(attachments),
+      'body': body,
       'msgtype': 'm.text',
       'cool.gravitas.river': {'version': 1, 'kind': 'message'},
     };
@@ -1914,14 +1882,8 @@ class _RiverShellState extends State<RiverShell> {
     if (!mounted || account != app.accountKey) return;
     try {
       await app.send(g['id'] as String, type, content, retryTxn!);
-      for (final f
-          in (content['cool.gravitas.river.attachments'] as List<Json>?) ??
-              <Json>[]) {
-        await app.files?.publish(f);
-      }
       if (mounted && composerRoom == room && draft.text.trim() == body) {
         draft.clear();
-        attachments.clear();
         retryTxn = null;
         retryPayload = null;
         await persistComposer();

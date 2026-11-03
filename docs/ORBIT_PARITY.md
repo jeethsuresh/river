@@ -41,12 +41,14 @@ text/voice sections and per-channel thread shortcuts, live voice occupancy, and
 conversation search by name or member. Live updates use authenticated SSE invalidation,
 PostgreSQL notifications and authorized refresh instead of idle polling.
 
-## Peer files and calls
+## Attachments and calls
 
-Peer attachments permit five files, 25MiB each/50MiB per message. SHA-256-verified
-account-isolated local caches retain 256MiB with eviction. Data channels implement
-chunking, backpressure, progress/retry and returning-peer retrieval from retained
-copies. The server carries metadata/signaling; no file backup is promised.
+Attachments now use standard Matrix media, with one file per send and a 32 MiB
+limit shared by River and Gravitas. Encrypted rooms encrypt files on the sender's
+device and verify/decrypt them on recipients' devices. Files remain downloadable
+from the homeserver after the sender goes offline. The earlier Orbit peer-file
+transport, local-copy discovery and signaling have been removed. Historical
+peer attachments show a notice asking the sender to attach them again.
 Calls use separate device leases, sticky MatrixRTC slot/member events and a
 LiveKit transport with standard encrypted WebRTC media. Voice/video/screen share,
 mini call controls, active participants, mute/deafen, speaker/camera switching and
@@ -85,10 +87,9 @@ implementations, rather than a product wishlist or full Matrix specification.
   ThreadScreen, PostScreen, BlogScreen, RiverContent and RiverPublishing. The
   audit found and fixed the visual editor, link handling, feed reaction target,
   entry acknowledgement, unread crowding and channel-thread navigation gaps.
-- Files: Orbit's files/file exchange/storage and peer mesh map to PeerFiles,
-  PeerMesh and account-isolated FileCache. Selection, scope checks, immutable
-  metadata, peer chunks/backpressure, hash verification, progress, retries, retained
-  copies and cache eviction remain covered by 0.4 media tests and unit regressions.
+- Files: the historical peer-file implementation has been replaced by standard
+  Matrix media uploads and downloads. The current 32 MiB boundary and encrypted
+  transfers are verified by the Matrix integration suite.
 - Calls: Orbit's web call controls, mobile core/calls and call screen map to
   RiverCalls, call widgets/chat, the native ongoing-call service, Gravitas leases
   and Go's LiveKit/TURN broker. Voice, camera, simultaneous screen sharing,

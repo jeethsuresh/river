@@ -7,7 +7,6 @@ import 'api.dart';
 import 'comment_tree.dart';
 import 'publishing_widgets.dart';
 import 'package:flutter/services.dart';
-import 'attachment_widgets.dart';
 import 'matrix_attachment_widgets.dart';
 import 'rich_composer.dart';
 import 'media.dart';
@@ -401,7 +400,14 @@ class ContentCard extends StatelessWidget {
                 for (final file
                     in ((c['cool.gravitas.river.attachments'] as List?) ?? [])
                         .cast<Json>())
-                  AttachmentCard(app: app, file: file),
+                  ListTile(
+                    contentPadding: EdgeInsets.zero,
+                    leading: const Icon(Icons.insert_drive_file_outlined),
+                    title: Text(file['name'] as String? ?? 'Attachment'),
+                    subtitle: const Text(
+                      'This old peer attachment is unavailable. Ask the sender to attach it again.',
+                    ),
+                  ),
                 const SizedBox(height: 2),
                 Wrap(
                   key: ValueKey('content-meta-${event['event_id']}'),

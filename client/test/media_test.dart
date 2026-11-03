@@ -30,7 +30,7 @@ class ReconnectingImageCache extends LinkedImageCache {
 
 void main() {
   test(
-    'linked images survive restart offline, verify bytes, and retain peer files during eviction',
+    'linked images survive restart offline, verify bytes, and leave unrelated cached data untouched during eviction',
     () async {
       final directory = await Directory.systemTemp.createTemp(
         'river-image-cache-',
@@ -41,7 +41,7 @@ void main() {
       final gif = base64Decode(
         'R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7',
       );
-      await store.put('peer-file', Uint8List.fromList([1, 2, 3]));
+      await store.put('unrelated-data', Uint8List.fromList([1, 2, 3]));
       var downloads = 0;
       final online = MockClient((request) async {
         downloads++;
@@ -76,7 +76,7 @@ void main() {
         ),
         isNull,
       );
-      expect(await store.get('peer-file'), [1, 2, 3]);
+      expect(await store.get('unrelated-data'), [1, 2, 3]);
       final key =
           'image-${sha256.convert(utf8.encode('https://host/second.gif'))}';
       await store.put(key, Uint8List.fromList([0]));
