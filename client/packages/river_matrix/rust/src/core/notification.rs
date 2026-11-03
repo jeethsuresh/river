@@ -1,6 +1,6 @@
 //! Notification content is fetched and decrypted by the existing SDK device.
 //! The distributor receives identifiers only; this result never leaves River.
-use super::connection::MatrixCore;
+use super::connection::{MatrixCore, sdk_error};
 use anyhow::{Context, Result};
 use matrix_sdk::{
     RoomState,
@@ -61,7 +61,8 @@ impl MatrixCore {
                             .retry_limit(0),
                     ),
                 )
-                .await?;
+                .await
+                .map_err(sdk_error)?;
             let value: Value = serde_json::from_str(event.raw().json().get())?;
             if value["event_id"] != event_id.as_str()
                 || value["unsigned"].get("redacted_because").is_some()
@@ -81,13 +82,13 @@ impl MatrixCore {
                 return Ok(json!({}));
             };
             let sender = UserId::parse(value["sender"].as_str().context("Missing sender")?)?;
-            let member = room.get_member_no_sync(&sender).await?;
+            let member = room.get_member_no_sync(&sender).await.map_err(sdk_error)?;
             let sender_name = member
                 .as_ref()
                 .and_then(|m| m.display_name())
                 .unwrap_or(sender.as_str())
                 .to_owned();
-            let title = room.display_name().await?.to_string();
+            let title = room.display_name().await.map_err(sdk_error)?.to_string();
             Ok::<_, anyhow::Error>(json!({"title": title, "sender": sender_name, "body": body}))
         };
         let result = matrix_sdk_common::timeout::timeout(work, Duration::from_secs(20)).await??;
