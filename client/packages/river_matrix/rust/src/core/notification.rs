@@ -45,68 +45,52 @@ impl MatrixCore {
         let room_id = RoomId::parse(room)?;
         let event_id = EventId::parse(event)?;
         let work = async {
-            // First try the saved keys. If a to-device key arrived with this
-            // message, consume it through the same serialized sync as the UI.
-            // Never create another device or race a second refresh-token owner.
-            for attempt in 0..3 {
-                self.active()?;
-                if let Some(room) = self.client.get_room(&room_id) {
-                    if room.state() != RoomState::Joined {
-                        return Ok(json!({}));
-                    }
-                    let event = room
-                        .event(
-                            &event_id,
-                            Some(
-                                RequestConfig::default()
-                                    .timeout(Duration::from_secs(10))
-                                    .retry_limit(0),
-                            ),
-                        )
-                        .await?;
-                    let value: Value = serde_json::from_str(event.raw().json().get())?;
-                    if value["event_id"] != event_id.as_str() {
-                        return Ok(json!({}));
-                    }
-                    if value["unsigned"].get("redacted_because").is_some()
-                        || (room.encryption_state().is_encrypted()
-                            && event.encryption_info().is_none()
-                            && value["type"] != "m.room.encrypted")
-                    {
-                        return Ok(json!({}));
-                    }
-                    // An encrypted room must never preview an injected plaintext
-                    // message. SDK decryption information proves this was encrypted.
-                    if !room.encryption_state().is_encrypted() || event.encryption_info().is_some()
-                    {
-                        if let Some(body) = preview(&value, self.own_user.as_str()) {
-                            let sender =
-                                UserId::parse(value["sender"].as_str().context("Missing sender")?)?;
-                            let member = room.get_member_no_sync(&sender).await?;
-                            let sender_name = member
-                                .as_ref()
-                                .and_then(|m| m.display_name())
-                                .unwrap_or(sender.as_str())
-                                .to_owned();
-                            let title = room.display_name().await?.to_string();
-                            return Ok(
-                                json!({"title": title, "sender": sender_name, "body": body}),
-                            );
-                        }
-                        if value["type"] != "m.room.encrypted" {
-                            return Ok(json!({}));
-                        }
-                    }
-                }
-                if attempt < 2 {
-                    self.sync().await?;
-                }
+            self.active()?;
+            let Some(room) = self.client.get_room(&room_id) else {
+                return Ok(json!({"needs_sync": true}));
+            };
+            if room.state() != RoomState::Joined {
+                return Ok(json!({}));
             }
-            Ok::<_, anyhow::Error>(json!({}))
+            let event = room
+                .event(
+                    &event_id,
+                    Some(
+                        RequestConfig::default()
+                            .timeout(Duration::from_secs(10))
+                            .retry_limit(0),
+                    ),
+                )
+                .await?;
+            let value: Value = serde_json::from_str(event.raw().json().get())?;
+            if value["event_id"] != event_id.as_str()
+                || value["unsigned"].get("redacted_because").is_some()
+            {
+                return Ok(json!({}));
+            }
+            if value["type"] == "m.room.encrypted" {
+                // Dart performs the bounded key sync through its durable
+                // transport, saving rotated tokens before fetching again.
+                return Ok(json!({"needs_sync": true}));
+            }
+            // An encrypted room must never preview an injected plaintext event.
+            if room.encryption_state().is_encrypted() && event.encryption_info().is_none() {
+                return Ok(json!({}));
+            }
+            let Some(body) = preview(&value, self.own_user.as_str()) else {
+                return Ok(json!({}));
+            };
+            let sender = UserId::parse(value["sender"].as_str().context("Missing sender")?)?;
+            let member = room.get_member_no_sync(&sender).await?;
+            let sender_name = member
+                .as_ref()
+                .and_then(|m| m.display_name())
+                .unwrap_or(sender.as_str())
+                .to_owned();
+            let title = room.display_name().await?.to_string();
+            Ok::<_, anyhow::Error>(json!({"title": title, "sender": sender_name, "body": body}))
         };
-        // Includes waiting for an already running foreground poll. Errors and
-        // unavailable keys leave the native generic alert in place.
-        let result = matrix_sdk_common::timeout::timeout(work, Duration::from_secs(55)).await??;
+        let result = matrix_sdk_common::timeout::timeout(work, Duration::from_secs(20)).await??;
         self.active()?;
         Ok(result.to_string())
     }

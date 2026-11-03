@@ -15,6 +15,16 @@ class PreviewTransport extends FakeMatrixTransport {
   int actions = 0, roomReads = 0;
   bool fail = false;
   Completer<void>? gate;
+  bool needsKey = false;
+  int syncs = 0;
+  void Function()? onSync;
+  @override
+  Future<MatrixJson> sync() async {
+    syncs++;
+    onSync?.call();
+    return super.sync();
+  }
+
   @override
   Future<MatrixJson> rooms() async {
     roomReads++;
@@ -30,6 +40,7 @@ class PreviewTransport extends FakeMatrixTransport {
     });
     actions++;
     await gate?.future;
+    if (needsKey && syncs == 0) return {'needs_sync': true};
     if (fail) throw StateError('offline after token rotation');
     return {'title': 'Friends', 'sender': 'Bob', 'body': 'Hello 🌊🔐'};
   }
@@ -124,6 +135,21 @@ void main() {
           jsonDecode(saved['session'])['refresh_token'],
           'rotated-refresh',
         );
+        engine.needsKey = true;
+        engine.onSync = () {
+          expect(
+            jsonDecode(
+              jsonDecode(storage.values[key]!)['session'],
+            )['refresh_token'],
+            'rotated-refresh',
+          );
+        };
+        expect(
+          await api.notificationPreview(ticket),
+          containsPair('body', 'Hello 🌊🔐'),
+        );
+        expect(engine.syncs, 1);
+        expect(engine.actions, 3);
         engine.fail = true;
         await expectLater(api.notificationPreview(ticket), throwsStateError);
         expect(
@@ -135,7 +161,7 @@ void main() {
         engine.fail = false;
         engine.gate = Completer<void>();
         final delayed = api.notificationPreview(ticket);
-        while (engine.actions < 3) {
+        while (engine.actions < 5) {
           await Future<void>.delayed(Duration.zero);
         }
         api.user = {...profile, 'sub': 'another-account'};

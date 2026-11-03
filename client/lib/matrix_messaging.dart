@@ -621,6 +621,24 @@ class MatrixMessaging extends ChangeNotifier {
     changed();
   }
 
+  Future<MatrixJson> notificationPreview(String room, String event) async {
+    final generation = _generation;
+    for (var attempt = 0; attempt < 3; attempt++) {
+      _guard(generation);
+      final preview = await transport.action({
+        'action': 'notification',
+        'room': room,
+        'event': event,
+      });
+      _guard(generation);
+      if (preview['needs_sync'] != true) return preview;
+      // Save refreshed credentials at each request boundary before retrying
+      // decryption. Share the UI's poll rather than creating another sync.
+      if (attempt < 2) await syncNow();
+    }
+    return {};
+  }
+
   Future<void> ensureJoinedRoom(String room) async {
     bool joined() =>
         roomList.any((r) => r['room_id'] == room && r['membership'] == 'join');

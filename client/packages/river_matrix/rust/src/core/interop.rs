@@ -521,13 +521,23 @@ async fn encrypted_notification_previews(first: &MatrixCore) -> Result<()> {
     let event = sent["event_id"].as_str().unwrap();
     // Do not sync the recipient: the notification operation must fetch its
     // to-device room key itself using the ordinary shared SDK sync.
-    let result: Value = serde_json::from_str(
-        &peer
-            .action(
-                json!({"action":"notification","room":room.room_id(),"event":event}).to_string(),
-            )
-            .await?,
-    )?;
+    let mut result = json!({});
+    for attempt in 0..3 {
+        result = serde_json::from_str(
+            &peer
+                .action(
+                    json!({"action":"notification","room":room.room_id(),"event":event})
+                        .to_string(),
+                )
+                .await?,
+        )?;
+        if result["needs_sync"] != true {
+            break;
+        }
+        if attempt < 2 {
+            peer.sync().await?;
+        }
+    }
     assert_eq!(result["title"], "Notification friends");
     assert_eq!(result["body"], "Hello 🌊🔐 from another device");
     let raw = first

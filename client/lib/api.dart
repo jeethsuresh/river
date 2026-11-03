@@ -358,11 +358,10 @@ class RiverApi extends ChangeNotifier {
         generation != _generation) {
       return {};
     }
-    final preview = await matrix.transport.action({
-      'action': 'notification',
-      'room': notification['room_id'],
-      'event': notification['event_id'],
-    });
+    final preview = await matrix.notificationPreview(
+      notification['room_id'] as String,
+      notification['event_id'] as String,
+    );
     if (_disposed || account != accountKey || generation != _generation) {
       return {};
     }
