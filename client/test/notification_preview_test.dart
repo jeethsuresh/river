@@ -16,6 +16,7 @@ class PreviewTransport extends FakeMatrixTransport {
   bool fail = false;
   Completer<void>? gate;
   bool needsKey = false;
+  String refreshed = "rotated";
   int syncs = 0;
   void Function()? onSync;
   @override
@@ -40,14 +41,19 @@ class PreviewTransport extends FakeMatrixTransport {
     });
     actions++;
     await gate?.future;
-    if (needsKey && syncs == 0) return {'needs_sync': true};
+    if (needsKey && syncs == 0) {
+      refreshed = 'key-fetch';
+      return {'needs_sync': true};
+    }
     if (fail) throw StateError('offline after token rotation');
     return {'title': 'Friends', 'sender': 'Bob', 'body': 'Hello 🌊🔐'};
   }
 
   @override
-  Future<String> credentials() async =>
-      '{"access_token":"rotated-access","refresh_token":"rotated-refresh"}';
+  Future<String> credentials() async => jsonEncode({
+    'access_token': '$refreshed-access',
+    'refresh_token': '$refreshed-refresh',
+  });
 }
 
 class RuntimeApi extends RiverApi {
@@ -172,7 +178,7 @@ void main() {
             jsonDecode(
               jsonDecode(storage.values[key]!)['session'],
             )['refresh_token'],
-            'rotated-refresh',
+            'key-fetch-refresh',
           );
         };
         expect(
@@ -187,7 +193,7 @@ void main() {
           jsonDecode(
             jsonDecode(storage.values[key]!)['session'],
           )['access_token'],
-          'rotated-access',
+          'key-fetch-access',
         );
         engine.fail = false;
         engine.gate = Completer<void>();
