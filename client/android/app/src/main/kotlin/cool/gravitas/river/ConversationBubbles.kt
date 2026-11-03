@@ -13,7 +13,7 @@ import android.net.Uri
 import android.os.Build
 import java.security.MessageDigest
 
-/** Adds Android conversation UI to Store alerts without fetching private content. */
+/** Adds conversation UI using generic text or content decrypted on this device. */
 internal object ConversationBubbles {
     private const val PREFIX = "river-conversation:"
 
@@ -25,16 +25,16 @@ internal object ConversationBubbles {
             .setData(Uri.parse("river://conversation/" + id(subject, room).removePrefix(PREFIX)))
             .putExtra("subject", subject).putExtra("room_id", room)
 
-    fun decorate(c: Context, builder: Notification.Builder, subject: String, room: String) {
+    fun decorate(c: Context, builder: Notification.Builder, subject: String, room: String,
+        title: String = "River conversation", sender: String = "Conversation", body: String = "New conversation activity") {
         // Android 11 introduced the user-facing conversation bubble controls.
         if (Build.VERSION.SDK_INT < 30) return
         val shortcutId = id(subject, room)
         val icon = Icon.createWithResource(c, R.drawable.ic_river)
-        // The Store payload deliberately contains no names or message bodies.
-        val person = Person.Builder().setName("Conversation").setKey(shortcutId).setIcon(icon).build()
+        val person = Person.Builder().setName(sender).setKey(shortcutId).setIcon(icon).build()
         val shortcut = ShortcutInfo.Builder(c, shortcutId)
             .setActivity(ComponentName(c, MainActivity::class.java))
-            .setShortLabel("River conversation").setIcon(icon)
+            .setShortLabel(title).setIcon(icon)
             .setIntent(intent(c, subject, room))
             .setLongLived(true).setPersons(arrayOf(person)).build()
         try {
@@ -50,7 +50,9 @@ internal object ConversationBubbles {
             (if (Build.VERSION.SDK_INT >= 31) PendingIntent.FLAG_MUTABLE else 0)
         val open = PendingIntent.getActivity(c, 0, intent(c, subject, room), flags)
         builder.setStyle(Notification.MessagingStyle(Person.Builder().setName("You").build())
-            .addMessage("New conversation activity", System.currentTimeMillis(), person))
+            .setConversationTitle(if (title == "River conversation") null else title)
+            .setGroupConversation(title != "River conversation")
+            .addMessage(body, System.currentTimeMillis(), person))
             .setShortcutId(shortcutId)
             .setBubbleMetadata(Notification.BubbleMetadata.Builder(open, icon).setDesiredHeight(640).build())
     }

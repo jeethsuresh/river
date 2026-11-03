@@ -311,6 +311,68 @@ class RiverApi extends ChangeNotifier {
   }
 
   int _notificationOpenRevision = 0;
+
+  /// Called only by the authenticated native notification runtime. A cold
+  /// background engine restores just the encrypted identity and Matrix device;
+  /// it does not refresh the workspace, launch authentication, or start polling.
+  Future<Json> notificationPreview(
+    Json notification, {
+    bool restore = false,
+  }) async {
+    final generation = _generation;
+    if (restore && user == null) {
+      final saved = await _identity.read('river.offline_profile');
+      if (saved == null || generation != _generation || _disposed) return {};
+      final record = jsonDecode(saved) as Json;
+      final profile = record['profile'] as Json;
+      if (record['origin'] != uri('/').origin ||
+          profile['issuer'] != 'https://gravitas.cool' ||
+          profile['sub'] != notification['subject'] ||
+          profile['user_id'] is! String) {
+        return {};
+      }
+      user = profile;
+      _offlineSession = true;
+    }
+    final account = accountKey;
+    if (user?['issuer'] != 'https://gravitas.cool' ||
+        notification['subject'] != user?['sub'] ||
+        notification['room_id'] is! String ||
+        notification['event_id'] is! String) {
+      return {};
+    }
+    if (restore && !matrix.connected && !matrix.connecting) {
+      matrix.active = false;
+      await matrix.bind(
+        user!,
+        synchronize: false,
+        loadRooms: false,
+        resumeLink: false,
+      );
+    }
+    // Foreground boot may still be opening the same saved device.
+    for (
+      var i = 0;
+      i < 100 && matrix.connecting && account == accountKey;
+      i++
+    ) {
+      await Future<void>.delayed(const Duration(milliseconds: 100));
+    }
+    if (!matrixConnected ||
+        account != accountKey ||
+        generation != _generation) {
+      return {};
+    }
+    final preview = await matrix.notificationPreview(
+      notification['room_id'] as String,
+      notification['event_id'] as String,
+    );
+    if (_disposed || account != accountKey || generation != _generation) {
+      return {};
+    }
+    return preview;
+  }
+
   Future<void> openStoreNotification(Json notification) async {
     final account = accountKey;
     if (notification['subject'] != user?['sub'] ||

@@ -368,7 +368,12 @@ class MatrixMessaging extends ChangeNotifier {
     if (!_disposed) super.notifyListeners();
   }
 
-  Future<void> bind(MatrixJson profile, {bool synchronize = true}) async {
+  Future<void> bind(
+    MatrixJson profile, {
+    bool synchronize = true,
+    bool loadRooms = true,
+    bool resumeLink = true,
+  }) async {
     final account = '${profile['issuer']}|${profile['sub']}';
     if (accountKey == account && (connected || connecting)) return;
     await disconnect();
@@ -405,7 +410,7 @@ class MatrixMessaging extends ChangeNotifier {
         _configuration = config;
         final engine = _durable(raw, generation);
         try {
-          final snapshot = await engine.rooms();
+          final snapshot = loadRooms ? await engine.rooms() : {'rooms': []};
           _guard(generation);
           _transport = engine;
           roomList = (snapshot['rooms'] as List).cast<MatrixJson>();
@@ -421,7 +426,7 @@ class MatrixMessaging extends ChangeNotifier {
           await engine.close(generation < _revokeBefore);
           rethrow;
         }
-      } else {
+      } else if (resumeLink) {
         final pending = await storage.read(_pendingKey);
         _guard(generation);
         if (pending != null) {
@@ -615,6 +620,24 @@ class MatrixMessaging extends ChangeNotifier {
   Future<void> syncNow() async {
     await _syncOnce(_generation);
     changed();
+  }
+
+  Future<MatrixJson> notificationPreview(String room, String event) async {
+    final generation = _generation;
+    for (var attempt = 0; attempt < 3; attempt++) {
+      _guard(generation);
+      final preview = await transport.action({
+        'action': 'notification',
+        'room': room,
+        'event': event,
+      });
+      _guard(generation);
+      if (preview['needs_sync'] != true) return preview;
+      // Save refreshed credentials at each request boundary before retrying
+      // decryption. Share the UI's poll rather than creating another sync.
+      if (attempt < 2) await syncNow();
+    }
+    return {};
   }
 
   Future<void> ensureJoinedRoom(String room) async {

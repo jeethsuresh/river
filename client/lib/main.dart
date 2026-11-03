@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 
 import 'api.dart';
 import 'store_notifications.dart';
+import 'notification_runtime.dart';
 import 'username_login.dart';
 import 'publishing_widgets.dart';
 import 'friends_view.dart';
@@ -24,16 +25,25 @@ import 'media_widgets.dart';
 import 'package:flutter_quill/flutter_quill.dart'
     show FlutterQuillLocalizations;
 
-void main() {
-  runApp(const RiverApp());
+Future<void> main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  if (StoreNotifications.supported) {
+    final app = RiverApi()..active = false;
+    await NotificationRuntime(app, (startup) {
+      runApp(RiverApp(api: app, startup: startup));
+    }).start();
+  } else {
+    runApp(const RiverApp());
+  }
 }
 
 const blue = riverAccent, ink = riverInk, muted = riverMuted;
 
 class RiverApp extends StatefulWidget {
-  const RiverApp({super.key, this.api, this.boot = true});
+  const RiverApp({super.key, this.api, this.boot = true, this.startup});
   final RiverApi? api;
   final bool boot;
+  final Future<void>? startup;
   @override
   State<RiverApp> createState() => _RiverAppState();
 }
@@ -56,8 +66,16 @@ class _RiverAppState extends State<RiverApp> with WidgetsBindingObserver {
       });
     }
     if (widget.boot) {
-      _startup = app.boot();
-      unawaited(_startup.then((_) => openNotification()));
+      _startup = widget.startup ?? app.boot();
+      unawaited(
+        _startup.then((_) async {
+          if (!mounted) return;
+          app.active =
+              WidgetsBinding.instance.lifecycleState ==
+              AppLifecycleState.resumed;
+          await openNotification();
+        }),
+      );
     }
   }
 
@@ -89,10 +107,17 @@ class _RiverAppState extends State<RiverApp> with WidgetsBindingObserver {
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    app.active = state == AppLifecycleState.resumed;
-    if (app.active) {
+    if (state != AppLifecycleState.resumed) {
+      app.active = false;
+    } else {
       unawaited(
         _startup.then((_) async {
+          if (!mounted ||
+              WidgetsBinding.instance.lifecycleState !=
+                  AppLifecycleState.resumed) {
+            return;
+          }
+          app.active = true;
           await app.resumeAuthentication();
           await app.refreshStoreNotifications();
           await openNotification();

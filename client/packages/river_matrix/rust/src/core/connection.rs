@@ -458,6 +458,7 @@ impl MatrixCore {
             data[key].as_str().with_context(|| format!("Missing {key}"))
         };
         match text("action")? {
+            "notification" => return self.notification(text("room")?, text("event")?).await,
             "local_read" => return self.local_data(&data, false).await,
             "local_write" => return self.local_data(&data, true).await,
             "reaction" => {

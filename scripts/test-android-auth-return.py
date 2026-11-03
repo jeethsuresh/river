@@ -99,9 +99,9 @@ with (output / 'emulator.log').open('w') as log:
             assert 'OK (1 test)' in denied and 'FAILURES' not in denied, denied
             result = device('shell', 'am', 'instrument', '-w', '-r', '-e', 'class',
                             'cool.gravitas.river.StoreNotificationDeliveryTest',
-                            package + '.test/androidx.test.runner.AndroidJUnitRunner', timeout=150)
-            assert 'OK (4 tests)' in result and 'FAILURES' not in result, result
-            print('ANDROID PUSH PASS native alerts, replay, session binding, unsigned IPC', flush=True)
+                            package + '.test/androidx.test.runner.AndroidJUnitRunner', timeout=210)
+            assert 'OK (6 tests)' in result and 'FAILURES' not in result, result
+            print('ANDROID PUSH PASS native alerts, decrypted previews, private lock screen, replay, session binding, unsigned IPC, headless engine handoff', flush=True)
             bubbles = device('shell', 'am', 'instrument', '-w', '-r', '-e', 'class',
                              'cool.gravitas.river.ConversationBubblesTest',
                              package + '.test/androidx.test.runner.AndroidJUnitRunner', timeout=180)
