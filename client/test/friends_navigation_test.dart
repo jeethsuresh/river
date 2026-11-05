@@ -6,6 +6,7 @@ import 'package:river/home_widgets.dart';
 import 'package:river/main.dart';
 import 'package:river/rich_composer.dart';
 
+import 'gravitas_navigation_test.dart' as navigation;
 import 'matrix_messaging_test.dart' show MemoryMatrixStorage;
 
 class NavigationApi extends RiverApi {
@@ -64,6 +65,10 @@ void main() {
           await tester.pumpAndSettle();
           expect(find.byType(FriendsView), findsOneWidget);
 
+          await navigation.back(tester);
+          expect(find.byType(FriendsView), findsNothing);
+          await navigation.forward(tester);
+          expect(find.byType(FriendsView), findsOneWidget);
           await tester.ensureVisible(find.text('Message'));
           await tester.tap(find.text('Message'));
           await tester.pumpAndSettle();

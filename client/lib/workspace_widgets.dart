@@ -1,3 +1,5 @@
+import 'gravitas_navigation.dart';
+
 import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
 
@@ -200,8 +202,7 @@ class _ConversationPickerState extends State<ConversationPicker> {
                       final person = query.text.trim();
                       if (!person.startsWith('@') || !person.contains(':')) {
                         setState(
-                          () => error =
-                              'Enter a full Matrix ID, such as @Alice:example.org, in the search field.',
+                          () => error = 'Enter a full Matrix ID, such as @Alice:example.org, in the search field.',
                         );
                         return;
                       }
@@ -229,8 +230,7 @@ class _ConversationPickerState extends State<ConversationPicker> {
                       final room = query.text.trim();
                       if (room.isEmpty) {
                         setState(
-                          () => error =
-                              'Enter a room ID, alias or matrix.to link in the search field.',
+                          () => error = 'Enter a room ID, alias or matrix.to link in the search field.',
                         );
                         return;
                       }
@@ -339,7 +339,7 @@ Future<void> openRiverThread(
   }
   if (context.mounted) {
     await Navigator.of(context).push<void>(
-      MaterialPageRoute(
+      HistoryPageRoute(
         builder: (_) => event['type'] == 'cool.gravitas.river.post.v1'
             ? PostScreen(app: app, event: event['event_id'] as String)
             : ThreadScreen(
@@ -575,9 +575,8 @@ class AccountPanel extends StatelessWidget {
               await app.setEnterSendsMessages(enabled);
             } catch (e) {
               if (context.mounted) {
-                ScaffoldMessenger.of(
-                  context,
-                ).showSnackBar(SnackBar(content: Text('$e')));
+                ScaffoldMessenger.of(context)
+                    .showSnackBar(SnackBar(content: Text('$e')));
               }
             }
           },
@@ -610,9 +609,8 @@ class InvitationCard extends StatelessWidget {
         await app.membership(content['space_id'] as String, action);
       } catch (e) {
         if (context.mounted) {
-          ScaffoldMessenger.of(
-            context,
-          ).showSnackBar(SnackBar(content: Text('$e')));
+          ScaffoldMessenger.of(context)
+              .showSnackBar(SnackBar(content: Text('$e')));
         }
       }
     }

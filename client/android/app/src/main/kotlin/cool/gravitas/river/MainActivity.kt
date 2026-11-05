@@ -1,6 +1,6 @@
 package cool.gravitas.river
 
-import io.flutter.embedding.android.FlutterActivity
+import cool.gravitas.navigation.GravitasFlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
 import android.content.Context
@@ -10,7 +10,7 @@ import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 
-open class MainActivity : FlutterActivity() {
+open class MainActivity : GravitasFlutterActivity() {
     private var engineEvicted = false
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)

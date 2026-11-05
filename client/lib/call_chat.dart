@@ -1,5 +1,9 @@
+import 'gravitas_navigation.dart';
+
 import 'dart:async';
+
 import 'package:flutter/material.dart';
+
 import 'api.dart';
 import 'rich_composer.dart';
 import 'content_widgets.dart';
@@ -173,7 +177,7 @@ class _CallChatScreenState extends State<CallChatScreen> {
                           changed: load,
                           reply: () => Navigator.push<void>(
                             context,
-                            MaterialPageRoute(
+                            HistoryPageRoute(
                               builder: (_) => ThreadScreen(
                                 app: widget.api,
                                 room: widget.room,

@@ -1,7 +1,11 @@
+import 'gravitas_navigation.dart';
 import 'username_login.dart';
+
 import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+
 import 'api.dart';
 import 'comment_tree.dart';
 import 'content_widgets.dart';
@@ -256,7 +260,7 @@ class _PostScreenState extends State<PostScreen> {
                             style: contentActionStyle(),
                             onPressed: () => Navigator.push<void>(
                               context,
-                              MaterialPageRoute(
+                              HistoryPageRoute(
                                 builder: (_) => BlogScreen(
                                   app: widget.app,
                                   room:
@@ -493,7 +497,7 @@ class _BlogScreenState extends State<BlogScreen> {
             metadata: const [],
             open: () => Navigator.push<void>(
               context,
-              MaterialPageRoute(
+              HistoryPageRoute(
                 builder: (_) => PostScreen(
                   app: widget.app,
                   event: post['event_id'] as String,
