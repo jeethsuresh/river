@@ -1,9 +1,9 @@
 {
   "schemaVersion": 1,
-  "version": "0.13.2",
-  "versionCode": 34,
+  "version": "0.13.3",
+  "versionCode": 35,
   "changes": [
-    "Make Android Back gestures consistent from both screen edges and after reopening River.",
-    "Keep each swipe to one action: open the sidebar first, then follow normal Back navigation on the next swipe."
+    "Swipe inward from the left edge to go back and from the right edge to go forward on Android 14 and later.",
+    "Return to previous browsing destinations without repeating actions; opening a new destination clears forward history."
   ]
 }

@@ -3,6 +3,9 @@ import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+
+import 'gravitas_navigation.dart';
+
 import 'package:flutter/services.dart';
 
 import 'api.dart';
@@ -53,6 +56,7 @@ class _RiverAppState extends State<RiverApp> with WidgetsBindingObserver {
   late final app = widget.api ?? RiverApi();
   Future<void> _startup = Future.value();
   int _notificationRequest = 0;
+  GravitasNavigationObserver _history = GravitasNavigationObserver();
   var _navigator = GlobalKey<NavigatorState>();
   String? _navigationAccount;
   @override
@@ -143,16 +147,19 @@ class _RiverAppState extends State<RiverApp> with WidgetsBindingObserver {
     builder: (_, _) {
       if (_navigationAccount != app.accountKey) {
         _navigationAccount = app.accountKey;
+        _history.clear();
+        _history = GravitasNavigationObserver();
         _navigator = GlobalKey<NavigatorState>();
       }
       return MaterialApp(
         key: ValueKey(app.accountKey),
         navigatorKey: _navigator,
+        navigatorObservers: [_history],
         title: 'River',
         builder: (context, child) => LinkedImageScope(
           cache: app.linkedImages,
           networkAvailable: !app.networkUnavailable,
-          child: child!,
+          child: GravitasNavigation(observer: _history, child: child!),
         ),
         localizationsDelegates:
             FlutterQuillLocalizations.localizationsDelegates,
@@ -187,6 +194,7 @@ class RiverShell extends StatefulWidget {
 
 class _RiverShellState extends State<RiverShell> {
   RiverApi get app => widget.app;
+  final destinationHistory = GlobalKey<HistoryBoundaryState>();
   String section = 'Home', filter = 'Chat', conversationQuery = '';
   bool searchOpen = false, spaceChat = false;
   final draft = TextEditingController();
@@ -333,11 +341,15 @@ class _RiverShellState extends State<RiverShell> {
   bool continuingBack = false;
   bool sending = false;
 
-  Future<void> handleBack(Object? result) async {
+  Future<void> handleBack(Object? result, {bool wide = false}) async {
     if (continuingBack) return;
     final shell = scaffold.currentState;
     if (shell == null) return;
-    if (!shell.isDrawerOpen) {
+    if (destinationHistory.currentState?.back() == true) {
+      shell.closeDrawer();
+      return;
+    }
+    if (!wide && !shell.isDrawerOpen) {
       shell.openDrawer();
       return;
     }
@@ -631,45 +643,66 @@ class _RiverShellState extends State<RiverShell> {
             ),
           ],
         );
-        return PopScope<Object?>(
-          canPop: wide || continuingBack,
-          onPopInvokedWithResult: (didPop, result) {
-            if (!didPop && !wide) unawaited(handleBack(result));
+        return HistoryBoundary(
+          key: destinationHistory,
+          interceptBack: false,
+          value: (
+            section: section,
+            room: app.selected,
+            filter: filter,
+            spaceChat: spaceChat,
+          ),
+          restore: (visit) {
+            setState(() {
+              section = visit.section;
+              filter = visit.filter;
+              spaceChat = visit.spaceChat;
+            });
+            unawaited(app.open(visit.room));
           },
-          child: Scaffold(
-            key: scaffold,
-            appBar: wide || group?['membership'] == 'join'
-                ? null
-                : AppBar(
-                    title: Text(
-                      group?['name'] as String? ?? 'River',
-                      style: const TextStyle(fontWeight: FontWeight.w800),
-                    ),
-                    actions: [
-                      IconButton(
-                        tooltip: 'Refresh',
-                        onPressed: () => app.refresh(),
-                        icon: const Icon(Icons.refresh),
+          child: PopScope<Object?>(
+            canPop: continuingBack,
+            onPopInvokedWithResult: (didPop, result) {
+              if (!didPop) unawaited(handleBack(result, wide: wide));
+            },
+            child: Scaffold(
+              key: scaffold,
+              appBar: wide || group?['membership'] == 'join'
+                  ? null
+                  : AppBar(
+                      title: Text(
+                        group?['name'] as String? ?? 'River',
+                        style: const TextStyle(fontWeight: FontWeight.w800),
                       ),
-                    ],
-                  ),
-            bottomNavigationBar: wide || group != null
-                ? null
-                : mobileDestinations(),
-            drawer: wide ? null : Drawer(child: SafeArea(child: navigation())),
-            // Android's system Back gesture owns the edge swipe. Letting the
-            // drawer also recognize it can open it before Back is committed,
-            // causing that same gesture to continue navigation as well.
-            drawerEnableOpenDragGesture:
-                kIsWeb || Theme.of(context).platform != TargetPlatform.android,
-            body: SafeArea(
-              bottom: false,
-              child: Row(
-                children: [
-                  if (wide) SizedBox(width: 248, child: navigation()),
-                  if (wide) const VerticalDivider(width: 1),
-                  Expanded(child: body),
-                ],
+                      actions: [
+                        IconButton(
+                          tooltip: 'Refresh',
+                          onPressed: () => app.refresh(),
+                          icon: const Icon(Icons.refresh),
+                        ),
+                      ],
+                    ),
+              bottomNavigationBar: wide || group != null
+                  ? null
+                  : mobileDestinations(),
+              drawer: wide
+                  ? null
+                  : Drawer(child: SafeArea(child: navigation())),
+              // Android's system Back gesture owns the edge swipe. Letting the
+              // drawer also recognize it can open it before Back is committed,
+              // causing that same gesture to continue navigation as well.
+              drawerEnableOpenDragGesture:
+                  kIsWeb ||
+                  Theme.of(context).platform != TargetPlatform.android,
+              body: SafeArea(
+                bottom: false,
+                child: Row(
+                  children: [
+                    if (wide) SizedBox(width: 248, child: navigation()),
+                    if (wide) const VerticalDivider(width: 1),
+                    Expanded(child: body),
+                  ],
+                ),
               ),
             ),
           ),
@@ -1852,7 +1885,7 @@ class _RiverShellState extends State<RiverShell> {
                   ? relation!['event_id'] as String
                   : e['event_id'] as String;
               await Navigator.of(context).push<void>(
-                MaterialPageRoute(
+                HistoryPageRoute(
                   builder: (_) => e['type'] == 'cool.gravitas.river.post.v1'
                       ? PostScreen(app: app, event: rootId)
                       : ThreadScreen(

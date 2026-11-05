@@ -1,12 +1,18 @@
+import 'gravitas_navigation.dart';
+
 import 'dart:async';
 import 'dart:convert';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_markdown_plus/flutter_markdown_plus.dart';
 import 'package:url_launcher/url_launcher.dart';
+
 import 'api.dart';
 import 'comment_tree.dart';
 import 'publishing_widgets.dart';
+
 import 'package:flutter/services.dart';
+
 import 'matrix_attachment_widgets.dart';
 import 'rich_composer.dart';
 import 'media.dart';
@@ -203,9 +209,8 @@ class _ReactionBarState extends State<ReactionBar> {
       await widget.change(emoji, !mine);
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text('$e')));
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text('$e')));
       }
     } finally {
       if (mounted) setState(() => busy = false);
@@ -1110,7 +1115,7 @@ class _EntryFeedState extends State<EntryFeed> {
             reply: () async {
               await Navigator.push<void>(
                 context,
-                MaterialPageRoute(
+                HistoryPageRoute(
                   builder: (_) => widget.kind == 'post'
                       ? PostScreen(
                           app: widget.app,

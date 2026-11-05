@@ -127,19 +127,19 @@ class BackNavigationTest {
 
     @Test fun eachGestureHasOneEffectAcrossRetainedActivityHosts() {
         var original: Any? = null
-        // Both edges, repeatedly recreating the Android host without restarting Dart.
+        // Repeatedly recreate the Android host without restarting Dart.
         for (attempt in 0..5) {
             val host = launch()
             val engine = FlutterEngineCache.getInstance().get("river")!!
             if (original == null) original = engine else assertSame(original, engine)
-            swipe(right = attempt % 2 == 1)
+            swipe(right = false)
             await("First OS swipe did not open the sidebar (attempt $attempt)") {
                 host.hasWindowFocus() && !host.isFinishing && !host.isDestroyed && drawer() == true
             }
             Thread.sleep(350)
             assertFalse("One swipe must not also leave River", host.isFinishing || host.isDestroyed)
             assertTrue("One swipe must not also background River", host.hasWindowFocus())
-            swipe(right = attempt % 2 == 0)
+            swipe(right = false)
             await("Second OS swipe did not leave River (attempt $attempt)") { !host.hasWindowFocus() }
             assertEquals("Back must reach Dart before leaving River", false, drawer())
             // Android may retain a root task in the background. Explicitly
