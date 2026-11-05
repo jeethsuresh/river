@@ -345,6 +345,11 @@ class _RiverShellState extends State<RiverShell> {
     if (continuingBack) return;
     final shell = scaffold.currentState;
     if (shell == null) return;
+    if (shell.isDrawerOpen &&
+        destinationHistory.currentState?.hasBack == true) {
+      shell.closeDrawer();
+      return;
+    }
     if (destinationHistory.currentState?.back() == true) {
       shell.closeDrawer();
       return;
