@@ -162,6 +162,11 @@ class BackNavigationTest {
         swipe(right = false)
         await("A committed gesture after cancellation must open the sidebar") { drawer() == true }
         swipe(right = true)
+        Thread.sleep(500)
+        assertFalse("Forward without history must not leave River", host.isFinishing || host.isDestroyed)
+        assertTrue("Forward without history must keep River visible", host.hasWindowFocus())
+        assertEquals("Forward without history must preserve the sidebar", true, drawer())
+        swipe(right = false)
         await("Back from the open sidebar must leave River") { !host.hasWindowFocus() }
         assertEquals(false, drawer())
     }
