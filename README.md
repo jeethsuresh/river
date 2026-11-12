@@ -301,7 +301,7 @@ public database or cloud VM is required. The Go pod requests/limits 100m CPU and
 and has no Kubernetes API token. Network policy permits ingress only from Traefik.
 
 ```
-deploy/gravitas/deploy.sh ghcr.io/jeethsuresh/river@sha256:<verified-image-digest>
+deploy/gravitas/deploy.sh ghcr.io/jeethsuresh/river-private@sha256:<verified-image-digest>
 ```
 
 The deploy script pins the existing cluster, requires a digest, and checks rollout

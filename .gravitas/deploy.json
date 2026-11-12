@@ -4,7 +4,7 @@
   "namespace": "river",
   "host": "chat.gravitas.cool",
   "health_path": "/healthz",
-  "image_repository": "ghcr.io/jeethsuresh/river",
+  "image_repository": "ghcr.io/jeethsuresh/river-private",
   "release": {
     "command": [
       "bash",
