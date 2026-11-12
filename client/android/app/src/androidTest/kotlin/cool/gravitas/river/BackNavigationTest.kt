@@ -67,12 +67,18 @@ class BackNavigationTest {
         return host
     }
     private fun swipe(right: Boolean, cancel: Boolean = false) {
+        instrumentation.waitForIdleSync()
+        instrumentation.uiAutomation.waitForIdle(500, 10_000)
         val metrics = c.resources.displayMetrics
         val start = if (right) metrics.widthPixels - 2f else 1f
         val end = if (right) metrics.widthPixels * .55f else metrics.widthPixels * .45f
         val y = metrics.heightPixels * .45f
         val down = SystemClock.uptimeMillis()
+        var sample = 0
         fun event(action: Int, x: Float) {
+            val eventTime = down + 16L * sample
+            sample += 1
+            SystemClock.sleep((eventTime - SystemClock.uptimeMillis()).coerceAtLeast(0L))
             val pointer = MotionEvent.PointerProperties().apply {
                 id = 0
                 toolType = MotionEvent.TOOL_TYPE_FINGER
@@ -83,21 +89,20 @@ class BackNavigationTest {
                 pressure = if (action == MotionEvent.ACTION_UP) 0f else 1f
                 size = 1f
             }
-            val event = MotionEvent.obtain(down, SystemClock.uptimeMillis(), action, 1,
+            val event = MotionEvent.obtain(down, eventTime, action, 1,
                 arrayOf(pointer), arrayOf(position), 0, 0, 1f, 1f, 0, 0, InputDevice.SOURCE_TOUCHSCREEN, 0)
-            // Hardware does not wait for the app to render between touch
-            // samples. Synchronous injection can turn a swipe into a long press
-            // on a busy software-rendered emulator and cancel Android Back.
+            // Keep the input timestamps on the gesture's sample clock.
+            // A slow emulator should not turn this swipe into a long press.
             try { assertTrue(instrumentation.uiAutomation.injectInputEvent(event, false)) }
             finally { event.recycle() }
         }
         event(MotionEvent.ACTION_DOWN, start)
-        for (step in 1..16) {
-            SystemClock.sleep(16)
-            event(MotionEvent.ACTION_MOVE, start + (end - start) * step / 16f)
+        for (step in 0..15) {
+            // Cross Android's touch slop on the first move.
+            val distance = .25f + .75f * step / 15f
+            event(MotionEvent.ACTION_MOVE, start + (end - start) * distance)
         }
         if (cancel) for (step in 1..16) {
-            SystemClock.sleep(16)
             event(MotionEvent.ACTION_MOVE, end + (start - end) * step / 16f)
         }
         event(MotionEvent.ACTION_UP, if (cancel) start else end)
