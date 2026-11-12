@@ -157,11 +157,11 @@ jobs:
           platforms: linux/amd64
           push: ${{ github.event_name != 'pull_request' }}
           load: ${{ github.event_name == 'pull_request' }}
-          tags: ghcr.io/jeethsuresh/river:${{ github.sha }}
+          tags: ghcr.io/jeethsuresh/river-private:${{ github.sha }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
       - name: Record digest
-        run: echo 'ghcr.io/jeethsuresh/river@${{ steps.image.outputs.digest }}' >> "$GITHUB_STEP_SUMMARY"
+        run: echo 'ghcr.io/jeethsuresh/river-private@${{ steps.image.outputs.digest }}' >> "$GITHUB_STEP_SUMMARY"
   deploy:
     if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
     needs: [image, desktop-verify]
@@ -186,7 +186,7 @@ jobs:
         uses: ./.gravitas-runtime
         with:
           config: .gravitas/deploy.json
-          image: ghcr.io/jeethsuresh/river@${{ needs.image.outputs.digest }}
+          image: ghcr.io/jeethsuresh/river-private@${{ needs.image.outputs.digest }}
           kubeconfig: ${{ secrets.GRAVITAS_KUBECONFIG }}
 
   desktop:

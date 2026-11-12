@@ -49,10 +49,13 @@
                 "type": "RuntimeDefault"
               }
             },
+            "imagePullSecrets": [
+              {"name": "gravitas-ghcr"}
+            ],
             "containers": [
               {
                 "name": "river",
-                "image": "ghcr.io/jeethsuresh/river:bootstrap",
+                "image": "ghcr.io/jeethsuresh/river-private:bootstrap",
                 "ports": [
                   {
                     "name": "http",
