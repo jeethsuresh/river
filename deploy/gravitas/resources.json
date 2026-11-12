@@ -133,6 +133,10 @@
                     "value": "96MiB"
                   },
                   {
+                    "name": "NOTIFICATION_STORE_URL",
+                    "value": "https://apps.gravitas.cool"
+                  },
+                  {
                     "name": "NOTIFICATION_PROVIDER_KEY",
                     "valueFrom": {
                       "secretKeyRef": {
