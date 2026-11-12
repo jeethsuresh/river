@@ -2,14 +2,13 @@
   "name": "River",
   "directory": "client",
   "engine": "flutter",
-  "version": "0.13.1",
-  "versionCode": 13001,
+  "version": "0.13.2",
+  "versionCode": 13002,
   "flutterVersion": "3.47.7",
   "flutterRevision": "abaf9c523780a608bd46686fd5e53740a07077f8",
   "defines": [],
   "changes": [
-    "Send chat and call-chat attachments through Matrix, with a 32 MiB limit per file.",
-    "Remove peer file transfers; ask senders to attach old peer files again to make them available."
+    "River for macOS is signed with Developer ID and notarized by Apple on Apple Silicon and Intel."
   ],
   "schemaVersion": 1,
   "slug": "river",
