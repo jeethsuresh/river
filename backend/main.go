@@ -30,11 +30,12 @@ type pairing struct {
 	Expires                             time.Time
 }
 type server struct {
-	auth        *gravitas.Client
-	static      string
-	mu          sync.Mutex
-	pairs       map[string]*pairing
-	matrixLinks map[string]*matrixLink
+	auth              *gravitas.Client
+	static            string
+	mu                sync.Mutex
+	pairs             map[string]*pairing
+	matrixLinks       map[string]*matrixLink
+	notificationStore string
 }
 
 var uuidPattern = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)
@@ -55,7 +56,11 @@ func main() {
 		log.Fatal(err)
 	}
 	a.Scope = scopes
-	s := &server{auth: a, static: env("STATIC_DIR", "../client/build/web"), pairs: map[string]*pairing{}}
+	notificationStore, err := notificationStoreOrigin(os.Getenv("NOTIFICATION_STORE_URL"))
+	if err != nil {
+		log.Fatal(err)
+	}
+	s := &server{auth: a, static: env("STATIC_DIR", "../client/build/web"), pairs: map[string]*pairing{}, notificationStore: notificationStore}
 	go s.rtcReaper(context.Background())
 	h := &http.Server{Addr: env("ADDR", ":8080"), Handler: s, ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 20 * time.Second, WriteTimeout: 30 * time.Second, IdleTimeout: 60 * time.Second, MaxHeaderBytes: 16 << 10}
 	log.Printf("River listening on %s", h.Addr)
@@ -224,6 +229,9 @@ func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		switch r.URL.Path {
+		case "/api/notifications/ios":
+			s.iosNotifications(w, r, session)
+			return
 		case "/api/matrix/link":
 			s.matrixNew(w, r, session)
 			return

@@ -1,0 +1,22 @@
+PODS:
+  - Flutter (1.0.0)
+  - river_matrix (0.1.0):
+    - Flutter
+
+DEPENDENCIES:
+  - Flutter (from `Flutter`)
+  - river_matrix (from `.symlinks/plugins/river_matrix/ios`)
+
+EXTERNAL SOURCES:
+  Flutter:
+    :path: Flutter
+  river_matrix:
+    :path: ".symlinks/plugins/river_matrix/ios"
+
+SPEC CHECKSUMS:
+  Flutter: 71a624a5bc0c04062bf19101d501e466baf2fb47
+  river_matrix: 5cef7dad26851473352d8fae765a979465d61ca6
+
+PODFILE CHECKSUM: 3ba3a73b1b12adcf321a227a745625fe0888cc82
+
+COCOAPODS: 1.16.2

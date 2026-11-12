@@ -9,6 +9,7 @@ import 'connection_health.dart';
 import 'matrix_messaging.dart';
 import 'matrix_timeline.dart';
 import 'store_notifications.dart';
+import 'ios_push.dart';
 import 'calls.dart';
 import 'media.dart' show LinkedImageCache;
 import 'attachment_limits.dart';
@@ -290,6 +291,12 @@ class RiverApi extends ChangeNotifier {
 
   Future<void> refreshStoreNotifications() async {
     if (user == null) return;
+    if (IOSPush.supported) {
+      if (uri('/').origin == 'https://chat.gravitas.cool') {
+        unawaited(IOSPush.bind(token));
+      }
+      return;
+    }
     final account = accountKey;
     final result = await StoreNotifications.bind(user!);
     if (account != accountKey) return;
@@ -1455,6 +1462,7 @@ class RiverApi extends ChangeNotifier {
     await StoreNotifications.clear();
     final renewal = _renewing;
     _generation++;
+    await IOSPush.unbind();
     if (!kIsWeb) {
       token = null;
       await _sessionStorage(() async {

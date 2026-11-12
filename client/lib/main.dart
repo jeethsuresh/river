@@ -10,6 +10,7 @@ import 'package:flutter/services.dart';
 
 import 'api.dart';
 import 'store_notifications.dart';
+import 'ios_push.dart';
 import 'notification_runtime.dart';
 import 'username_login.dart';
 import 'publishing_widgets.dart';
@@ -70,6 +71,13 @@ class _RiverAppState extends State<RiverApp> with WidgetsBindingObserver {
         }
       });
     }
+    if (IOSPush.supported) {
+      IOSPush.channel.setMethodCallHandler((call) async {
+        if (call.method == 'opened') {
+          await openNotification(resumeAuthentication: true);
+        }
+      });
+    }
     if (widget.boot) {
       _startup = widget.startup ?? app.boot();
       unawaited(
@@ -88,7 +96,9 @@ class _RiverAppState extends State<RiverApp> with WidgetsBindingObserver {
     // A bubble can take the shared engine during its first account restoration.
     await _startup;
     if (!mounted) return;
-    final notification = await StoreNotifications.call('takeOpen');
+    final notification = IOSPush.supported
+        ? await IOSPush.takeOpen()
+        : await StoreNotifications.call('takeOpen');
     if (notification.isEmpty || !mounted) return;
     final request = ++_notificationRequest;
     if (resumeAuthentication) await app.resumeAuthentication();
@@ -137,6 +147,9 @@ class _RiverAppState extends State<RiverApp> with WidgetsBindingObserver {
     app.dispose();
     if (StoreNotifications.supported) {
       StoreNotifications.channel.setMethodCallHandler(null);
+    }
+    if (IOSPush.supported) {
+      IOSPush.channel.setMethodCallHandler(null);
     }
     super.dispose();
   }
