@@ -1,0 +1,19 @@
+{
+  "schemaVersion": 1,
+  "revision": 1,
+  "apps": [
+    {
+      "id": "river",
+      "name": "River",
+      "packageName": "cool.gravitas.river",
+      "repository": "jeethsuresh/river",
+      "assetName": "River-{tag}-android.apk",
+      "certificateSha256": "6559956b5cf6b2f796824995b31da7fa2c176ba652e8fcb40741686d850bb6b0",
+      "description": "Give each group a space and each topic its own channel. Chat privately with friends, publish posts and follow threaded discussions with your Gravitas account. Pick up where you left off on another device.",
+      "desktop": true,
+      "website": "https://chat.gravitas.cool",
+      "ios": "testflight",
+      "macOSNotarizedFrom": 13002
+    }
+  ]
+}

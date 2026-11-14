@@ -11,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"github.com/jeethsuresh/river/backend/internal/gravitas"
+	"github.com/jeethsuresh/river/backend/internal/storecatalog"
 	"io"
 	"log"
 	"net/http"
@@ -61,6 +62,7 @@ func main() {
 		log.Fatal(err)
 	}
 	s := &server{auth: a, static: env("STATIC_DIR", "../client/build/web"), pairs: map[string]*pairing{}, notificationStore: notificationStore}
+	go storecatalog.Run(context.Background())
 	go s.rtcReaper(context.Background())
 	h := &http.Server{Addr: env("ADDR", ":8080"), Handler: s, ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 20 * time.Second, WriteTimeout: 30 * time.Second, IdleTimeout: 60 * time.Second, MaxHeaderBytes: 16 << 10}
 	log.Printf("River listening on %s", h.Addr)
@@ -160,6 +162,7 @@ func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			fail(w, 503, "Cannot establish session")
 			return
 		}
+		storecatalog.Register(r.Context(), a.Issuer, a.CheckToken)
 		http.Redirect(w, r, next, 303)
 		return
 	case "/auth/logout":

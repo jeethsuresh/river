@@ -2,6 +2,7 @@ package gravitas
 
 import (
 	"context"
+	"github.com/jeethsuresh/river/backend/internal/storecatalog"
 	"regexp"
 	"time"
 )
@@ -30,5 +31,8 @@ func (c *Client) BrokerSession(ctx context.Context, code, verifier, subject, fam
 		expires = time.Unix(auth.CheckExpires, 0)
 	}
 	value, _, err := c.encodeAppSession(auth, auth.AccessToken, expires)
+	if err == nil {
+		storecatalog.Register(ctx, auth.Issuer, auth.CheckToken)
+	}
 	return value, err
 }
