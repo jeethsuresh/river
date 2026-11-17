@@ -2,13 +2,13 @@
   "name": "River",
   "directory": "client",
   "engine": "flutter",
-  "version": "0.13.2",
-  "versionCode": 13002,
+  "version": "0.13.3",
+  "versionCode": 13003,
   "flutterVersion": "3.47.7",
   "flutterRevision": "abaf9c523780a608bd46686fd5e53740a07077f8",
   "defines": [],
   "changes": [
-    "River for macOS is signed with Developer ID and notarized by Apple on Apple Silicon and Intel."
+    "River shows its own app icon on macOS, Windows, and Linux."
   ],
   "schemaVersion": 1,
   "slug": "river",
