@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'api.dart';
 import 'workspace_widgets.dart';
 import 'river_design.dart';
+import 'river_feedback.dart';
+import 'profile_avatar.dart';
 
 class RiverHome extends StatelessWidget {
   const RiverHome({
@@ -29,7 +31,7 @@ class RiverHome extends StatelessWidget {
               (c) => (c['participants'] as List? ?? []).isNotEmpty,
             ))
               const Padding(
-                padding: EdgeInsets.symmetric(vertical: 12),
+                padding: EdgeInsets.symmetric(vertical: 8),
                 child: Text(
                   'No active voice rooms. Drop into a room in one of your spaces.',
                 ),
@@ -50,17 +52,19 @@ class RiverHome extends StatelessWidget {
             'Welcome, ${app.displayName(app.user?['user_id'] as String? ?? app.user?['username'] as String? ?? '')}.',
             style: Theme.of(
               context,
-            ).textTheme.headlineMedium?.copyWith(fontWeight: FontWeight.w700),
+            ).textTheme.titleMedium?.copyWith(color: riverMuted),
           ),
           const SizedBox(height: 12),
           Wrap(
             spacing: 8,
             runSpacing: 8,
             children: [
-              FilledButton.icon(
-                onPressed: () => create('dm'),
-                icon: const Icon(Icons.add),
-                label: const Text('New conversation'),
+              RiverPress(
+                child: FilledButton.icon(
+                  onPressed: () => create('dm'),
+                  icon: const Icon(Icons.add),
+                  label: const Text('New conversation'),
+                ),
               ),
               OutlinedButton.icon(
                 onPressed: () => create('space'),
@@ -70,54 +74,6 @@ class RiverHome extends StatelessWidget {
             ],
           ),
           const SizedBox(height: 16),
-          if (navigate != null && box.maxWidth >= 600) ...[
-            Row(
-              children: [
-                for (final d in riverDestinations)
-                  Expanded(
-                    child: Padding(
-                      padding: const EdgeInsets.only(right: 6),
-                      child: Card(
-                        child: InkWell(
-                          onTap: () => navigate!(d.name),
-                          borderRadius: BorderRadius.circular(12),
-                          child: Padding(
-                            padding: const EdgeInsets.all(12),
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Icon(d.icon, color: riverAccent, size: 20),
-                                const SizedBox(height: 8),
-                                Text(
-                                  d.name,
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: const TextStyle(
-                                    fontWeight: FontWeight.w600,
-                                    fontSize: 12,
-                                  ),
-                                ),
-                                const SizedBox(height: 2),
-                                Text(
-                                  d.description,
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: const TextStyle(
-                                    fontSize: 10,
-                                    color: riverMuted,
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                        ),
-                      ),
-                    ),
-                  ),
-              ],
-            ),
-            const SizedBox(height: 16),
-          ],
           if (box.maxWidth >= 850)
             Row(
               key: const ValueKey('home-columns'),
@@ -128,17 +84,17 @@ class RiverHome extends StatelessWidget {
                 Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [voices, const SizedBox(height: 16), people],
+                    children: [people, const SizedBox(height: 16), voices],
                   ),
                 ),
               ],
             )
           else ...[
-            voices,
+            people,
             const SizedBox(height: 16),
             catchUp,
             const SizedBox(height: 16),
-            people,
+            voices,
           ],
         ],
       );
@@ -192,7 +148,7 @@ class FavouritePeople extends StatefulWidget {
 
 class _FavouritePeopleState extends State<FavouritePeople> {
   Set<String> favourites = {};
-  bool loaded = false, saving = false;
+  bool loaded = false, saving = false, showAll = false;
   String? error;
   @override
   void initState() {
@@ -268,16 +224,15 @@ class _FavouritePeopleState extends State<FavouritePeople> {
             const Text('Add friends to keep your favourite people close.'),
           if (people.isNotEmpty && favourites.isEmpty)
             const Text('Star people to keep them at the top.'),
-          for (final person in people)
+          for (final person in (showAll ? people : people.take(6)))
             ListTile(
               dense: true,
               contentPadding: EdgeInsets.zero,
-              leading: Icon(
-                Icons.circle,
-                size: 10,
-                color: app.online.contains(person['user_id'])
-                    ? Colors.green
-                    : Colors.grey,
+              leading: RiverProfileAvatar(
+                app: app,
+                name: app.displayName(person['user_id'] as String),
+                avatarUrl: app.personAvatar(person['user_id'] as String),
+                size: 36,
               ),
               title: Text(
                 app.displayName(person['user_id'] as String),
@@ -310,6 +265,15 @@ class _FavouritePeopleState extends State<FavouritePeople> {
                   }
                 }
               },
+            ),
+          if (people.length > 6)
+            TextButton(
+              onPressed: () => setState(() => showAll = !showAll),
+              child: Text(
+                showAll
+                    ? 'Show fewer people'
+                    : 'Show all ${people.length} people',
+              ),
             ),
         ],
       ),

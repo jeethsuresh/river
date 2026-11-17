@@ -54,7 +54,7 @@ enum Toolchain {
 }
 
 class CargoBuildOptions {
-  final Toolchain toolchain;
+  final Toolchain? toolchain;
   final List<String> flags;
 
   CargoBuildOptions({
@@ -79,7 +79,8 @@ class CargoBuildOptions {
     if (node is! YamlMap) {
       throw SourceSpanException('Cargo options must be a map', node.span);
     }
-    Toolchain toolchain = Toolchain.stable;
+    // Flags alone must not replace the builder's pinned default toolchain.
+    Toolchain? toolchain;
     List<String> flags = [];
     for (final MapEntry(:key, :value) in node.nodes.entries) {
       if (key case YamlScalar(value: 'toolchain')) {

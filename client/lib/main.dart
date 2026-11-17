@@ -18,6 +18,7 @@ import 'friends_view.dart';
 import 'content_widgets.dart';
 import 'workspace_widgets.dart';
 import 'home_widgets.dart';
+import 'river_feedback.dart';
 import 'river_design.dart';
 import 'profile_avatar.dart';
 import 'destination_widgets.dart';
@@ -214,6 +215,10 @@ class _RiverShellState extends State<RiverShell> {
   final timeline = ScrollController();
   String? renderedList, renderedLast;
   bool newMessages = false;
+  final knownMessageIds = <String>{};
+  final arrivingMessageIds = <String, DateTime>{};
+  String? sendStatus, sendStatusRoom;
+  Timer? sendStatusTimer;
   final collapsed = <String>{};
   @override
   void initState() {
@@ -390,6 +395,7 @@ class _RiverShellState extends State<RiverShell> {
 
   @override
   void dispose() {
+    sendStatusTimer?.cancel();
     timeline.dispose();
     draft.dispose();
     super.dispose();
@@ -1382,8 +1388,26 @@ class _RiverShellState extends State<RiverShell> {
       return e['type'] ==
           'cool.gravitas.river.${viewFilter == 'Posts' ? 'post' : 'discussion'}.v1';
     }).toList();
-    final listKey = '${g['id']}:$viewFilter:$spaceChat';
+    final listKey = '${app.accountKey}:${g['id']}:$viewFilter:$spaceChat';
     final last = items.lastOrNull?['event_id'] as String?;
+    final now = DateTime.now();
+    arrivingMessageIds.removeWhere(
+      (_, at) => now.difference(at) > const Duration(seconds: 2),
+    );
+    if (renderedList != listKey || renderedLast == null) {
+      knownMessageIds.clear();
+      arrivingMessageIds.clear();
+    } else if (last != renderedLast) {
+      final oldIndex = items.indexWhere((e) => e['event_id'] == renderedLast);
+      // Newer events follow the previously rendered tail; earlier history does not.
+      if (oldIndex >= 0) {
+        for (final e in items.skip(oldIndex + 1)) {
+          final id = e['event_id'] as String;
+          if (!knownMessageIds.contains(id)) arrivingMessageIds[id] = now;
+        }
+      }
+    }
+    knownMessageIds.addAll(items.map((e) => e['event_id'] as String));
     if (renderedList != listKey || renderedLast != last) {
       final stick =
           renderedList != listKey ||
@@ -1826,6 +1850,21 @@ class _RiverShellState extends State<RiverShell> {
               padding: const EdgeInsets.all(8),
               child: Column(
                 children: [
+                  if (sendStatus != null && sendStatusRoom == composerRoom)
+                    Align(
+                      alignment: Alignment.centerLeft,
+                      child: Padding(
+                        padding: const EdgeInsets.fromLTRB(8, 0, 8, 6),
+                        child: Text(
+                          sendStatus!,
+                          semanticsLabel: sendStatus,
+                          style: const TextStyle(
+                            color: riverMuted,
+                            fontSize: 12,
+                          ),
+                        ),
+                      ),
+                    ),
                   if (viewFilter != 'Chat')
                     FilledButton.icon(
                       onPressed: () => showDialog<bool>(
@@ -1869,13 +1908,18 @@ class _RiverShellState extends State<RiverShell> {
                           ),
                         ),
                         const SizedBox(width: 10),
-                        IconButton.filled(
-                          tooltip: 'Send',
-                          onPressed: sending || needsMessaging
-                              ? null
-                              : () => send(g),
-                          icon: Icon(
-                            sending ? Icons.hourglass_top : Icons.arrow_upward,
+                        RiverPress(
+                          enabled: !sending && !needsMessaging,
+                          child: IconButton.filled(
+                            tooltip: 'Send',
+                            onPressed: sending || needsMessaging
+                                ? null
+                                : () => send(g),
+                            icon: Icon(
+                              sending
+                                  ? Icons.hourglass_top
+                                  : Icons.arrow_upward,
+                            ),
                           ),
                         ),
                       ],
@@ -1891,31 +1935,38 @@ class _RiverShellState extends State<RiverShell> {
   Widget eventCard(Json e, Json g) => Padding(
     key: ValueKey(e['event_id']),
     padding: const EdgeInsets.symmetric(vertical: 3),
-    child: e['type'] == 'cool.gravitas.river.invitation.v1'
-        ? InvitationCard(app: app, event: e)
-        : ContentCard(
-            app: app,
-            room: g['id'] as String,
-            event: e,
-            reply: () async {
-              final relation = (e['content'] as Json)['m.relates_to'] as Json?;
-              final rootId = relation?['rel_type'] == 'm.thread'
-                  ? relation!['event_id'] as String
-                  : e['event_id'] as String;
-              await Navigator.of(context).push<void>(
-                HistoryPageRoute(
-                  builder: (_) => e['type'] == 'cool.gravitas.river.post.v1'
-                      ? PostScreen(app: app, event: rootId)
-                      : ThreadScreen(
-                          app: app,
-                          room: g['id'] as String,
-                          rootId: rootId,
-                        ),
-                ),
-              );
-              if (mounted) await app.refresh();
-            },
-          ),
+    child: RiverMessageArrival(
+      animate:
+          arrivingMessageIds[e['event_id']] != null &&
+          DateTime.now().difference(arrivingMessageIds[e['event_id']]!) <
+              const Duration(seconds: 2),
+      child: e['type'] == 'cool.gravitas.river.invitation.v1'
+          ? InvitationCard(app: app, event: e)
+          : ContentCard(
+              app: app,
+              room: g['id'] as String,
+              event: e,
+              reply: () async {
+                final relation =
+                    (e['content'] as Json)['m.relates_to'] as Json?;
+                final rootId = relation?['rel_type'] == 'm.thread'
+                    ? relation!['event_id'] as String
+                    : e['event_id'] as String;
+                await Navigator.of(context).push<void>(
+                  HistoryPageRoute(
+                    builder: (_) => e['type'] == 'cool.gravitas.river.post.v1'
+                        ? PostScreen(app: app, event: rootId)
+                        : ThreadScreen(
+                            app: app,
+                            room: g['id'] as String,
+                            rootId: rootId,
+                          ),
+                  ),
+                );
+                if (mounted) await app.refresh();
+              },
+            ),
+    ),
   );
 
   Future<void> send(Json g) async {
@@ -1928,17 +1979,25 @@ class _RiverShellState extends State<RiverShell> {
       'msgtype': 'm.text',
       'cool.gravitas.river': {'version': 1, 'kind': 'message'},
     };
-    setState(() => sending = true);
+    sendStatusTimer?.cancel();
+    setState(() {
+      sending = true;
+      sendStatusRoom = room;
+      sendStatus = 'Sending…';
+    });
     final payload = jsonEncode(content);
     if (payload != retryPayload) {
       retryTxn = transactionId();
       retryPayload = payload;
     }
     retryTxn ??= transactionId();
-    await persistComposer();
-    if (!mounted || account != app.accountKey) return;
+    var confirmed = false;
     try {
+      await persistComposer();
+      if (!mounted || account != app.accountKey) return;
       await app.send(g['id'] as String, type, content, retryTxn!);
+      confirmed = true;
+      if (!mounted || account != app.accountKey) return;
       if (mounted && composerRoom == room && draft.text.trim() == body) {
         draft.clear();
         retryTxn = null;
@@ -1951,19 +2010,37 @@ class _RiverShellState extends State<RiverShell> {
         drafts.remove(room);
         if (room != null) await app.saveDraft(room, null);
       }
+      if (mounted && account == app.accountKey) {
+        setState(() => sendStatus = 'Sent');
+        sendStatusTimer = Timer(const Duration(seconds: 2), () {
+          if (mounted) setState(() => sendStatus = null);
+        });
+      }
     } catch (e) {
-      if (mounted) {
+      if (mounted && account == app.accountKey) {
+        setState(
+          () => sendStatus = confirmed
+              ? 'Sent · draft cleanup failed'
+              : 'Send failed',
+        );
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('$e · Your draft is kept.'),
-            action: SnackBarAction(
-              label: 'Retry',
-              onPressed: () {
-                if (app.selected == g['id'] && draft.text.trim() == body) {
-                  unawaited(send(g));
-                }
-              },
+            content: Text(
+              confirmed
+                  ? 'Message sent. Could not clear its saved draft on this device.'
+                  : '$e · Your draft is kept.',
             ),
+            action: confirmed
+                ? null
+                : SnackBarAction(
+                    label: 'Retry',
+                    onPressed: () {
+                      if (app.selected == g['id'] &&
+                          draft.text.trim() == body) {
+                        unawaited(send(g));
+                      }
+                    },
+                  ),
           ),
         );
       }

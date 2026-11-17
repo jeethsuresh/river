@@ -263,11 +263,12 @@ void main() {
           voice = tester.getTopLeft(find.text('Active Voice Rooms')),
           people = tester.getTopLeft(find.text('Your Favourite People'));
       if (width < 850) {
-        expect(voice.dy, lessThan(catchUp.dy));
-        expect(catchUp.dy, lessThan(people.dy));
+        expect(people.dy, lessThan(catchUp.dy));
+        expect(catchUp.dy, lessThan(voice.dy));
       } else {
         expect(catchUp.dx, lessThan(voice.dx));
         expect(voice.dx, people.dx);
+        expect(people.dy, lessThan(voice.dy));
         expect(
           tester.getSize(find.byType(CatchUpPanel)).width,
           greaterThan(tester.getSize(find.byType(FavouritePeople)).width * 1.8),

@@ -2,13 +2,16 @@
   "name": "River",
   "directory": "client",
   "engine": "flutter",
-  "version": "0.13.3",
-  "versionCode": 13003,
+  "version": "0.14.0",
+  "versionCode": 14000,
   "flutterVersion": "3.47.7",
   "flutterRevision": "abaf9c523780a608bd46686fd5e53740a07077f8",
   "defines": [],
   "changes": [
-    "River shows its own app icon on macOS, Windows, and Linux."
+    "Home puts favourite people and catch-up ahead of repeated navigation, with profile pictures and a shorter people list.",
+    "New messages settle into the conversation while loaded and earlier history stay still.",
+    "Sending and reactions have clearer pending, confirmed and failed feedback with tactile controls and larger reaction targets.",
+    "Call controls share consistent press feedback and expose their active state to assistive technology."
   ],
   "schemaVersion": 1,
   "slug": "river",

@@ -17,6 +17,7 @@ import 'matrix_attachment_widgets.dart';
 import 'rich_composer.dart';
 import 'media.dart';
 import 'media_widgets.dart';
+import 'river_feedback.dart';
 import 'river_design.dart';
 import 'profile_avatar.dart';
 
@@ -199,21 +200,31 @@ class ReactionBar extends StatefulWidget {
 
 class _ReactionBarState extends State<ReactionBar> {
   bool busy = false;
+  String? pendingEmoji;
   Future<void> react(String emoji) async {
     if (busy || !widget.enabled) return;
     final mine = widget.summary.any(
       (r) => r['key'] == emoji && (r['mine'] == true || r['active'] == true),
     );
-    setState(() => busy = true);
+    setState(() {
+      busy = true;
+      pendingEmoji = emoji;
+    });
     try {
       await widget.change(emoji, !mine);
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text('$e')));
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('$e')));
       }
     } finally {
-      if (mounted) setState(() => busy = false);
+      if (mounted) {
+        setState(() {
+          busy = false;
+          pendingEmoji = null;
+        });
+      }
     }
   }
 
@@ -261,54 +272,88 @@ class _ReactionBarState extends State<ReactionBar> {
   @override
   Widget build(BuildContext context) => Wrap(
     spacing: 6,
-    runSpacing: 2,
+    runSpacing: 4,
     crossAxisAlignment: WrapCrossAlignment.center,
     children: [
       for (final r in widget.summary)
-        Semantics(
-          selected: r['mine'] == true || r['active'] == true,
-          child: Tooltip(
-            message: (r['mine'] == true || r['active'] == true)
-                ? 'Remove ${stickerReactionUrl(r['key'] as String) != null ? 'sticker' : r['key']} reaction'
-                : 'React ${stickerReactionUrl(r['key'] as String) != null ? 'with sticker' : r['key']}',
-            child: TextButton(
-              style: contentActionStyle().copyWith(
-                foregroundColor: WidgetStatePropertyAll(
-                  r['mine'] == true || r['active'] == true
-                      ? riverAccent
-                      : riverMuted,
+        Builder(
+          builder: (context) {
+            final selected = r['mine'] == true || r['active'] == true;
+            final reaction = r['key'] as String;
+            final sticker = stickerReactionUrl(reaction);
+            return Semantics(
+              key: ValueKey('reaction-$reaction'),
+              selected: selected,
+              child: Tooltip(
+                message: selected
+                    ? 'Remove ${sticker != null ? 'sticker' : reaction} reaction'
+                    : 'React ${sticker != null ? 'with sticker' : reaction}',
+                child: RiverPress(
+                  enabled: !busy && widget.enabled,
+                  child: AnimatedContainer(
+                    duration: MediaQuery.disableAnimationsOf(context)
+                        ? Duration.zero
+                        : const Duration(milliseconds: 160),
+                    decoration: BoxDecoration(
+                      color: selected
+                          ? riverAccent.withValues(alpha: .10)
+                          : Colors.transparent,
+                      border: Border.all(
+                        color: selected
+                            ? riverAccent.withValues(alpha: .35)
+                            : riverBorder,
+                      ),
+                      borderRadius: BorderRadius.circular(18),
+                    ),
+                    child: TextButton(
+                      style: TextButton.styleFrom(
+                        foregroundColor: selected ? riverAccent : riverMuted,
+                        minimumSize: const Size(44, 40),
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 10,
+                          vertical: 6,
+                        ),
+                      ),
+                      onPressed: busy || !widget.enabled
+                          ? null
+                          : () => react(reaction),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          if (sticker != null)
+                            StickerImage(
+                              image: NetworkImage(mediaFetchUrl(sticker)),
+                              size: 20,
+                            )
+                          else
+                            Text(reaction),
+                          const SizedBox(width: 5),
+                          Text('${r['count']}'),
+                          if (pendingEmoji == reaction) ...[
+                            const SizedBox(width: 6),
+                            const SizedBox(
+                              width: 10,
+                              height: 10,
+                              child: CircularProgressIndicator(
+                                strokeWidth: 1.5,
+                                semanticsLabel: 'Saving reaction',
+                              ),
+                            ),
+                          ],
+                        ],
+                      ),
+                    ),
+                  ),
                 ),
               ),
-              onPressed: busy || !widget.enabled
-                  ? null
-                  : () => react(r['key'] as String),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  if (stickerReactionUrl(r['key'] as String) case final url?)
-                    StickerImage(
-                      image: NetworkImage(mediaFetchUrl(url)),
-                      size: 20,
-                    )
-                  else
-                    Text(r['key'] as String),
-                  const SizedBox(width: 3),
-                  Text('${r['count']}'),
-                ],
-              ),
-            ),
-          ),
+            );
+          },
         ),
       IconButton(
-        style: IconButton.styleFrom(
-          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-          foregroundColor: riverMuted,
-        ),
-        constraints: const BoxConstraints.tightFor(width: 24, height: 24),
-        padding: EdgeInsets.zero,
+        style: IconButton.styleFrom(foregroundColor: riverMuted),
         tooltip: widget.enabled ? 'Add reaction' : 'Sign in to react',
         onPressed: busy || !widget.enabled ? null : choose,
-        icon: const Icon(Icons.add_reaction_outlined, size: 15),
+        icon: const Icon(Icons.add_reaction_outlined, size: 18),
       ),
     ],
   );

@@ -51,7 +51,17 @@ void main() {
         lessThan(tester.getTopLeft(caption).dy),
       );
       expect(tester.getTopLeft(body).dx, tester.getTopLeft(caption).dx);
-      expect(tester.getSize(find.byType(ContentCard)).height, lessThan(60));
+      // Keep text-first composition compact while giving Add reaction its
+      // full Material touch target instead of the former 24px icon hit area.
+      expect(tester.getSize(find.byType(ContentCard)).height, lessThan(80));
+      expect(
+        tester
+            .getSize(
+              find.widgetWithIcon(IconButton, Icons.add_reaction_outlined),
+            )
+            .height,
+        greaterThanOrEqualTo(44),
+      );
       expect(
         tester
             .widget<MarkdownBody>(find.byType(MarkdownBody))
