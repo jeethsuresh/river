@@ -1,9 +1,11 @@
 {
   "schemaVersion": 1,
-  "version": "0.13.3",
-  "versionCode": 35,
+  "version": "0.14.0",
+  "versionCode": 36,
   "changes": [
-    "Swipe inward from the left edge to go back and from the right edge to go forward on Android 14 and later.",
-    "Return to previous browsing destinations without repeating actions; opening a new destination clears forward history."
+    "Home puts favourite people and catch-up ahead of repeated navigation, with profile pictures and a shorter people list.",
+    "New messages settle into the conversation while loaded and earlier history stay still.",
+    "Sending and reactions have clearer pending, confirmed and failed feedback with tactile controls and larger reaction targets.",
+    "Call controls share consistent press feedback and expose their active state to assistive technology."
   ]
 }

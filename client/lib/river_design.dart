@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'river_feedback.dart';
 
 const riverAccent = Color(0xff4059c9);
 const riverInk = Color(0xff202735);
@@ -8,6 +9,13 @@ const riverCanvas = Color(0xfff8f9fc);
 
 ThemeData riverTheme() => ThemeData(
   useMaterial3: true,
+  pageTransitionsTheme: PageTransitionsTheme(
+    builders: {
+      ...const PageTransitionsTheme().builders,
+      TargetPlatform.windows: const RiverPageTransitions(),
+      TargetPlatform.linux: const RiverPageTransitions(),
+    },
+  ),
   colorScheme: ColorScheme.fromSeed(
     seedColor: riverAccent,
     primary: riverAccent,
@@ -35,7 +43,7 @@ ThemeData riverTheme() => ThemeData(
       fontWeight: FontWeight.w600,
       color: riverInk,
     ),
-    bodyMedium: TextStyle(fontSize: 14, color: riverInk),
+    bodyMedium: TextStyle(fontSize: 15, height: 1.45, color: riverInk),
     bodySmall: TextStyle(fontSize: 12, color: riverMuted),
   ),
   appBarTheme: const AppBarTheme(

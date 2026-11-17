@@ -3,6 +3,7 @@ import 'package:livekit_client/livekit_client.dart';
 import 'api.dart';
 import 'calls.dart';
 import 'call_chat.dart';
+import 'river_feedback.dart';
 
 Future<void> joinRiverCall(
   BuildContext context,
@@ -300,15 +301,22 @@ class RiverCallScreen extends StatelessWidget {
     String label,
     IconData icon,
     VoidCallback action, {
-    bool selected = false,
+    bool? selected,
     bool enabled = true,
-  }) => FilledButton.tonalIcon(
-    style: FilledButton.styleFrom(
-      backgroundColor: selected ? const Color(0xffbcd1ff) : null,
+  }) => RiverPress(
+    enabled: enabled,
+    child: Semantics(
+      toggled: selected,
+      child: FilledButton.tonalIcon(
+        style: FilledButton.styleFrom(
+          minimumSize: const Size(48, 48),
+          backgroundColor: selected == true ? const Color(0xffbcd1ff) : null,
+        ),
+        onPressed: enabled ? action : null,
+        icon: Icon(icon),
+        label: Text(label),
+      ),
     ),
-    onPressed: enabled ? action : null,
-    icon: Icon(icon),
-    label: Text(label),
   );
 }
 
