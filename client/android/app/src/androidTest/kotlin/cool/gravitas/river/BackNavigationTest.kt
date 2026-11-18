@@ -3,8 +3,10 @@ package cool.gravitas.river
 import android.content.Intent
 import android.os.ParcelFileDescriptor
 import android.os.SystemClock
+import android.os.Build
 import android.view.InputDevice
 import android.view.MotionEvent
+import android.view.WindowInsets
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import io.flutter.embedding.engine.FlutterEngineCache
@@ -24,12 +26,21 @@ class BackNavigationTest {
     private val c = instrumentation.targetContext
     private var activity: MainActivity? = null
     private var lastState: Any? = null
+    private fun imeVisible(): Boolean? {
+        var shown: Boolean? = null
+        instrumentation.runOnMainSync {
+            if (Build.VERSION.SDK_INT >= 30) {
+                shown = activity?.window?.decorView?.rootWindowInsets?.isVisible(WindowInsets.Type.ime())
+            }
+        }
+        return shown
+    }
     private fun shell(command: String) = ParcelFileDescriptor.AutoCloseInputStream(
         instrumentation.uiAutomation.executeShellCommand(command)).bufferedReader().use { it.readText() }
     private fun await(message: String, condition: () -> Boolean) {
         val deadline = System.nanoTime() + 30_000_000_000L
         while (!condition() && System.nanoTime() < deadline) Thread.sleep(50)
-        assertTrue("$message; Dart state=$lastState; focused=${activity?.hasWindowFocus()}; registered=${activity?.backCallbackState}", condition())
+        assertTrue("$message; Dart state=$lastState; focused=${activity?.hasWindowFocus()}; registered=${activity?.backCallbackState}; ime=${imeVisible()}", condition())
     }
     private fun drawer(): Boolean? {
         val done = CountDownLatch(1)
@@ -93,7 +104,10 @@ class BackNavigationTest {
                 arrayOf(pointer), arrayOf(position), 0, 0, 1f, 1f, 0, 0, InputDevice.SOURCE_TOUCHSCREEN, 0)
             // Keep the input timestamps on the gesture's sample clock.
             // A slow emulator should not turn this swipe into a long press.
-            try { assertTrue(instrumentation.uiAutomation.injectInputEvent(event, false)) }
+            // Preserve the sample clock for moves, then wait for final dispatch.
+            // A successful async enqueue alone does not establish that the OS
+            // finished receiving the committed/cancelled gesture.
+            try { assertTrue(instrumentation.uiAutomation.injectInputEvent(event, action == MotionEvent.ACTION_UP)) }
             finally { event.recycle() }
         }
         event(MotionEvent.ACTION_DOWN, start)

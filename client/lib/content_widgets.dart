@@ -201,6 +201,8 @@ class ReactionBar extends StatefulWidget {
 class _ReactionBarState extends State<ReactionBar> {
   bool busy = false;
   String? pendingEmoji;
+  String? confirmedEmoji;
+  int confirmedSignal = 0;
   Future<void> react(String emoji) async {
     if (busy || !widget.enabled) return;
     final mine = widget.summary.any(
@@ -212,6 +214,12 @@ class _ReactionBarState extends State<ReactionBar> {
     });
     try {
       await widget.change(emoji, !mine);
+      if (mounted) {
+        setState(() {
+          confirmedEmoji = emoji;
+          confirmedSignal++;
+        });
+      }
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(
@@ -320,13 +328,21 @@ class _ReactionBarState extends State<ReactionBar> {
                       child: Row(
                         mainAxisSize: MainAxisSize.min,
                         children: [
-                          if (sticker != null)
-                            StickerImage(
-                              image: NetworkImage(mediaFetchUrl(sticker)),
-                              size: 20,
-                            )
-                          else
-                            Text(reaction),
+                          ElasticArt(
+                            child: ElasticPulse(
+                              signal: confirmedEmoji == reaction
+                                  ? confirmedSignal
+                                  : 0,
+                              child: sticker != null
+                                  ? StickerImage(
+                                      image: NetworkImage(
+                                        mediaFetchUrl(sticker),
+                                      ),
+                                      size: 20,
+                                    )
+                                  : Text(reaction),
+                            ),
+                          ),
                           const SizedBox(width: 5),
                           Text('${r['count']}'),
                           if (pendingEmoji == reaction) ...[

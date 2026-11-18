@@ -2,16 +2,15 @@
   "name": "River",
   "directory": "client",
   "engine": "flutter",
-  "version": "0.14.0",
-  "versionCode": 14000,
+  "version": "0.15.0",
+  "versionCode": 15000,
   "flutterVersion": "3.47.7",
   "flutterRevision": "abaf9c523780a608bd46686fd5e53740a07077f8",
   "defines": [],
   "changes": [
-    "Home puts favourite people and catch-up ahead of repeated navigation, with profile pictures and a shorter people list.",
-    "New messages settle into the conversation while loaded and earlier history stay still.",
-    "Sending and reactions have clearer pending, confirmed and failed feedback with tactile controls and larger reaction targets.",
-    "Call controls share consistent press feedback and expose their active state to assistive technology."
+    "The send button becomes sending, sent or failed feedback in place, replacing the extra status row while keeping drafts and retry behavior.",
+    "Reactions respond to press and confirmed saves without stretching counts or message text.",
+    "Call controls and new conversations have elastic icon feedback; Home drops the repeated welcome line."
   ],
   "schemaVersion": 1,
   "slug": "river",

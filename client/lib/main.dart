@@ -1850,21 +1850,6 @@ class _RiverShellState extends State<RiverShell> {
               padding: const EdgeInsets.all(8),
               child: Column(
                 children: [
-                  if (sendStatus != null && sendStatusRoom == composerRoom)
-                    Align(
-                      alignment: Alignment.centerLeft,
-                      child: Padding(
-                        padding: const EdgeInsets.fromLTRB(8, 0, 8, 6),
-                        child: Text(
-                          sendStatus!,
-                          semanticsLabel: sendStatus,
-                          style: const TextStyle(
-                            color: riverMuted,
-                            fontSize: 12,
-                          ),
-                        ),
-                      ),
-                    ),
                   if (viewFilter != 'Chat')
                     FilledButton.icon(
                       onPressed: () => showDialog<bool>(
@@ -1910,15 +1895,39 @@ class _RiverShellState extends State<RiverShell> {
                         const SizedBox(width: 10),
                         RiverPress(
                           enabled: !sending && !needsMessaging,
-                          child: IconButton.filled(
-                            tooltip: 'Send',
-                            onPressed: sending || needsMessaging
-                                ? null
-                                : () => send(g),
-                            icon: Icon(
-                              sending
-                                  ? Icons.hourglass_top
-                                  : Icons.arrow_upward,
+                          child: Semantics(
+                            liveRegion: true,
+                            child: IconButton.filled(
+                              key: const ValueKey('message-send'),
+                              tooltip:
+                                  sendStatusRoom == composerRoom &&
+                                      sendStatus != null
+                                  ? sendStatus!
+                                  : 'Send',
+                              onPressed: sending || needsMessaging
+                                  ? null
+                                  : () => send(g),
+                              icon: ElasticArt(
+                                child: ElasticPulse(
+                                  signal:
+                                      sendStatusRoom == composerRoom &&
+                                          sendStatus == 'Sent'
+                                      ? 1
+                                      : 0,
+                                  child: Icon(
+                                    sending
+                                        ? Icons.hourglass_top
+                                        : sendStatusRoom == composerRoom &&
+                                              (sendStatus?.contains('failed') ??
+                                                  false)
+                                        ? Icons.error_outline
+                                        : sendStatusRoom == composerRoom &&
+                                              sendStatus == 'Sent'
+                                        ? Icons.check
+                                        : Icons.arrow_upward,
+                                  ),
+                                ),
+                              ),
                             ),
                           ),
                         ),

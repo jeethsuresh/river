@@ -50,15 +50,15 @@ void main() {
     final composer = tester.widget<RichComposer>(find.byType(RichComposer));
     composer.controller.text = 'Keep this message';
     await tester.pump();
-    await tester.tap(find.byTooltip('Send'));
+    await tester.tap(find.byKey(const ValueKey('message-send')));
     await tester.pump();
-    expect(find.text('Sending…'), findsOneWidget);
-    await tester.tap(find.byTooltip('Send'));
+    expect(find.byTooltip('Sending…'), findsOneWidget);
+    await tester.tap(find.byKey(const ValueKey('message-send')));
     expect(api.transactions, hasLength(1));
     api.operation.completeError(StateError('offline'));
     await tester.pumpAndSettle();
     expect(composer.controller.text, 'Keep this message');
-    expect(find.text('Send failed'), findsOneWidget);
+    expect(find.byTooltip('Send failed'), findsOneWidget);
     api.operation = Completer<Json>();
     await tester.tap(find.text('Retry'));
     await tester.pump();
@@ -67,7 +67,7 @@ void main() {
     api.operation.complete({'event_id': 'sent'});
     await tester.pumpAndSettle();
     expect(composer.controller.text, isEmpty);
-    expect(find.text('Sent'), findsOneWidget);
+    expect(find.byTooltip('Sent'), findsOneWidget);
     await tester.pumpWidget(const SizedBox());
   });
 
@@ -80,7 +80,7 @@ void main() {
     final composer = tester.widget<RichComposer>(find.byType(RichComposer));
     composer.controller.text = 'Alice message';
     await tester.pump();
-    await tester.tap(find.byTooltip('Send'));
+    await tester.tap(find.byKey(const ValueKey('message-send')));
     await tester.pump();
     api.user = {'sub': 'bob', 'username': 'Bob'};
     api.notifyListeners();
@@ -93,7 +93,7 @@ void main() {
       tester.widget<RichComposer>(find.byType(RichComposer)).controller.text,
       'Bob draft',
     );
-    expect(find.text('Sent'), findsNothing);
+    expect(find.byTooltip('Sent'), findsNothing);
     await tester.pumpWidget(const SizedBox());
   });
   testWidgets(
@@ -106,25 +106,27 @@ void main() {
             body: RiverPress(
               child: TextButton(
                 onPressed: () => actions++,
-                child: const Text('Send'),
+                child: const ElasticArt(child: Icon(Icons.arrow_upward)),
               ),
             ),
           ),
         ),
       );
       final gesture = await tester.startGesture(
-        tester.getCenter(find.text('Send')),
+        tester.getCenter(find.byType(TextButton)),
       );
+      await tester.pump();
       await tester.pump(const Duration(milliseconds: 90));
-      expect(
-        tester.widget<AnimatedScale>(find.byType(AnimatedScale)).scale,
-        lessThan(1),
+      final art = find.descendant(
+        of: find.byType(ElasticArt),
+        matching: find.byType(Transform),
       );
+      expect(tester.widget<Transform>(art).transform.isIdentity(), isFalse);
       await gesture.cancel();
       await tester.pumpAndSettle();
       expect(actions, 0);
-      expect(tester.widget<AnimatedScale>(find.byType(AnimatedScale)).scale, 1);
-      await tester.tap(find.text('Send'));
+      expect(tester.widget<Transform>(art).transform.isIdentity(), isTrue);
+      await tester.tap(find.byType(TextButton));
       expect(actions, 1);
     },
   );
