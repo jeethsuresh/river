@@ -3,6 +3,7 @@ import 'gravitas_navigation.dart';
 import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
 
+import 'add_gravitas_friend.dart';
 import 'api.dart';
 import 'call_widgets.dart';
 import 'matrix_security_widgets.dart';
@@ -111,6 +112,7 @@ class _ConversationPickerState extends State<ConversationPicker> {
   final name = TextEditingController(), query = TextEditingController();
   final selected = <String>{};
   bool busy = false;
+  bool contactRequestSent = false;
   String? error;
   @override
   void dispose() {
@@ -160,6 +162,78 @@ class _ConversationPickerState extends State<ConversationPicker> {
         .toList();
   }
 
+  Widget peopleList() {
+    final search = query.text.trim();
+    final needle = search.toLowerCase();
+    final people = candidates;
+    final visible = people
+        .where(
+          (person) =>
+              (person['username'] as String).toLowerCase().contains(needle),
+        )
+        .toList();
+    if (visible.isEmpty && widget.contextGroup == null) {
+      return ListView(
+        children: [
+          Center(
+            child: AddGravitasFriendButton(
+              app: widget.app,
+              enabled: !busy,
+              initialUsername: RegExp(r'^@?[a-zA-Z0-9]{1,20}$').hasMatch(search)
+                  ? search
+                  : '',
+              onSent: () => setState(() => contactRequestSent = true),
+            ),
+          ),
+          if (contactRequestSent)
+            Center(
+              child: Semantics(
+                liveRegion: true,
+                child: const Text('Gravitas contact request sent.'),
+              ),
+            ),
+        ],
+      );
+    }
+    if (people.isEmpty) {
+      return const Center(
+        child: Text(
+          'Invite people to this group before starting a conversation.',
+        ),
+      );
+    }
+    return ListView(
+      children: [
+        for (final friend in visible)
+          CheckboxListTile(
+            secondary: RiverProfileAvatar(
+              app: widget.app,
+              name: friend['username'] as String,
+              avatarUrl: widget.app.personAvatar(friend['user_id'] as String),
+            ),
+            value: selected.contains(friend['user_id']),
+            title: Text(friend['username'] as String),
+            subtitle: Text(
+              widget.app.online.contains(friend['user_id'])
+                  ? 'Online'
+                  : widget.contextGroup == null
+                  ? 'River friend'
+                  : 'Group member',
+            ),
+            onChanged: busy
+                ? null
+                : (checked) => setState(() {
+                    if (checked == true && selected.length < 24) {
+                      selected.add(friend['user_id'] as String);
+                    } else {
+                      selected.remove(friend['user_id']);
+                    }
+                  }),
+          ),
+      ],
+    );
+  }
+
   @override
   Widget build(BuildContext context) => AlertDialog(
     title: Text(
@@ -182,7 +256,7 @@ class _ConversationPickerState extends State<ConversationPicker> {
             ),
           TextField(
             controller: query,
-            onChanged: (_) => setState(() {}),
+            onChanged: (_) => setState(() => contactRequestSent = false),
             decoration: InputDecoration(
               labelText: widget.matrixOnly
                   ? 'Matrix ID, room alias or link'
@@ -202,7 +276,8 @@ class _ConversationPickerState extends State<ConversationPicker> {
                       final person = query.text.trim();
                       if (!person.startsWith('@') || !person.contains(':')) {
                         setState(
-                          () => error = 'Enter a full Matrix ID, such as @Alice:example.org, in the search field.',
+                          () => error =
+                              'Enter a full Matrix ID, such as @Alice:example.org, in the search field.',
                         );
                         return;
                       }
@@ -230,7 +305,8 @@ class _ConversationPickerState extends State<ConversationPicker> {
                       final room = query.text.trim();
                       if (room.isEmpty) {
                         setState(
-                          () => error = 'Enter a room ID, alias or matrix.to link in the search field.',
+                          () => error =
+                              'Enter a room ID, alias or matrix.to link in the search field.',
                         );
                         return;
                       }
@@ -257,50 +333,7 @@ class _ConversationPickerState extends State<ConversationPicker> {
                           : 'Connect Matrix messaging on this device to continue.',
                     ),
                   )
-                : candidates.isEmpty
-                ? Center(
-                    child: Text(
-                      widget.contextGroup == null
-                          ? 'Add a Gravitas contact who uses River to start a conversation.'
-                          : 'Invite people to this group before starting a conversation.',
-                    ),
-                  )
-                : ListView(
-                    children: [
-                      for (final friend in candidates.where(
-                        (p) => '${p['username']}'.toLowerCase().contains(
-                          query.text.toLowerCase(),
-                        ),
-                      ))
-                        CheckboxListTile(
-                          secondary: RiverProfileAvatar(
-                            app: widget.app,
-                            name: friend['username'] as String,
-                            avatarUrl: widget.app.personAvatar(
-                              friend['user_id'] as String,
-                            ),
-                          ),
-                          value: selected.contains(friend['user_id']),
-                          title: Text(friend['username'] as String),
-                          subtitle: Text(
-                            widget.app.online.contains(friend['user_id'])
-                                ? 'Online'
-                                : widget.contextGroup == null
-                                ? 'River friend'
-                                : 'Group member',
-                          ),
-                          onChanged: busy
-                              ? null
-                              : (checked) => setState(() {
-                                  if (checked == true && selected.length < 24) {
-                                    selected.add(friend['user_id'] as String);
-                                  } else {
-                                    selected.remove(friend['user_id']);
-                                  }
-                                }),
-                        ),
-                    ],
-                  ),
+                : peopleList(),
           ),
           if (error != null)
             Text(

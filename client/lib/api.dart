@@ -1875,7 +1875,8 @@ class RiverApi extends ChangeNotifier {
   }
 
   Future<void> friendAction(String person, String action) async {
-    final id = userId(person), key = 'friend:$action:$person';
+    final id = userId(person), key = 'friend:$action:$id';
+    final account = accountKey, generation = _generation;
     await request(
       '/api/friends',
       method: 'POST',
@@ -1885,6 +1886,9 @@ class RiverApi extends ChangeNotifier {
         'txn_id': _transactions.putIfAbsent(key, transactionId),
       },
     );
+    if (account != accountKey || generation != _generation) {
+      throw ApiException(409, 'session_changed');
+    }
     _transactions.remove(key);
     await refresh();
   }

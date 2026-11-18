@@ -7,6 +7,7 @@ import 'package:http/testing.dart';
 import 'package:river/api.dart';
 import 'package:river/main.dart';
 import 'package:river/friends_view.dart';
+import 'package:river/workspace_widgets.dart';
 
 const rootId = '11111111-1111-4111-8111-111111111111';
 const childId = '22222222-2222-4222-8222-222222222222';
@@ -47,9 +48,11 @@ http.Response response(Json data, [int status = 200]) => http.Response(
 
 void main() {
   testWidgets(
-    'friend request dialog canonicalizes username and displays outgoing request',
+    'friend request keeps its username on failure and sends once per attempt',
     (tester) async {
       final social = <Json>[];
+      final submissions = <Json>[];
+      final firstAttempt = Completer<http.Response>();
       final api =
           RiverApi(
               client: MockClient((r) async {
@@ -63,6 +66,8 @@ void main() {
                     expect(data['action'], 'request');
                     expect(data['user_id'], '@bob:gravitas.cool');
                     expect(data['txn_id'], isNotEmpty);
+                    submissions.add(data);
+                    if (submissions.length == 1) return firstAttempt.future;
                     social.add({...bob, 'direction': 'outgoing'});
                     return response({'ok': true});
                   }
@@ -89,17 +94,115 @@ void main() {
       );
       await tester.tap(find.text('Add a friend'));
       await tester.pumpAndSettle();
-      await tester.enterText(
-        find.widgetWithText(TextField, 'Gravitas username'),
-        'Bob',
-      );
+      final input = find.widgetWithText(TextField, 'Gravitas username');
+      await tester.enterText(input, ' Bob ');
+      await tester.pump();
+      await tester.testTextInput.receiveAction(TextInputAction.send);
+      await tester.tap(find.text('Send request'));
+      await tester.pump();
+      expect(submissions, hasLength(1));
+      expect(find.text('Sending…'), findsOneWidget);
+      expect(find.text('Gravitas contact request sent.'), findsNothing);
+
+      firstAttempt.complete(response({'error': 'unavailable'}, 502));
+      await tester.pumpAndSettle();
+      expect(find.text('Unable to connect. Please try again.'), findsOneWidget);
+      expect(tester.widget<TextField>(input).controller!.text, ' Bob ');
+
+      await tester.enterText(input, '@bob');
+      await tester.pump();
       await tester.tap(find.text('Send request'));
       await tester.pumpAndSettle();
+      expect(submissions, hasLength(2));
+      expect(submissions.last['txn_id'], submissions.first['txn_id']);
+      expect(find.text('Gravitas contact request sent.'), findsOneWidget);
       expect(find.text('bob'), findsOneWidget);
       expect(find.text('Cancel request'), findsOneWidget);
       expect(tester.takeException(), isNull);
       await tester.pumpWidget(const SizedBox());
       api.dispose();
+    },
+  );
+
+  testWidgets(
+    'Home and the conversation picker offer Gravitas contact requests',
+    (tester) async {
+      await tester.binding.setSurfaceSize(const Size(390, 850));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+      tester.platformDispatcher.accessibilityFeaturesTestValue =
+          const FakeAccessibilityFeatures(disableAnimations: true);
+      addTearDown(
+        tester.platformDispatcher.clearAccessibilityFeaturesTestValue,
+      );
+
+      final submissions = <Json>[];
+      final api =
+          RiverApi(
+              client: MockClient((r) async {
+                if (r.method == 'POST' && r.url.path == '/api/friends') {
+                  submissions.add(jsonDecode(r.body) as Json);
+                  return response({'ok': true});
+                }
+                return switch (r.url.path) {
+                  '/api/friends' => response({
+                    'friends': [bob],
+                    'requests': [],
+                    'blocked': [],
+                  }),
+                  '/api/overview' => response({'groups': [], 'recent': []}),
+                  _ => throw StateError(
+                    'Unexpected request: ${r.method} ${r.url.path}',
+                  ),
+                };
+              }),
+            )
+            ..user = alice
+            ..loading = false
+            ..friends = [bob];
+      await tester.pumpWidget(RiverApp(api: api, boot: false));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('Add a friend'));
+      await tester.pumpAndSettle();
+      await tester.enterText(
+        find.widgetWithText(TextField, 'Gravitas username'),
+        'dana',
+      );
+      await tester.binding.handlePopRoute();
+      await tester.pumpAndSettle();
+      expect(submissions, isEmpty);
+      expect(find.text('Add a Gravitas contact'), findsNothing);
+
+      await tester.tap(find.text('New conversation'));
+      await tester.pumpAndSettle();
+      final search = find.widgetWithText(
+        TextField,
+        'Friend, Matrix user or room',
+      );
+      expect(
+        find.descendant(
+          of: find.byType(ConversationPicker),
+          matching: find.text('bob'),
+        ),
+        findsOneWidget,
+      );
+      expect(find.text('Add a friend').hitTestable(), findsNothing);
+      await tester.enterText(search, 'Carol');
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Add a friend').hitTestable());
+      await tester.pumpAndSettle();
+      final input = find.widgetWithText(TextField, 'Gravitas username');
+      expect(tester.widget<TextField>(input).controller!.text, 'Carol');
+      await tester.tap(find.text('Send request'));
+      await tester.pumpAndSettle();
+      expect(submissions.single['user_id'], '@carol:gravitas.cool');
+      expect(
+        find.text('Gravitas contact request sent.').hitTestable(),
+        findsOneWidget,
+      );
+      expect(tester.widget<TextField>(search).controller!.text, 'Carol');
+      expect(tester.takeException(), isNull);
+      await tester.pumpWidget(const SizedBox());
     },
   );
 

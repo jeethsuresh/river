@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'add_gravitas_friend.dart';
 import 'api.dart';
 import 'profile_avatar.dart';
 
@@ -32,45 +33,6 @@ class _FriendsViewState extends State<FriendsView> {
     } finally {
       if (mounted) setState(() => busy = false);
     }
-  }
-
-  Future<void> add() async {
-    final controller = TextEditingController();
-    final name = await showDialog<String>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Add a Gravitas contact'),
-        content: TextField(
-          controller: controller,
-          autofocus: true,
-          maxLength: 100,
-          decoration: const InputDecoration(
-            labelText: 'Gravitas username',
-            hintText: 'alice',
-          ),
-          onSubmitted: (v) {
-            if (v.trim().isNotEmpty) Navigator.pop(ctx, v.trim());
-          },
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            onPressed: () {
-              if (controller.text.trim().isNotEmpty) {
-                Navigator.pop(ctx, controller.text.trim());
-              }
-            },
-            child: const Text('Send request'),
-          ),
-        ],
-      ),
-    );
-    await Future<void>.delayed(const Duration(milliseconds: 300));
-    controller.dispose();
-    if (name != null) await run(() => app.friendAction(name, 'request'));
   }
 
   bool matches(Json p) => '${p['username']} ${p['user_id']}'
@@ -165,11 +127,7 @@ class _FriendsViewState extends State<FriendsView> {
         spacing: 12,
         runSpacing: 12,
         children: [
-          FilledButton.icon(
-            onPressed: busy ? null : add,
-            icon: const Icon(Icons.person_add_outlined),
-            label: const Text('Add a friend'),
-          ),
+          AddGravitasFriendButton(app: app, enabled: !busy),
           if (busy)
             const Padding(
               padding: EdgeInsets.all(10),
