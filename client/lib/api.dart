@@ -8,6 +8,7 @@ import 'native_broker.dart';
 import 'connection_health.dart';
 import 'matrix_messaging.dart';
 import 'matrix_timeline.dart';
+import 'secure_storage.dart';
 import 'store_notifications.dart';
 import 'ios_push.dart';
 import 'calls.dart';
@@ -19,7 +20,6 @@ import 'cache_io.dart'
 
 import 'package:crypto/crypto.dart';
 import 'package:flutter/foundation.dart';
-import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:http/http.dart' as http;
 import 'package:url_launcher/url_launcher.dart';
 
@@ -639,9 +639,7 @@ class RiverApi extends ChangeNotifier {
   RiverCalls get calls => _calls ??= RiverCalls(this);
   List<Json> activeCalls = [];
   final http.Client client;
-  final storage = const FlutterSecureStorage(
-    mOptions: MacOsOptions(usesDataProtectionKeychain: false),
-  );
+  final storage = riverSecureStorage;
   String defaultDomain = const String.fromEnvironment(
     'GRAVITAS_IDENTITY_DOMAIN',
     defaultValue: 'gravitas.cool',
