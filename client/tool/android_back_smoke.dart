@@ -52,7 +52,9 @@ void main() {
   const MethodChannel('cool.gravitas.river/back-smoke').setMethodCallHandler((
     call,
   ) async {
-    if (call.method != 'state') throw MissingPluginException();
+    if (call.method != 'state' && call.method != 'resetDrawer') {
+      throw MissingPluginException();
+    }
     ScaffoldState? shell;
     void visit(Element element) {
       if (element is StatefulElement &&
@@ -64,6 +66,10 @@ void main() {
     }
 
     WidgetsBinding.instance.rootElement?.visitChildren(visit);
+    if (call.method == 'resetDrawer') {
+      shell?.closeDrawer();
+      return null;
+    }
     return {
       'drawer': shell?.isDrawerOpen,
       'user': app.user?['sub'],
