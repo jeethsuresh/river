@@ -2,15 +2,14 @@
   "name": "River",
   "directory": "client",
   "engine": "flutter",
-  "version": "0.15.0",
-  "versionCode": 15000,
+  "version": "0.16.0",
+  "versionCode": 16000,
   "flutterVersion": "3.47.7",
   "flutterRevision": "abaf9c523780a608bd46686fd5e53740a07077f8",
   "defines": [],
   "changes": [
-    "The send button becomes sending, sent or failed feedback in place, replacing the extra status row while keeping drafts and retry behavior.",
-    "Reactions respond to press and confirmed saves without stretching counts or message text.",
-    "Call controls and new conversations have elastic icon feedback; Home drops the repeated welcome line."
+    "Send Gravitas contact requests from Home, Friends, or New conversation when no friend matches your search.",
+    "Keep the username when a contact request fails so you can correct it or retry."
   ],
   "schemaVersion": 1,
   "slug": "river",
