@@ -1,35 +1,15 @@
 import 'package:flutter/material.dart';
+import 'interaction_juice.dart';
+export 'interaction_juice.dart' show ElasticArt, ElasticPulse;
 
-/// Tactile presentation around an existing control; never owns its action.
-class RiverPress extends StatefulWidget {
+/// The control owns activation; only its marked art changes shape.
+class RiverPress extends StatelessWidget {
   const RiverPress({super.key, required this.child, this.enabled = true});
   final Widget child;
   final bool enabled;
   @override
-  State<RiverPress> createState() => _RiverPressState();
-}
-
-class _RiverPressState extends State<RiverPress> {
-  bool pressed = false;
-  @override
-  Widget build(BuildContext context) {
-    final reduced = MediaQuery.disableAnimationsOf(context);
-    return Listener(
-      onPointerDown: (_) {
-        if (widget.enabled) setState(() => pressed = true);
-      },
-      onPointerUp: (_) => setState(() => pressed = false),
-      onPointerCancel: (_) => setState(() => pressed = false),
-      child: AnimatedScale(
-        scale: pressed && widget.enabled && !reduced ? .95 : 1,
-        duration: reduced
-            ? Duration.zero
-            : Duration(milliseconds: pressed ? 80 : 170),
-        curve: Curves.easeOutCubic,
-        child: widget.child,
-      ),
-    );
-  }
+  Widget build(BuildContext context) =>
+      ElasticInteraction(enabled: enabled, builder: (context, pose) => child);
 }
 
 /// Only genuinely new event IDs opt in. Hydrated/paginated history stays still.

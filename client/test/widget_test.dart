@@ -28,7 +28,8 @@ void main() {
         ];
         await tester.pumpWidget(RiverApp(api: api, boot: false));
         await tester.pumpAndSettle();
-        expect(find.text('Welcome, Alice.'), findsOneWidget);
+        expect(find.text('New conversation'), findsOneWidget);
+        expect(find.text('Welcome, Alice.'), findsNothing);
         expect(tester.takeException(), isNull);
         api.selected = 'space';
         api.notifyListeners();
@@ -123,6 +124,7 @@ void main() {
     api.notifyListeners();
     await tester.pumpAndSettle();
     expect(find.text('private-member'), findsNothing);
-    expect(find.text('Welcome, bob.'), findsOneWidget);
+    expect(find.text('New conversation'), findsOneWidget);
+    expect(api.accountKey, contains('bob'));
   });
 }

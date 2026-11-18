@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'api.dart';
 import 'workspace_widgets.dart';
-import 'river_design.dart';
 import 'river_feedback.dart';
 import 'profile_avatar.dart';
 
@@ -48,13 +47,6 @@ class RiverHome extends StatelessWidget {
       return ListView(
         padding: EdgeInsets.all(box.maxWidth < 600 ? 12 : 24),
         children: [
-          Text(
-            'Welcome, ${app.displayName(app.user?['user_id'] as String? ?? app.user?['username'] as String? ?? '')}.',
-            style: Theme.of(
-              context,
-            ).textTheme.titleMedium?.copyWith(color: riverMuted),
-          ),
-          const SizedBox(height: 12),
           Wrap(
             spacing: 8,
             runSpacing: 8,
@@ -62,7 +54,7 @@ class RiverHome extends StatelessWidget {
               RiverPress(
                 child: FilledButton.icon(
                   onPressed: () => create('dm'),
-                  icon: const Icon(Icons.add),
+                  icon: const ElasticArt(child: Icon(Icons.add)),
                   label: const Text('New conversation'),
                 ),
               ),

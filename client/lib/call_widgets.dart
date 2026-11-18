@@ -313,7 +313,7 @@ class RiverCallScreen extends StatelessWidget {
           backgroundColor: selected == true ? const Color(0xffbcd1ff) : null,
         ),
         onPressed: enabled ? action : null,
-        icon: Icon(icon),
+        icon: ElasticArt(child: Icon(icon)),
         label: Text(label),
       ),
     ),
