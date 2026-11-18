@@ -25,7 +25,7 @@ class BackNavigationTest {
     private val instrumentation = InstrumentationRegistry.getInstrumentation()
     private val c = instrumentation.targetContext
     private var activity: MainActivity? = null
-    private var lastState: Any? = null
+    private var lastState: Map<*, *>? = null
     private fun imeVisible(): Boolean? {
         var shown: Boolean? = null
         instrumentation.runOnMainSync {
@@ -39,20 +39,30 @@ class BackNavigationTest {
         instrumentation.uiAutomation.executeShellCommand(command)).bufferedReader().use { it.readText() }
     private fun await(message: String, condition: () -> Boolean) {
         val deadline = System.nanoTime() + 30_000_000_000L
-        while (!condition() && System.nanoTime() < deadline) Thread.sleep(50)
-        assertTrue("$message; Dart state=$lastState; focused=${activity?.hasWindowFocus()}; registered=${activity?.backCallbackState}; ime=${imeVisible()}", condition())
+        do {
+            if (condition()) return
+            Thread.sleep(50)
+        } while (System.nanoTime() < deadline)
+        val systemGestures = systemUiState().lines()
+            .filter { it.contains("Gesture [") }.takeLast(8)
+        fail("$message; Dart state=$lastState; focused=${activity?.hasWindowFocus()}; " +
+            "registered=${activity?.backCallbackState}; ime=${imeVisible()}; " +
+            "recent SystemUI gestures=${systemGestures.joinToString("\n")}")
     }
-    private fun drawer(): Boolean? {
+    private fun systemUiState() =
+        shell("dumpsys activity service com.android.systemui/.SystemUIService")
+    private fun drawer(): Boolean? = fixture("state")?.get("drawer") as? Boolean
+    private fun fixture(method: String): Map<*, *>? {
         val done = CountDownLatch(1)
-        var opened: Boolean? = null
+        var reply: Map<*, *>? = null
         instrumentation.runOnMainSync {
             val engine = FlutterEngineCache.getInstance().get("river")
             if (engine == null) { done.countDown(); return@runOnMainSync }
             MethodChannel(engine.dartExecutor.binaryMessenger, "cool.gravitas.river/back-smoke")
-                .invokeMethod("state", null, object : MethodChannel.Result {
+                .invokeMethod(method, null, object : MethodChannel.Result {
                     override fun success(result: Any?) {
-                        lastState = result
-                        opened = (result as? Map<*, *>)?.get("drawer") as? Boolean
+                        reply = result as? Map<*, *>
+                        lastState = reply
                         done.countDown()
                     }
                     override fun error(code: String, message: String?, details: Any?) { done.countDown() }
@@ -60,7 +70,7 @@ class BackNavigationTest {
                 })
         }
         check(done.await(5, TimeUnit.SECONDS)) { "River did not answer the UI state query" }
-        return opened
+        return reply
     }
     private fun launch(): MainActivity {
         val host = instrumentation.startActivitySync(
@@ -71,7 +81,7 @@ class BackNavigationTest {
             instrumentation.runOnMainSync {
                 rendered = FlutterEngineCache.getInstance().get("river")?.renderer?.isDisplayingFlutterUi == true
             }
-            host.hasWindowFocus() && rendered && drawer() == false
+            host.hasWindowFocus() && host.backCallbackState && rendered && drawer() == false
         }
         instrumentation.waitForIdleSync()
         instrumentation.uiAutomation.waitForIdle(500, 10_000)
@@ -102,12 +112,12 @@ class BackNavigationTest {
             }
             val event = MotionEvent.obtain(down, eventTime, action, 1,
                 arrayOf(pointer), arrayOf(position), 0, 0, 1f, 1f, 0, 0, InputDevice.SOURCE_TOUCHSCREEN, 0)
-            // Keep the input timestamps on the gesture's sample clock.
-            // A slow emulator should not turn this swipe into a long press.
-            // Preserve the sample clock for moves, then wait for final dispatch.
-            // A successful async enqueue alone does not establish that the OS
-            // finished receiving the committed/cancelled gesture.
-            try { assertTrue(instrumentation.uiAutomation.injectInputEvent(event, action == MotionEvent.ACTION_UP)) }
+            // Keep scheduled timestamps under load. Wait for each sample to be
+            // dispatched so SystemUI can take ownership before the finger lifts.
+            try {
+                assertTrue("Android rejected touch action $action at x=$x",
+                    instrumentation.uiAutomation.injectInputEvent(event, true))
+            }
             finally { event.recycle() }
         }
         event(MotionEvent.ACTION_DOWN, start)
@@ -130,7 +140,7 @@ class BackNavigationTest {
         await("Gesture navigation must be enabled") { shell("settings get secure navigation_mode").trim() == "2" }
         // The settings value changes before SystemUI attaches its input monitor.
         await("Android's system edge-gesture handler must be ready") {
-            shell("dumpsys activity service com.android.systemui/.SystemUIService")
+            systemUiState()
                 .split("EdgeBackGestureHandler:").drop(1).any { section ->
                     val state = section.lineSequence().take(12).joinToString("\n")
                     state.contains("mIsEnabled=true") && state.contains("mIsGestureHandlingEnabled=true")
@@ -139,8 +149,14 @@ class BackNavigationTest {
     }
     @After fun cleanup() {
         activity?.let { host ->
-            instrumentation.runOnMainSync { if (!host.isDestroyed) host.finish() }
-            await("Android host did not finish cleanup") { host.isDestroyed }
+            try {
+                // A case can fail with its drawer open. The next case gets the
+                // same Dart engine, so restore the fixture between cases only.
+                fixture("resetDrawer")
+            } finally {
+                instrumentation.runOnMainSync { if (!host.isDestroyed) host.finish() }
+                await("Android host did not finish cleanup") { host.isDestroyed }
+            }
         }
     }
 
@@ -151,6 +167,7 @@ class BackNavigationTest {
             val host = launch()
             val engine = FlutterEngineCache.getInstance().get("river")!!
             if (original == null) original = engine else assertSame(original, engine)
+            val backRequests = lastState?.get("backRequests") as Int
             swipe(right = false)
             await("First OS swipe did not open the sidebar (attempt $attempt)") {
                 host.hasWindowFocus() && !host.isFinishing && !host.isDestroyed && drawer() == true
@@ -158,9 +175,13 @@ class BackNavigationTest {
             Thread.sleep(350)
             assertFalse("One swipe must not also leave River", host.isFinishing || host.isDestroyed)
             assertTrue("One swipe must not also background River", host.hasWindowFocus())
+            assertEquals(true, drawer())
+            assertEquals("First OS swipe must reach Dart once", backRequests + 1, lastState?.get("backRequests"))
             swipe(right = false)
-            await("Second OS swipe did not leave River (attempt $attempt)") { !host.hasWindowFocus() }
-            assertEquals("Back must reach Dart before leaving River", false, drawer())
+            await("Second OS swipe did not leave River (attempt $attempt)") {
+                drawer() == false && !host.hasWindowFocus()
+            }
+            assertEquals("Second OS swipe must reach Dart once", backRequests + 2, lastState?.get("backRequests"))
             // Android may retain a root task in the background. Explicitly
             // destroy that host to exercise a new Activity with the same engine.
             instrumentation.runOnMainSync { if (!host.isDestroyed) host.finish() }
