@@ -1,10 +1,9 @@
 {
   "schemaVersion": 1,
-  "version": "0.15.0",
-  "versionCode": 37,
+  "version": "0.16.1",
+  "versionCode": 39,
   "changes": [
-    "The send button becomes sending, sent or failed feedback in place, replacing the extra status row while keeping drafts and retry behavior.",
-    "Reactions respond to press and confirmed saves without stretching counts or message text.",
-    "Call controls and new conversations have elastic icon feedback; Home drops the repeated welcome line."
+    "Choose unencrypted sending after confirmation when encryption is unavailable.",
+    "Encrypted and unencrypted messages share one conversation history for the same participants."
   ]
 }
