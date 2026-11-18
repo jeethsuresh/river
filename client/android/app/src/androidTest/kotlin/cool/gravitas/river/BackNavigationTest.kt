@@ -121,13 +121,15 @@ class BackNavigationTest {
             finally { event.recycle() }
         }
         event(MotionEvent.ACTION_DOWN, start)
-        for (step in 0..15) {
-            // Cross Android's touch slop on the first move.
-            val distance = .25f + .75f * step / 15f
-            event(MotionEvent.ACTION_MOVE, start + (end - start) * distance)
+        // Approach the system's touch slop in small increments. A jump across
+        // both Android's and Flutter's thresholds lets the drawer also drag
+        // before the system can take ownership of the edge gesture.
+        val steps = 32
+        for (step in 1..steps) {
+            event(MotionEvent.ACTION_MOVE, start + (end - start) * step / steps)
         }
-        if (cancel) for (step in 1..16) {
-            event(MotionEvent.ACTION_MOVE, end + (start - end) * step / 16f)
+        if (cancel) for (step in 1..steps) {
+            event(MotionEvent.ACTION_MOVE, end + (start - end) * step / steps)
         }
         event(MotionEvent.ACTION_UP, if (cancel) start else end)
     }
