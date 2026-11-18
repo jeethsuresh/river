@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'add_gravitas_friend.dart';
 import 'api.dart';
 import 'workspace_widgets.dart';
 import 'river_feedback.dart';
@@ -212,8 +213,10 @@ class _FavouritePeopleState extends State<FavouritePeople> {
           if (error != null) Text(error!),
           if (!loaded && error != null)
             TextButton(onPressed: load, child: const Text('Retry favourites')),
-          if (people.isEmpty)
-            const Text('Add friends to keep your favourite people close.'),
+          Align(
+            alignment: Alignment.centerLeft,
+            child: AddGravitasFriendButton(app: app),
+          ),
           if (people.isNotEmpty && favourites.isEmpty)
             const Text('Star people to keep them at the top.'),
           for (final person in (showAll ? people : people.take(6)))
