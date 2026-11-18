@@ -2,13 +2,14 @@
   "name": "River",
   "directory": "client",
   "engine": "flutter",
-  "version": "0.15.1",
-  "versionCode": 15001,
+  "version": "0.16.0",
+  "versionCode": 16000,
   "flutterVersion": "3.47.7",
   "flutterRevision": "abaf9c523780a608bd46686fd5e53740a07077f8",
   "defines": [],
   "changes": [
-    "Fix Matrix sign-in on macOS so River can save the messaging connection for this device."
+    "Send Gravitas contact requests from Home, Friends, or New conversation when no friend matches your search.",
+    "Keep the username when a contact request fails so you can correct it or retry."
   ],
   "schemaVersion": 1,
   "slug": "river",
