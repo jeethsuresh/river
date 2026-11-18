@@ -125,6 +125,10 @@ class StoreNotificationDeliveryTest {
         instrumentation.runOnMainSync {
             StorePush.deliver(c, payload())
             first = StorePush.pending(c).single()
+            // notify() queues work in system_server. Keep this app's preview
+            // job queued until the generic alert exists, then enrich it below.
+            // Otherwise enrich correctly rejects an alert that is not active yet.
+            await { notifications().size == 1 }
             StorePush.enrich(c, first, preview)
             StorePush.finishPreview(c, first)
         }
