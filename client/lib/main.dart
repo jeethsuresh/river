@@ -115,7 +115,9 @@ class _RiverAppState extends State<RiverApp> with WidgetsBindingObserver {
         app.user?['issuer'] == 'https://gravitas.cool' &&
         notification['subject'] == app.user?['sub'] &&
         app.selected != null &&
-        app.matrixRoom(app.selected!) == notification['room_id']) {
+        app
+            .conversationWires(app.selected!)
+            .contains(notification['room_id'])) {
       // A shared engine can still have a thread or dialog over its chat shell.
       _navigator.currentState?.popUntil((route) => route.isFirst);
     }
@@ -236,10 +238,14 @@ class _RiverShellState extends State<RiverShell> {
 
   void markVisibleRead() {
     if (!app.active || !(ModalRoute.of(context)?.isCurrent ?? true)) return;
-    final id = app.selected,
-        event = app.events.lastOrNull?['event_id'] as String?;
-    if (id != null && event != null) {
-      unawaited(action(() => app.markRead(id, event)));
+    final id = app.selected;
+    if (id == null) return;
+    final seen = <String?>{};
+    for (final event in app.events.reversed) {
+      if (event['event_id'] case final String eventId
+          when seen.add(event['room_id'] as String?)) {
+        unawaited(action(() => app.markRead(id, eventId)));
+      }
     }
   }
 
@@ -255,12 +261,13 @@ class _RiverShellState extends State<RiverShell> {
   int _composerRevision = 0;
   String? _composerAccount;
   final _lastDraftWrites = <String, String>{};
-  String? retryTxn, retryPayload;
+  String? retryTxn, retryPayload, retryWire;
 
   Json composerSnapshot() => {
     'text': draft.text,
     'txn': retryTxn,
     'payload': retryPayload,
+    'wire': retryWire,
   };
 
   void composerChanged() {
@@ -290,7 +297,8 @@ class _RiverShellState extends State<RiverShell> {
   }
 
   String? composerRoom;
-  final drafts = <String, ({String text, String? txn, String? payload})>{};
+  final drafts =
+      <String, ({String text, String? txn, String? payload, String? wire})>{};
 
   void bindComposer() {
     final id = app.selected;
@@ -309,6 +317,7 @@ class _RiverShellState extends State<RiverShell> {
         text: draft.text,
         txn: retryTxn,
         payload: retryPayload,
+        wire: retryWire,
       );
     }
     final saved = drafts.remove(room);
@@ -316,6 +325,7 @@ class _RiverShellState extends State<RiverShell> {
     draft.text = saved?.text ?? '';
     retryTxn = saved?.txn;
     retryPayload = saved?.payload;
+    retryWire = saved?.wire;
     _bindingComposer = false;
     final revision = ++_composerRevision, account = app.accountKey;
     if (saved == null && room != null && app.matrixConnected) {
@@ -335,6 +345,7 @@ class _RiverShellState extends State<RiverShell> {
               draft.text = value['text'] as String? ?? '';
               retryTxn = value['txn'] as String?;
               retryPayload = value['payload'] as String?;
+              retryWire = value['wire'] as String?;
               _bindingComposer = false;
             });
             if ((value['files'] as List?)?.isNotEmpty ?? false) {
@@ -1489,6 +1500,9 @@ class _RiverShellState extends State<RiverShell> {
                   PopupMenuButton<String>(
                     tooltip: 'Group options',
                     onSelected: (v) => action(() async {
+                      if (v == 'unencrypted') {
+                        await changeSendMode(g['id'] as String);
+                      }
                       if (v == 'channel' || v == 'drop_in') {
                         final name = await ask(
                           'Create a channel',
@@ -1617,6 +1631,15 @@ class _RiverShellState extends State<RiverShell> {
                       }
                     }),
                     itemBuilder: (_) => [
+                      if (!app.readOnly &&
+                          app.matrix.deviceVerified != false &&
+                          !app.sendingUnencrypted(g['id'] as String) &&
+                          app.canSendUnencrypted(g['id'] as String))
+                        PopupMenuItem(
+                          enabled: !sending,
+                          value: 'unencrypted',
+                          child: const Text('Send unencrypted'),
+                        ),
                       if (app.matrixConnected &&
                           g['can_encrypt'] == true &&
                           g['encrypted'] != true &&
@@ -1865,7 +1888,8 @@ class _RiverShellState extends State<RiverShell> {
                         viewFilter == 'Posts' ? 'New post' : 'New discussion',
                       ),
                     )
-                  else
+                  else ...[
+                    sendMode(g['id'] as String),
                     Row(
                       crossAxisAlignment: CrossAxisAlignment.end,
                       children: [
@@ -1903,6 +1927,11 @@ class _RiverShellState extends State<RiverShell> {
                                   sendStatusRoom == composerRoom &&
                                       sendStatus != null
                                   ? sendStatus!
+                                  : app.isUnencryptedChat(
+                                      g['id'] as String,
+                                      app.composerWire(g['id'] as String),
+                                    )
+                                  ? 'Send unencrypted'
                                   : 'Send',
                               onPressed: sending || needsMessaging
                                   ? null
@@ -1933,6 +1962,7 @@ class _RiverShellState extends State<RiverShell> {
                         ),
                       ],
                     ),
+                  ],
                 ],
               ),
             ),
@@ -1969,6 +1999,7 @@ class _RiverShellState extends State<RiverShell> {
                             app: app,
                             room: g['id'] as String,
                             rootId: rootId,
+                            eventRoom: e['room_id'] as String?,
                           ),
                   ),
                 );
@@ -1977,6 +2008,102 @@ class _RiverShellState extends State<RiverShell> {
             ),
     ),
   );
+
+  Widget sendMode(String id) {
+    final fallback = app.sendingUnencrypted(id);
+    final unencrypted = app.isUnencryptedChat(id, app.composerWire(id));
+    final offerFallback =
+        app.canSendUnencrypted(id) && app.matrix.deviceVerified == false;
+    if (!fallback && !unencrypted && !offerFallback) {
+      return const SizedBox.shrink();
+    }
+    return Align(
+      alignment: AlignmentDirectional.centerStart,
+      child: Wrap(
+        crossAxisAlignment: WrapCrossAlignment.center,
+        children: [
+          if (unencrypted || fallback)
+            Padding(
+              padding: const EdgeInsetsDirectional.only(start: 8),
+              child: Semantics(
+                liveRegion: true,
+                child: const Text('Messages are unencrypted'),
+              ),
+            ),
+          if (fallback || offerFallback)
+            RiverPress(
+              enabled: !sending && !app.readOnly,
+              child: TextButton.icon(
+                onPressed: sending || app.readOnly
+                    ? null
+                    : () => changeSendMode(id),
+                icon: Icon(
+                  fallback ? Icons.lock_outline : Icons.lock_open,
+                  size: 16,
+                ),
+                label: Text(fallback ? 'Use encryption' : 'Send unencrypted'),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> changeSendMode(String id) async {
+    if (sending || app.selected != id) return;
+    final fallback = app.sendingUnencrypted(id);
+    final earlierAttempt = retryWire != null && draft.text.trim().isNotEmpty;
+    if (!fallback || earlierAttempt) {
+      final confirmed = await showDialog<bool>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: Text(fallback ? 'Use encryption?' : 'Send unencrypted?'),
+          content: Text(
+            [
+              if (!fallback)
+                'Homeservers can read messages and files sent in this mode. Participants may receive an invitation to the unencrypted room.',
+              if (earlierAttempt)
+                'Your last send may have gone through. Check the conversation before sending the draft to another room.',
+            ].join('\n\n'),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              child: Text(fallback ? 'Use encryption' : 'Continue unencrypted'),
+            ),
+          ],
+        ),
+      );
+      if (confirmed != true || !mounted || app.selected != id) return;
+    }
+    setState(() => sending = true);
+    try {
+      await action(() async {
+        if (fallback) {
+          app.chooseEncrypted(id);
+        } else {
+          await app.chooseUnencrypted(id);
+        }
+        if (!mounted ||
+            app.selected != id ||
+            !earlierAttempt ||
+            retryWire == app.composerWire(id)) {
+          return;
+        }
+        setState(() {
+          retryTxn = retryPayload = retryWire = null;
+          sendStatus = null;
+        });
+        await persistComposer();
+      });
+    } finally {
+      if (mounted) setState(() => sending = false);
+    }
+  }
 
   Future<void> send(Json g) async {
     final room = composerRoom, account = app.accountKey;
@@ -1998,19 +2125,35 @@ class _RiverShellState extends State<RiverShell> {
     if (payload != retryPayload) {
       retryTxn = transactionId();
       retryPayload = payload;
+      retryWire = null;
     }
     retryTxn ??= transactionId();
     var confirmed = false;
     try {
+      final wire = app.messageWire(g['id'] as String);
+      if (retryWire != null && retryWire != wire) {
+        throw StateError(
+          'Switch to the previous send mode to retry this draft.',
+        );
+      }
+      retryWire = wire;
       await persistComposer();
       if (!mounted || account != app.accountKey) return;
-      await app.send(g['id'] as String, type, content, retryTxn!);
+      if (composerRoom != room) return;
+      await app.send(
+        g['id'] as String,
+        type,
+        content,
+        retryTxn!,
+        expectedWire: wire,
+      );
       confirmed = true;
       if (!mounted || account != app.accountKey) return;
       if (mounted && composerRoom == room && draft.text.trim() == body) {
         draft.clear();
         retryTxn = null;
         retryPayload = null;
+        retryWire = null;
         await persistComposer();
       } else if (drafts[room]?.payload == payload &&
           drafts[room]?.text.trim() == body) {

@@ -1,6 +1,7 @@
-pub(crate) mod connection;
 #[cfg(all(test, not(target_family = "wasm")))]
 mod avatar_test;
+pub(crate) mod connection;
+mod conversation;
 #[cfg(all(test, not(target_family = "wasm")))]
 mod credential_refresh_test;
 #[cfg(all(test, not(target_family = "wasm")))]
