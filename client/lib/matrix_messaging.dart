@@ -4,13 +4,13 @@ import 'dart:math';
 
 import 'package:crypto/crypto.dart';
 import 'package:flutter/foundation.dart';
-import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:river_matrix/river_matrix.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import 'matrix_store_location.dart';
 import 'performance.dart';
 import 'connection_health.dart';
+import 'secure_storage.dart';
 
 typedef MatrixJson = Map<String, dynamic>;
 typedef MatrixRequest =
@@ -266,14 +266,13 @@ abstract interface class MatrixStorage {
 
 class SecureMatrixStorage implements MatrixStorage {
   const SecureMatrixStorage();
-  static const _storage = FlutterSecureStorage();
   @override
-  Future<String?> read(String key) => _storage.read(key: key);
+  Future<String?> read(String key) => riverSecureStorage.read(key: key);
   @override
   Future<void> write(String key, String value) =>
-      _storage.write(key: key, value: value);
+      riverSecureStorage.write(key: key, value: value);
   @override
-  Future<void> delete(String key) => _storage.delete(key: key);
+  Future<void> delete(String key) => riverSecureStorage.delete(key: key);
 }
 
 /// Owns one authenticated River profile's local Matrix device. All delayed work
