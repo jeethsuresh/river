@@ -282,15 +282,11 @@ void main() {
         );
         expect(
           tester
-              .widget<IconButton>(
-                find.byWidgetPredicate(
-                  (widget) => widget is IconButton && widget.tooltip == 'Send',
-                ),
-              )
+              .widget<IconButton>(find.byKey(const ValueKey('message-send')))
               .onPressed,
           isNotNull,
         );
-        await tester.tap(find.byTooltip('Send'));
+        await tester.tap(find.byKey(const ValueKey('message-send')));
         await tester.pumpAndSettle();
         expect(engine.sentEvents, hasLength(1));
         expect(find.textContaining('Your draft is kept.'), findsNothing);

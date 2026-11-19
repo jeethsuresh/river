@@ -1,9 +1,9 @@
 {
   "schemaVersion": 1,
-  "version": "0.16.0",
-  "versionCode": 38,
+  "version": "0.16.1",
+  "versionCode": 39,
   "changes": [
-    "Send Gravitas contact requests from Home, Friends, or New conversation when no friend matches your search.",
-    "Keep the username when a contact request fails so you can correct it or retry."
+    "Choose unencrypted sending after confirmation when encryption is unavailable.",
+    "Encrypted and unencrypted messages share one conversation history for the same participants."
   ]
 }

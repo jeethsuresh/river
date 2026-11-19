@@ -20,6 +20,8 @@ class FeedbackSendApi extends RiverApi {
     Json content,
     String txn, {
     bool refreshAfter = true,
+    String? eventRoom,
+    String? expectedWire,
   }) {
     transactions.add(txn);
     return operation.future;

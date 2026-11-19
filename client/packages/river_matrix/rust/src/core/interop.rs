@@ -442,6 +442,92 @@ async fn direct_room_permissions(first: &MatrixCore) -> Result<()> {
         acl
     );
 
+    let fallback: Value = serde_json::from_str(
+        &first
+            .action(
+                json!({
+                    "action": "unencrypted_fallback", "room": legacy.room_id(),
+                })
+                .to_string(),
+            )
+            .await?,
+    )?;
+    let fallback_id = matrix_sdk::ruma::RoomId::parse(
+        fallback["room_id"]
+            .as_str()
+            .context("Unencrypted room ID missing")?,
+    )?;
+    assert_ne!(
+        fallback_id.as_ref() as &matrix_sdk::ruma::RoomId,
+        legacy.room_id()
+    );
+    step(&[first, &peer]).await?;
+    peer.action(json!({"action": "join", "room": fallback_id}).to_string())
+        .await?;
+    step(&[first, &peer]).await?;
+    for core in [first, &peer] {
+        let rooms: Value = serde_json::from_str(&core.rooms().await?)?;
+        assert!(rooms["rooms"].as_array().unwrap().iter().any(|r| {
+            r["room_id"] == fallback_id.as_str()
+                && r["fallback_for"] == legacy.room_id().as_str()
+                && r["encrypted"] == false
+        }));
+        let reused: Value = serde_json::from_str(
+            &core
+                .action(
+                    json!({
+                        "action": "unencrypted_fallback", "room": legacy.room_id(),
+                    })
+                    .to_string(),
+                )
+                .await?,
+        )?;
+        assert_eq!(reused["room_id"], fallback_id.as_str());
+    }
+    let content = json!({"msgtype": "m.text", "body": "Explicit unencrypted fallback"});
+    let sent: Value = serde_json::from_str(
+        &first
+            .send(
+                fallback_id.to_string(),
+                "m.room.message".into(),
+                content.to_string(),
+                uuid::Uuid::new_v4().to_string(),
+            )
+            .await?,
+    )?;
+    let raw = peer
+        .client
+        .send(
+            matrix_sdk::ruma::api::client::room::get_room_event::v3::Request::new(
+                fallback_id.clone(),
+                matrix_sdk::ruma::EventId::parse(
+                    sent["event_id"]
+                        .as_str()
+                        .context("Missing fallback event")?,
+                )?,
+            ),
+        )
+        .await?;
+    let raw: Value = serde_json::from_str(raw.event.json().get())?;
+    assert_eq!(raw["type"], "m.room.message");
+    assert_eq!(raw["content"], content);
+    assert!(joined.encryption_state().is_encrypted());
+
+    peer.action(json!({"action": "leave", "room": fallback_id}).to_string())
+        .await?;
+    assert!(
+        first
+            .send(
+                fallback_id.to_string(),
+                "m.room.message".into(),
+                content.to_string(),
+                uuid::Uuid::new_v4().to_string(),
+            )
+            .await
+            .is_err(),
+        "A stale sync roster must not authorize unencrypted sending"
+    );
+
     let new_peer = matrix_sdk::ruma::UserId::parse("@deactclient:native.test:8448")?;
     assert!(first.client.get_dm_room(&new_peer).is_none());
     let created: Value = serde_json::from_str(
