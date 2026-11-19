@@ -14,6 +14,7 @@ import 'ios_push.dart';
 import 'notification_runtime.dart';
 import 'username_login.dart';
 import 'publishing_widgets.dart';
+import 'friends_sidebar.dart';
 import 'friends_view.dart';
 import 'content_widgets.dart';
 import 'workspace_widgets.dart';
@@ -210,6 +211,7 @@ class _RiverShellState extends State<RiverShell> {
   RiverApi get app => widget.app;
   final destinationHistory = GlobalKey<HistoryBoundaryState>();
   String section = 'Home', filter = 'Chat', conversationQuery = '';
+  String? friendsPerson;
   bool searchOpen = false, spaceChat = false;
   final draft = TextEditingController();
   final timeline = ScrollController();
@@ -423,13 +425,14 @@ class _RiverShellState extends State<RiverShell> {
     return roomDestination(app, group);
   }
 
-  void open(String? id, {String? destination}) {
+  void open(String? id, {String? destination, String? friend}) {
     scaffold.currentState?.closeDrawer();
     final group = id == null ? null : app.group(id);
     final target =
         destination ?? (group == null ? 'Home' : roomDestination(app, group));
     setState(() {
       section = target;
+      friendsPerson = friend;
       filter = target == 'Posts'
           ? 'Posts'
           : target == 'Forums'
@@ -645,10 +648,13 @@ class _RiverShellState extends State<RiverShell> {
                   ? AccountPanel(app: app)
                   : section == 'Friends'
                   ? FriendsView(
+                      key: ValueKey(friendsPerson),
                       app: app,
+                      initialQuery: friendsPerson ?? '',
                       onConversation: () => setState(() {
                         section = 'Chats';
                         filter = 'Chat';
+                        friendsPerson = null;
                       }),
                     )
                   : riverDestinations.any((d) => d.name == section)
@@ -675,12 +681,14 @@ class _RiverShellState extends State<RiverShell> {
             room: app.selected,
             filter: filter,
             spaceChat: spaceChat,
+            friendsPerson: friendsPerson,
           ),
           restore: (visit) {
             setState(() {
               section = visit.section;
               filter = visit.filter;
               spaceChat = visit.spaceChat;
+              friendsPerson = visit.friendsPerson;
             });
             unawaited(app.open(visit.room));
           },
@@ -1023,6 +1031,14 @@ class _RiverShellState extends State<RiverShell> {
                       onTap: () => open(null, destination: d.name),
                     ),
                   ),
+                FriendsSidebar(
+                  app: app,
+                  selected: section == 'Friends' && app.selected == null,
+                  selectedPerson: friendsPerson,
+                  onOpen: () => open(null, destination: 'Friends'),
+                  onPerson: (id) =>
+                      open(null, destination: 'Friends', friend: id),
+                ),
                 const Padding(
                   padding: EdgeInsets.symmetric(horizontal: 14, vertical: 10),
                   child: Divider(),
@@ -1076,18 +1092,6 @@ class _RiverShellState extends State<RiverShell> {
             ),
           ),
           RiverCallBar(api: app),
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 8),
-            child: ListTile(
-              selected: section == 'Friends' && app.selected == null,
-              leading: const Icon(Icons.people_outline, size: 19),
-              title: const Text('Friends'),
-              trailing: app.incomingRequests > 0
-                  ? Badge(label: Text('${app.incomingRequests}'))
-                  : null,
-              onTap: () => open(null, destination: 'Friends'),
-            ),
-          ),
           const Divider(),
           ListTile(
             leading: RiverProfileAvatar(
