@@ -1,0 +1,109 @@
+name: River iOS TestFlight
+on:
+  push:
+    branches: [main]
+    paths: [client/pubspec.yaml]
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: river-ios-testflight-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  plan:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    outputs:
+      version: ${{ steps.release.outputs.version }}
+      build: ${{ steps.release.outputs.build }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Select the declared River release
+        id: release
+        env:
+          BEFORE: ${{ github.event.before }}
+        run: |
+          python3 scripts/android-release.py validate
+          release=$(awk '/^version:/ {print $2}' client/pubspec.yaml)
+          if [[ "$GITHUB_EVENT_NAME" == push ]]; then
+            previous=$(git show "$BEFORE:client/pubspec.yaml" | awk '/^version:/ {print $2}')
+            if [[ "$release" == "$previous" ]]; then
+              echo 'River version is unchanged.'
+              exit 0
+            fi
+            if (( 10#${release##*+} <= 10#${previous##*+} )); then
+              echo 'Increase the River build number for TestFlight.' >&2
+              exit 1
+            fi
+          fi
+          printf 'version=%s\nbuild=%s\n' "${release%+*}" "${release##*+}" >> "$GITHUB_OUTPUT"
+
+  testflight:
+    name: Sign and upload to TestFlight
+    needs: plan
+    if: needs.plan.outputs.build != ''
+    runs-on: macos-15
+    timeout-minutes: 60
+    environment: ios-release
+    env:
+      FLUTTER_SUPPRESS_ANALYTICS: 'true'
+      DART_SUPPRESS_ANALYTICS: 'true'
+      RIVER_IOS_VERSION: ${{ needs.plan.outputs.version }}
+      RIVER_IOS_BUILD: ${{ needs.plan.outputs.build }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - name: Install pinned Xcode, Flutter and Rust toolchains
+        run: |
+          sudo xcode-select --switch /Applications/Xcode_26.0.1.app/Contents/Developer
+          xcodebuild -version
+          git init "$RUNNER_TEMP/flutter"
+          git -C "$RUNNER_TEMP/flutter" remote add origin https://github.com/flutter/flutter.git
+          git -C "$RUNNER_TEMP/flutter" fetch --depth 1 origin refs/tags/3.47.7:refs/tags/3.47.7
+          git -C "$RUNNER_TEMP/flutter" checkout --detach abaf9c523780a608bd46686fd5e53740a07077f8
+          test "$(git -C "$RUNNER_TEMP/flutter" rev-parse HEAD)" = abaf9c523780a608bd46686fd5e53740a07077f8
+          echo "$RUNNER_TEMP/flutter/bin" >> "$GITHUB_PATH"
+          bash scripts/matrix-toolchain.sh
+          rustup target add --toolchain 1.96.0 aarch64-apple-ios
+      - name: Analyze, test and configure the River iOS app
+        working-directory: client
+        run: |
+          flutter --no-version-check pub get --enforce-lockfile
+          flutter --no-version-check analyze --no-pub
+          flutter --no-version-check test --no-pub
+          flutter --no-version-check build ios --config-only --release --no-codesign --no-pub
+          (cd ios && pod install --deployment)
+      - name: Archive, sign and verify the IPA
+        env:
+          IOS_DISTRIBUTION_P12_BASE64: ${{ secrets.IOS_DISTRIBUTION_P12_BASE64 }}
+          IOS_DISTRIBUTION_P12_PASSWORD: ${{ secrets.IOS_DISTRIBUTION_P12_PASSWORD }}
+          IOS_PROVISIONING_PROFILE_BASE64: ${{ secrets.IOS_PROVISIONING_PROFILE_BASE64 }}
+        run: bash scripts/ios-release.sh
+      - name: Validate and upload to App Store Connect
+        env:
+          IOS_ASC_KEY_BASE64: ${{ secrets.IOS_ASC_KEY_BASE64 }}
+          IOS_ASC_KEY_ID: ${{ secrets.IOS_ASC_KEY_ID }}
+          IOS_ASC_ISSUER_ID: ${{ secrets.IOS_ASC_ISSUER_ID }}
+        run: |
+          : "${IOS_ASC_KEY_BASE64:?Set IOS_ASC_KEY_BASE64 in the ios-release environment}"
+          : "${IOS_ASC_KEY_ID:?Set IOS_ASC_KEY_ID in the ios-release environment}"
+          : "${IOS_ASC_ISSUER_ID:?Set IOS_ASC_ISSUER_ID in the ios-release environment}"
+          [[ "$IOS_ASC_KEY_ID" =~ ^[A-Za-z0-9]+$ ]]
+          umask 077
+          key_dir=$(mktemp -d "$RUNNER_TEMP/river-asc.XXXXXX")
+          trap 'rm -rf "$key_dir"' EXIT
+          printf '%s' "$IOS_ASC_KEY_BASE64" | base64 --decode > "$key_dir/AuthKey_$IOS_ASC_KEY_ID.p8"
+          unset IOS_ASC_KEY_BASE64
+          export API_PRIVATE_KEYS_DIR="$key_dir"
+          ipa="$RUNNER_TEMP/river-testflight.ipa"
+          xcrun altool --validate-app -f "$ipa" -t ios --api-key "$IOS_ASC_KEY_ID" --api-issuer "$IOS_ASC_ISSUER_ID"
+          xcrun altool --upload-app -f "$ipa" -t ios --api-key "$IOS_ASC_KEY_ID" --api-issuer "$IOS_ASC_ISSUER_ID"
+          printf 'Apple accepted River %s (build %s) from `%s` for processing.\n' \
+            "$RIVER_IOS_VERSION" "$RIVER_IOS_BUILD" "$GITHUB_SHA" >> "$GITHUB_STEP_SUMMARY"
+      - name: Remove the IPA
+        if: always()
+        run: rm -f "$RUNNER_TEMP/river-testflight.ipa"

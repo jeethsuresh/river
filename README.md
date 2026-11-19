@@ -273,6 +273,8 @@ as a release asset. Release builds fail when signing configuration is absent.
 
 After increasing the version name and Android build number, push or merge to `main`. GitHub's **Signed Android release** workflow automatically tests, signs with the original River key, verifies the APK and publishes it for Private Store ingestion. Existing versions and tags are never overwritten. See [signed Android releases](ANDROID_RELEASES.md) for verification-only builds and secret maintenance.
 
+The **River iOS TestFlight** workflow signs the same declared release and uploads it to App Store Connect. See [iOS releases](IOS_RELEASES.md) for signing setup and delivery verification.
+
 Configure the Go process with `GRAVITAS_SESSION_KEY` (32 random bytes, base64url),
 `GRAVITAS_ISSUER=https://gravitas.cool`, `APP_URL=https://chat.gravitas.cool`,
 `STATIC_DIR=/app/web` and `ADDR=:8080`. The session key belongs in a Kubernetes
