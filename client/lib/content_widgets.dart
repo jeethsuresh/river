@@ -527,6 +527,7 @@ class ContentCard extends StatelessWidget {
                             event['event_id'] as String,
                             emoji,
                             active,
+                            eventRoom: event['room_id'] as String?,
                           );
                         }
                         await changed?.call();
@@ -818,9 +819,11 @@ class ThreadScreen extends StatefulWidget {
     required this.app,
     required this.room,
     required this.rootId,
+    this.eventRoom,
   });
   final RiverApi app;
   final String room, rootId;
+  final String? eventRoom;
   @override
   State<ThreadScreen> createState() => _ThreadScreenState();
 }
@@ -892,6 +895,7 @@ class _ThreadScreenState extends State<ThreadScreen> {
         widget.room,
         widget.rootId,
         before: older ? cursor : null,
+        eventRoom: widget.eventRoom,
       );
       if (!mounted) return;
       final incoming = (result['events'] as List).cast<Json>();
@@ -958,7 +962,13 @@ class _ThreadScreenState extends State<ThreadScreen> {
     }
     setState(() => sending = true);
     try {
-      await widget.app.send(widget.room, 'm.room.message', c, txn);
+      await widget.app.send(
+        widget.room,
+        'm.room.message',
+        c,
+        txn,
+        eventRoom: widget.eventRoom,
+      );
       if (!mounted) return;
       if (draft.text.trim() == body) draft.clear();
       setState(() => parent = null);
@@ -1043,6 +1053,8 @@ class _ThreadScreenState extends State<ThreadScreen> {
       padding: const EdgeInsets.symmetric(vertical: 8),
       child: Column(
         children: [
+          if (widget.app.isUnencryptedChat(widget.room, widget.eventRoom))
+            const Text('Replies are unencrypted'),
           if (parent != null)
             Row(
               children: [

@@ -315,6 +315,13 @@ class MatrixMessaging extends ChangeNotifier {
   Object? _credentialOwner;
   final _unsavedSessions = <String, MatrixJson>{};
   List<MatrixJson> roomList = [];
+  bool? deviceVerified;
+
+  void _applyRooms(MatrixJson snapshot) {
+    roomList = (snapshot['rooms'] as List).cast<MatrixJson>();
+    deviceVerified = snapshot['device_verified'] as bool?;
+  }
+
   final _avatars = <String, Uint8List>{};
   final _avatarRequests = <String, Future<Uint8List?>>{};
   int _avatarBytes = 0;
@@ -455,7 +462,7 @@ class MatrixMessaging extends ChangeNotifier {
           final snapshot = loadRooms ? await engine.rooms() : {'rooms': []};
           _guard(generation);
           _transport = engine;
-          roomList = (snapshot['rooms'] as List).cast<MatrixJson>();
+          _applyRooms(snapshot);
           notifyListeners();
           changed();
           if (synchronize) _startSync();
@@ -602,7 +609,7 @@ class MatrixMessaging extends ChangeNotifier {
         _guard(generation);
         _transport = engine;
         engine = null;
-        roomList = (snapshot['rooms'] as List).cast<MatrixJson>();
+        _applyRooms(snapshot);
         changed();
         error = null;
         _startSync();
@@ -682,9 +689,13 @@ class MatrixMessaging extends ChangeNotifier {
     return {};
   }
 
-  Future<void> ensureJoinedRoom(String room) async {
-    bool joined() =>
-        roomList.any((r) => r['room_id'] == room && r['membership'] == 'join');
+  Future<void> ensureJoinedRoom(String room, {String? fallbackFor}) async {
+    bool joined() => roomList.any(
+      (r) =>
+          r['room_id'] == room &&
+          r['membership'] == 'join' &&
+          (fallbackFor == null || r['fallback_for'] == fallbackFor),
+    );
     // An already-running poll can finish just before the create/join mutation.
     // Allow the next poll to bring that room into the local SDK before using it.
     for (var attempt = 0; attempt < 2 && !joined(); attempt++) {
@@ -723,7 +734,7 @@ class MatrixMessaging extends ChangeNotifier {
         final snapshot = await engine.sync();
         _guard(generation);
         _connection.succeeded(observation);
-        roomList = (snapshot['rooms'] as List).cast<MatrixJson>();
+        _applyRooms(snapshot);
         notifyListeners();
         return snapshot;
       } catch (e) {
@@ -788,7 +799,7 @@ class MatrixMessaging extends ChangeNotifier {
     final generation = _generation;
     final snapshot = await transport.rooms();
     _guard(generation);
-    roomList = (snapshot['rooms'] as List).cast<MatrixJson>();
+    _applyRooms(snapshot);
     notifyListeners();
     changed();
   }
@@ -864,6 +875,7 @@ class MatrixMessaging extends ChangeNotifier {
     _credentialOwner = null;
     _profile = null;
     roomList = [];
+    deviceVerified = null;
     _avatars.clear();
     _avatarRequests.clear();
     _avatarBytes = 0;

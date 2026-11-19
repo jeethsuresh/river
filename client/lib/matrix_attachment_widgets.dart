@@ -13,7 +13,7 @@ Future<void> sendMatrixAttachment(
   bool Function()? canSend,
 }) async {
   final engine = app.matrix.transport;
-  final wire = app.matrixRoom(room);
+  final wire = app.messageWire(room);
   final account = app.accountKey;
   if (wire == null) throw StateError('Room is not available.');
   final picked = await FilePicker.pickFiles(withData: true);
@@ -27,7 +27,7 @@ Future<void> sendMatrixAttachment(
     builder: (ctx) => AlertDialog(
       title: const Text('Send attachment'),
       content: Text(
-        '${file.name}\n${app.encrypted(room) ? 'Encrypted for this room’s members' : 'Shared with this room’s members'}',
+        '${file.name}\n${app.wireEncrypted(wire) ? 'Encrypted for this room’s members' : 'Unencrypted. Homeservers can read this file.'}',
       ),
       actions: [
         TextButton(
@@ -51,6 +51,7 @@ Future<void> sendMatrixAttachment(
     lookupMimeType(file.name, headerBytes: file.bytes) ??
         'application/octet-stream',
     file.bytes!,
+    expectedWire: wire,
   );
 }
 

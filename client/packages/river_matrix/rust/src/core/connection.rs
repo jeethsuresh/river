@@ -1,4 +1,5 @@
 use std::{
+    collections::HashMap,
     sync::{
         Arc,
         atomic::{AtomicBool, Ordering},
@@ -31,7 +32,7 @@ use matrix_sdk::{
     config::SyncSettings,
     room::MessagesOptions,
     ruma::{
-        OwnedUserId, RoomId, UserId,
+        OwnedRoomId, OwnedUserId, RoomId, UserId,
         events::{
             StateEventType, key::verification::request::ToDeviceKeyVerificationRequestEvent,
             room::member::MembershipState,
@@ -58,6 +59,7 @@ pub struct MatrixCore {
     polling: Mutex<()>,
     closed: AtomicBool,
     pub(crate) verification_flows: Arc<Mutex<Vec<String>>>,
+    pub(crate) pending_fallbacks: Mutex<HashMap<OwnedRoomId, OwnedRoomId>>,
 }
 
 impl MatrixCore {
@@ -158,6 +160,7 @@ impl MatrixCore {
             local_key: None,
             own_user,
             verification_flows,
+            pending_fallbacks: Mutex::new(HashMap::new()),
             connection_id: holder[..15].to_owned(),
             sliding: Mutex::new(None),
             polling: Mutex::new(()),
@@ -242,6 +245,7 @@ impl MatrixCore {
                                 (StateEventType::RoomTopic, "".into()),
                                 (StateEventType::RoomAvatar, "".into()),
                                 (StateEventType::RoomEncryption, "".into()),
+                                (super::conversation::fallback_event_type(), "".into()),
                                 (StateEventType::RoomPowerLevels, "".into()),
                                 (StateEventType::RoomJoinRules, "".into()),
                                 (StateEventType::RoomTombstone, "".into()),
@@ -364,6 +368,13 @@ impl MatrixCore {
                 .map(|v| v.to_string())
                 .unwrap_or_else(|_| room.room_id().to_string());
             let direct = room.is_direct().await.unwrap_or(false);
+            let fallback = self.fallback_link(&room).await?;
+            let fallback_for = self.linked_conversation(&room, &fallback).await?;
+            let direct_peer = if direct && fallback.is_none() {
+                self.direct_peer(&room).await?
+            } else {
+                None
+            };
             let heroes = room.heroes().await;
             let mut profiles: Vec<Value> = heroes
                 .iter()
@@ -408,6 +419,10 @@ impl MatrixCore {
                 "room_id": room.room_id(), "name": name, "membership": membership,
                 "avatar_url": avatar,
                 "heroes": profiles,
+                "direct_peer": direct_peer,
+                "is_fallback_room": fallback.is_some(),
+                "fallback_for": fallback_for,
+                "can_use_fallback": fallback.is_none() && super::conversation::private_chat(&room),
                 "replacement_room": replacements.get(room.room_id()),
                 "upgrade_pending": room.is_tombstoned() && !replacements.contains_key(room.room_id()),
                 "kind": if room.is_space() {"space"} else if direct {"dm"} else {metadata["kind"].as_str().unwrap_or("group")},
@@ -419,10 +434,17 @@ impl MatrixCore {
                 "unread_count": room.unread_notification_counts().notification_count,
             }));
         }
-        Ok(
-            json!({"rooms": rooms, "user_id": self.own_user, "device_id": self.client.device_id()})
-                .to_string(),
-        )
+        let verified = self
+            .client
+            .encryption()
+            .get_own_device()
+            .await
+            .ok()
+            .flatten()
+            .is_some_and(|device| device.is_verified());
+        Ok(json!({"rooms": rooms, "user_id": self.own_user,
+            "device_id": self.client.device_id(), "device_verified": verified})
+        .to_string())
     }
 
     pub(crate) fn room(&self, room: &str) -> Result<Room> {
@@ -485,6 +507,7 @@ impl MatrixCore {
         let content: Value = serde_json::from_str(&content)?;
         ensure!(content.is_object(), "Message content must be an object");
         room.request_encryption_state().await.map_err(sdk_error)?;
+        self.check_fallback_send(&room).await?;
         let transaction: matrix_sdk::ruma::OwnedTransactionId = transaction.into();
         let response = room
             .send_raw(&event_type, content)
@@ -505,6 +528,7 @@ impl MatrixCore {
             "notification" => return self.notification(text("room")?, text("event")?).await,
             "local_read" => return self.local_data(&data, false).await,
             "local_write" => return self.local_data(&data, true).await,
+            "unencrypted_fallback" => return self.open_fallback(text("room")?).await,
             "reaction" => {
                 self.reaction(&data).await?;
             }
@@ -565,6 +589,7 @@ impl MatrixCore {
                                 if room.state() == RoomState::Joined
                                     && !room.is_tombstoned()
                                     && joined
+                                    && self.fallback_link(&room).await?.is_none()
                                 {
                                     current = Some(room);
                                     break;
@@ -593,7 +618,9 @@ impl MatrixCore {
                         room.encryption_state().is_encrypted(),
                         "New direct rooms must be encrypted"
                     );
-                } else if !room.encryption_state().is_encrypted() {
+                } else if data["prefer_encryption"].as_bool() != Some(false)
+                    && !room.encryption_state().is_encrypted()
+                {
                     let power = room.power_levels_or_default().await;
                     if power.user_can_send_state(&self.own_user, StateEventType::RoomEncryption) {
                         room.enable_encryption().await.map_err(sdk_error)?;
