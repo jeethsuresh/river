@@ -1,9 +1,8 @@
 {
   "schemaVersion": 1,
-  "version": "0.16.4",
-  "versionCode": 42,
+  "version": "0.16.6",
+  "versionCode": 44,
   "changes": [
-    "See River friends, incoming requests, and pending sent requests in the sidebar and mobile drawer.",
-    "Open a contact's actions from their sidebar entry."
+    "Unencrypted messages and replies are labeled in chat history for everyone who can see them."
   ]
 }

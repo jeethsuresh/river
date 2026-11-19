@@ -25,6 +25,7 @@ import 'profile_avatar.dart';
 import 'destination_widgets.dart';
 import 'matrix_attachment_widgets.dart';
 import 'matrix_setup.dart';
+import 'matrix_timeline.dart';
 import 'call_widgets.dart';
 import 'rich_composer.dart';
 import 'media_widgets.dart';
@@ -1403,7 +1404,8 @@ class _RiverShellState extends State<RiverShell> {
                 e['type'] == 'm.room.message' ||
                 e['type'] == 'm.sticker' ||
                 e['type'] == 'cool.gravitas.river.invitation.v1') &&
-            relation?['rel_type'] != 'm.thread';
+            relation?['rel_type'] != 'm.thread' &&
+            crossRoomThread(e) == null;
       }
       return e['type'] ==
           'cool.gravitas.river.${viewFilter == 'Posts' ? 'post' : 'discussion'}.v1';
@@ -1949,7 +1951,7 @@ class _RiverShellState extends State<RiverShell> {
                                 child: ElasticPulse(
                                   signal:
                                       sendStatusRoom == composerRoom &&
-                                          sendStatus == 'Sent'
+                                          sendStatus?.startsWith('Sent') == true
                                       ? 1
                                       : 0,
                                   child: Icon(
@@ -1960,7 +1962,8 @@ class _RiverShellState extends State<RiverShell> {
                                                   false)
                                         ? Icons.error_outline
                                         : sendStatusRoom == composerRoom &&
-                                              sendStatus == 'Sent'
+                                              sendStatus?.startsWith('Sent') ==
+                                                  true
                                         ? Icons.check
                                         : Icons.arrow_upward,
                                   ),
@@ -2149,7 +2152,7 @@ class _RiverShellState extends State<RiverShell> {
       await persistComposer();
       if (!mounted || account != app.accountKey) return;
       if (composerRoom != room) return;
-      await app.send(
+      final result = await app.send(
         g['id'] as String,
         type,
         content,
@@ -2172,7 +2175,13 @@ class _RiverShellState extends State<RiverShell> {
         if (room != null) await app.saveDraft(room, null);
       }
       if (mounted && account == app.accountKey) {
-        setState(() => sendStatus = 'Sent');
+        setState(
+          () => sendStatus =
+              result['river_encrypted'] == false &&
+                  app.canSendUnencrypted(g['id'] as String)
+              ? 'Sent unencrypted'
+              : 'Sent',
+        );
         sendStatusTimer = Timer(const Duration(seconds: 2), () {
           if (mounted) setState(() => sendStatus = null);
         });

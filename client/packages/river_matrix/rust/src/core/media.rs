@@ -13,7 +13,7 @@ use matrix_sdk::{
 };
 use serde_json::json;
 
-use super::connection::{MatrixCore, sdk_error};
+use super::connection::{ENCRYPTION_UNAVAILABLE, MatrixCore, encryption_unavailable, sdk_error};
 
 impl MatrixCore {
     pub async fn send_attachment(
@@ -33,11 +33,18 @@ impl MatrixCore {
         self.check_fallback_send(&room).await?;
         let mime: mime::Mime = content_type.parse()?;
         let config = AttachmentConfig::new().txn_id(transaction.into());
-        let response = room
-            .send_attachment(name, &mime, bytes, config)
-            .await
-            .map_err(sdk_error)?;
-        Ok(json!({"event_id": response.event_id}).to_string())
+        let response = match room.send_attachment(name, &mime, bytes, config).await {
+            Ok(response) => response,
+            Err(error) if encryption_unavailable(&error) => {
+                return Ok(ENCRYPTION_UNAVAILABLE.into());
+            }
+            Err(error) => return Err(sdk_error(error)),
+        };
+        Ok(json!({
+            "event_id": response.event_id,
+            "river_encrypted": room.encryption_state().is_encrypted(),
+        })
+        .to_string())
     }
 
     /// The SDK validates the MXC source and authenticates/decrypts encrypted

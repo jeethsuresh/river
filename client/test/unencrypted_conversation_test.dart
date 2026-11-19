@@ -1,6 +1,7 @@
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
@@ -27,21 +28,48 @@ Json dm(String id, String wire, {required bool encrypted, String peer = bob}) =>
 
 class FallbackTransport extends FlowTransport {
   final reads = <(String, String?)>[];
+  final routes = <(String, String)>[];
+  bool encryptionBlocked = false,
+      failEnableEncryption = false,
+      verified = false;
+  String? unavailableHistory;
+
+  @override
+  Future<Json> send(String room, String type, Json content, String txn) async {
+    routes.add((room, txn));
+    if (room == secureRoom && encryptionBlocked) {
+      return {'encryption_unavailable': true};
+    }
+    return super.send(room, type, content, txn);
+  }
+
+  @override
+  Future<Json> sendAttachment(
+    String room,
+    String name,
+    String mime,
+    Uint8List bytes,
+    String txn,
+  ) => send(room, 'm.room.message', {'body': name, 'msgtype': 'm.file'}, txn);
 
   @override
   Future<Json> rooms() async => {
     ...await super.rooms(),
-    'device_verified': false,
+    'device_verified': verified,
   };
 
   @override
   Future<Json> sync() async => {
     ...await super.sync(),
-    'device_verified': false,
+    'device_verified': verified,
   };
 
   @override
   Future<Json> action(Json payload) async {
+    if (payload['action'] == 'encrypt' && failEnableEncryption) {
+      actions.add(payload);
+      throw StateError('Encryption setup is unavailable');
+    }
     if (payload['action'] != 'unencrypted_fallback') {
       return super.action(payload);
     }
@@ -63,6 +91,7 @@ class FallbackTransport extends FlowTransport {
   @override
   Future<Json> history(String room, String? cursor) async {
     reads.add((room, cursor));
+    if (room == unavailableHistory) throw StateError('History unavailable');
     final ts = cursor != null
         ? 0
         : room == secureRoom
@@ -78,9 +107,9 @@ class FallbackTransport extends FlowTransport {
           'content': {'body': 'Message in $room', 'msgtype': 'm.text'},
           'river_encrypted': room == secureRoom,
         },
-        ...sentEvents.values.where(
-          (e) => cursor == null && e['room_id'] == room,
-        ),
+        for (final e in sentEvents.values)
+          if (cursor == null && e['room_id'] == room)
+            {...e, 'river_encrypted': room == secureRoom},
       ],
       'next_cursor': cursor == null ? 'earlier:$room' : null,
     };
@@ -96,18 +125,23 @@ class FallbackTransport extends FlowTransport {
 Future<RiverApi> openConversation(
   FallbackTransport engine, {
   bool disposeWithWidget = false,
+  List<Json>? roomSnapshot,
+  List<Json>? delegated,
+  bool directFriend = false,
 }) async {
   final secure = dm('direct', secureRoom, encrypted: true);
-  engine.roomList = [
-    secure,
-    dm('older', olderRoom, encrypted: false),
-    dm(
-      'other',
-      '!other:example.org',
-      encrypted: false,
-      peer: '@carol:example.org',
-    ),
-  ];
+  engine.roomList =
+      roomSnapshot ??
+      [
+        secure,
+        dm('older', olderRoom, encrypted: false),
+        dm(
+          'other',
+          '!other:example.org',
+          encrypted: false,
+          peer: '@carol:example.org',
+        ),
+      ];
   final saved = await device(engine);
   addTearDown(saved.dispose);
   final api = RiverApi(
@@ -118,12 +152,20 @@ Future<RiverApi> openConversation(
     client: MockClient(
       (request) async => http.Response(
         jsonEncode(
-          request.url.path == '/api/overview'
+          request.url.path == '/api/direct' && directFriend
+              ? engine.roomList.first
+              : request.url.path == '/api/overview'
               ? {
-                  'groups': [secure],
+                  'groups': delegated ?? [secure],
                   'recent': [],
                 }
-              : {'friends': [], 'requests': [], 'blocked': []},
+              : {
+                  'friends': [
+                    if (directFriend) {'user_id': bob},
+                  ],
+                  'requests': [],
+                  'blocked': [],
+                },
         ),
         200,
       ),
@@ -138,6 +180,214 @@ Future<RiverApi> openConversation(
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
+
+  test(
+    'opening a direct chat survives failed optional encryption setup',
+    () async {
+      final engine = FallbackTransport()
+        ..verified = true
+        ..failEnableEncryption = true;
+      final plain = {
+        ...dm('direct', secureRoom, encrypted: false),
+        'can_encrypt': true,
+      };
+      final api = await openConversation(
+        engine,
+        roomSnapshot: [plain],
+        delegated: [plain],
+        directFriend: true,
+      );
+      await api.messageFriend(bob);
+      expect(api.selected, 'direct');
+      expect(
+        engine.actions.where((a) => a['action'] == 'encrypt'),
+        hasLength(1),
+      );
+      await api.send('direct', 'm.room.message', {
+        'body': 'Hi',
+        'msgtype': 'm.text',
+      }, 'first');
+      expect(engine.sentEvents['first']?['room_id'], secureRoom);
+    },
+  );
+
+  test(
+    'an ambiguous fallback delivery retries only its original route',
+    () async {
+      final engine = FallbackTransport()..encryptionBlocked = true;
+      final api = await openConversation(engine);
+      final body = {'body': 'Keep this message', 'msgtype': 'm.text'};
+      engine.loseSendResponse = true;
+      await expectLater(
+        api.send('direct', 'm.room.message', body, 'retry'),
+        throwsStateError,
+      );
+      engine.encryptionBlocked = false;
+      final result = await api.send('direct', 'm.room.message', body, 'retry');
+      expect(result['river_encrypted'], isFalse);
+      expect(engine.routes, [
+        (secureRoom, 'retry'),
+        (plainRoom, 'retry'),
+        (plainRoom, 'retry'),
+      ]);
+      expect(engine.sentEvents, hasLength(1));
+
+      final next = await api.send('direct', 'm.room.message', body, 'next');
+      expect(next['river_room_id'], secureRoom);
+      expect(next['river_encrypted'], isTrue);
+    },
+  );
+
+  test('a lost encrypted response never creates an unencrypted copy', () async {
+    final engine = FallbackTransport();
+    final api = await openConversation(engine);
+    engine.loseSendResponse = true;
+    final body = {'body': 'One copy', 'msgtype': 'm.text'};
+    await expectLater(
+      api.send('direct', 'm.room.message', body, 'lost'),
+      throwsStateError,
+    );
+    engine.encryptionBlocked = true;
+    await expectLater(
+      api.send('direct', 'm.room.message', body, 'lost'),
+      throwsStateError,
+    );
+    engine.encryptionBlocked = false;
+    await api.send('direct', 'm.room.message', body, 'lost');
+    expect(engine.routes, [
+      (secureRoom, 'lost'),
+      (secureRoom, 'lost'),
+      (secureRoom, 'lost'),
+    ]);
+    expect(
+      engine.actions.where((a) => a['action'] == 'unencrypted_fallback'),
+      isEmpty,
+    );
+  });
+
+  test(
+    'attachments and replies fall back within the same conversation',
+    () async {
+      final engine = FallbackTransport()..encryptionBlocked = true;
+      final api = await openConversation(engine);
+      expect(
+        await api.sendMatrixFile(
+          'direct',
+          'proof.txt',
+          'text/plain',
+          Uint8List.fromList([1]),
+        ),
+        isFalse,
+      );
+      final root = api.events.firstWhere((e) => e['room_id'] == secureRoom);
+      final rootId = root['event_id'] as String;
+      final result = await api.send(
+        'direct',
+        'm.room.message',
+        {
+          'body': 'A reply',
+          'msgtype': 'm.text',
+          'm.relates_to': {'rel_type': 'm.thread', 'event_id': rootId},
+        },
+        'reply',
+        eventRoom: secureRoom,
+      );
+      expect(result['river_room_id'], plainRoom);
+      final reply = engine.sentEvents['reply']!;
+      expect(reply['content']['m.relates_to'], isNull);
+      expect(
+        reply['content']['cool.gravitas.river.thread.v1']['room_id'],
+        secureRoom,
+      );
+      final thread = await api.thread('direct', rootId, eventRoom: secureRoom);
+      expect((thread['events'] as List).single['event_id'], reply['event_id']);
+    },
+  );
+
+  test(
+    'Gravitas groups share history for exactly the same participants',
+    () async {
+      const alice = '@alice:example.org', carol = '@carol:example.org';
+      Json groupChat(String id, String wire, List<String> participants) => {
+        ...room(id, wire),
+        'conversation_participants': participants,
+      };
+      final groups = [
+        groupChat('direct', secureRoom, [alice, bob, carol]),
+        groupChat('second', olderRoom, [carol, alice, bob]),
+        groupChat('other', '!other:example.org', [
+          alice,
+          bob,
+          '@dave:example.org',
+        ]),
+      ];
+      final engine = FallbackTransport();
+      final api = await openConversation(
+        engine,
+        roomSnapshot: groups,
+        delegated: groups,
+      );
+      expect(api.groups, hasLength(2));
+      expect(api.conversationForWire(olderRoom)?['id'], 'second');
+      await api.conversation('Same conversation', [carol, bob]);
+      expect(api.selected, 'second');
+      expect(api.events.map((e) => e['room_id']).toSet(), {
+        olderRoom,
+        secureRoom,
+      });
+      engine.unavailableHistory = secureRoom;
+      await api.older();
+      expect(api.events.any((e) => e['origin_server_ts'] == 0), isTrue);
+      engine.roomList = [
+        for (final g in groups)
+          if (g['room_id'] == olderRoom) {...g, 'membership': 'leave'} else g,
+      ];
+      await api.matrix.refreshRooms();
+      expect(api.selected, 'direct');
+    },
+  );
+
+  testWidgets('Send automatically falls back and announces delivery', (
+    tester,
+  ) async {
+    final engine = FallbackTransport()..encryptionBlocked = true;
+    final api = await openConversation(engine, disposeWithWidget: true);
+    await tester.pumpWidget(RiverApp(api: api, boot: false));
+    await tester.pumpAndSettle();
+    Finder encryptionLabelFor(String event) => find.descendant(
+      of: find.byKey(ValueKey('content-meta-$event')),
+      matching: find.text('Unencrypted'),
+    );
+
+    expect(api.events.map((event) => event['room_id']), [
+      olderRoom,
+      secureRoom,
+    ]);
+    for (final event in api.events) {
+      final eventId = event['event_id'] as String;
+      expect(find.byKey(ValueKey('content-meta-$eventId')), findsOneWidget);
+      expect(
+        encryptionLabelFor(eventId),
+        event['room_id'] == olderRoom ? findsOneWidget : findsNothing,
+      );
+    }
+    final composer = tester.widget<RichComposer>(find.byType(RichComposer));
+    composer.controller.text = 'Send this now';
+    await tester.tap(find.byKey(const ValueKey('message-send')));
+    await tester.pumpAndSettle();
+    expect(composer.controller.text, isEmpty);
+    final sent = engine.sentEvents.values.single;
+    expect(sent['room_id'], plainRoom);
+    expect(encryptionLabelFor(sent['event_id'] as String), findsOneWidget);
+    expect(api.selected, 'direct');
+    expect(
+      tester
+          .widget<IconButton>(find.byKey(const ValueKey('message-send')))
+          .tooltip,
+      'Sent unencrypted',
+    );
+    await tester.pumpWidget(const SizedBox());
+  });
 
   test(
     'participant history paginates across Matrix rooms and keeps event routing',

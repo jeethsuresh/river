@@ -84,7 +84,9 @@ Testing `chat.gravitas.cool` instead tests a separate server identity that River
 does not host. Federation delegation changes the connection address, not the
 server name in signing keys, accounts or rooms.
 
-Device security in Account supports showing a Matrix QR code, reading a QR image, camera capture where supported, SAS number comparison, cross-signing and encrypted key recovery. Confirming a QR scan is required before granting trust. Matrix sessions and private encryption keys stay in the client's encrypted store; the Go server receives only the one-use SSO login token. Encrypted messages never fall back to a clear-text send when the Matrix connection fails.
+Device security in Account supports showing a Matrix QR code, reading a QR image, camera capture where supported, SAS number comparison, cross-signing and encrypted key recovery. Confirming a QR scan is required before granting trust. The client's encrypted store holds Matrix sessions and private encryption keys. The Go server receives only the one-use SSO login token.
+
+If Matrix rejects encryption before sending a message, reply, or attachment in a private conversation, River retries through an invite-only unencrypted room for the same participants and labels the delivery. Homeservers can read unencrypted content. When delivery is uncertain, River retries the same transaction in its original room.
 
 The adapter has native plugin builds for Android, iOS, macOS, Windows and Linux and a WebAssembly/IndexedDB implementation for Flutter web. River currently distributes web and Android applications; platform CI links the adapter on the other Flutter targets. See [the adapter](client/packages/river_matrix/README.md) for pinned dependencies and build/test instructions. Standard encrypted file uploads are limited to 32 MiB by River.
 
@@ -130,14 +132,15 @@ Delegated Gravitas groups retain their internal UUIDs and membership records. Th
 - A River space is a Matrix space (`m.room.create.content.type = m.space`)
   containing multiple conversation rooms. Its root group/room identifies the space
   and transports space-owned custom events. It is not a conversation.
-- A River DM/group conversation maps 1:1 to a normal Matrix room and group. Its
-  `cool.gravitas.river.group.v1` state identifies `kind=dm` or `kind=group`. Invitations use
-  `m.room.member` with `is_direct=true`. Private Matrix `m.direct` account data is
-  maintained by Gravitas and the SDK lets other Matrix clients recognize direct rooms.
+- River combines the history of joined private DM and group rooms with the
+  same participants. Gravitas group IDs remain the reference for delegated
+  permissions. Each Matrix room keeps its own history access and event
+  IDs. River keeps the originating room ID for actions on individual events.
+  The `cool.gravitas.river.group.v1` state identifies `kind=dm` or `kind=group`.
+  Private `m.direct` account data lets other Matrix clients recognize direct rooms.
 - Each channel is a separate room/group linked by `m.space.child` and canonical
   `m.space.parent`. A `river_channels` row is the authoritative parent link.
   Posts and discussions belong to the parent space, never to a child room.
-  Conversations (including DMs and group chats) are exactly one normal Matrix room.
   Membership changes and child creation take the same space row lock; accepting,
   leaving or removing a member propagates to every channel in the transaction.
   Independent child joins/invites/leaves are denied. Child writes recheck the

@@ -27,7 +27,11 @@ Future<void> sendMatrixAttachment(
     builder: (ctx) => AlertDialog(
       title: const Text('Send attachment'),
       content: Text(
-        '${file.name}\n${app.wireEncrypted(wire) ? 'Encrypted for this room’s members' : 'Unencrypted. Homeservers can read this file.'}',
+        '${file.name}\n${app.canSendUnencrypted(room) && app.wireEncrypted(wire)
+            ? 'If encryption is unavailable, River will send this file unencrypted. Homeservers can read unencrypted files.'
+            : app.wireEncrypted(wire)
+            ? 'Encrypted for this room’s members'
+            : 'Unencrypted. Homeservers can read this file.'}',
       ),
       actions: [
         TextButton(
@@ -45,7 +49,7 @@ Future<void> sendMatrixAttachment(
   if (account != app.accountKey || app.matrix.transport != engine) {
     throw StateError('Your account changed.');
   }
-  await app.sendMatrixFile(
+  final encrypted = await app.sendMatrixFile(
     room,
     file.name,
     lookupMimeType(file.name, headerBytes: file.bytes) ??
@@ -53,6 +57,11 @@ Future<void> sendMatrixAttachment(
     file.bytes!,
     expectedWire: wire,
   );
+  if (!encrypted && context.mounted && app.accountKey == account) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Attachment sent unencrypted')),
+    );
+  }
 }
 
 class MatrixAttachmentCard extends StatefulWidget {
