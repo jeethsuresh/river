@@ -8,17 +8,27 @@ class FriendsView extends StatefulWidget {
     super.key,
     required this.app,
     required this.onConversation,
+    this.initialQuery = '',
   });
   final RiverApi app;
   final VoidCallback onConversation;
+  final String initialQuery;
   @override
   State<FriendsView> createState() => _FriendsViewState();
 }
 
 class _FriendsViewState extends State<FriendsView> {
-  String query = '';
+  late final search = TextEditingController(text: widget.initialQuery);
+  String get query => search.text.trim();
   bool busy = false;
   RiverApi get app => widget.app;
+
+  @override
+  void dispose() {
+    search.dispose();
+    super.dispose();
+  }
+
   Future<void> run(Future<void> Function() f) async {
     if (busy) return;
     setState(() => busy = true);
@@ -141,7 +151,8 @@ class _FriendsViewState extends State<FriendsView> {
       ),
       const SizedBox(height: 16),
       TextField(
-        onChanged: (v) => setState(() => query = v),
+        controller: search,
+        onChanged: (_) => setState(() {}),
         decoration: const InputDecoration(
           prefixIcon: Icon(Icons.search),
           labelText: 'Find a friend or request',
