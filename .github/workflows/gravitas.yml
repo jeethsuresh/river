@@ -28,8 +28,17 @@ jobs:
           docker build -f .matrix-server/Dockerfile.tests -t river-matrix-server:test .matrix-server
           docker build -f Dockerfile.matrix-tests -t river-matrix-client:test .
           docker build --target matrix-browser-interop-client -t river-matrix-browser:test .
-      - name: Verify QR trust and encrypted key recovery
-        run: bash integration/matrix/run.sh river-matrix-server:test river-matrix-client:test .matrix-server river-matrix-browser:test
+      - name: Verify encrypted federation, QR trust and key recovery
+        run: |
+          bash integration/matrix/run.sh river-matrix-server:test river-matrix-client:test .matrix-server river-matrix-browser:test > "$RUNNER_TEMP/matrix-modern.log" 2>&1 &
+          modern_pid=$!
+          bash integration/matrix/run.sh river-matrix-server:test river-matrix-client:test .matrix-server '' legacy > "$RUNNER_TEMP/matrix-legacy.log" 2>&1 &
+          legacy_pid=$!
+          result=0
+          wait "$modern_pid" || result=1
+          wait "$legacy_pid" || result=1
+          cat "$RUNNER_TEMP/matrix-modern.log" "$RUNNER_TEMP/matrix-legacy.log"
+          exit "$result"
   matrix-platforms:
     name: Matrix SDK (${{ matrix.platform }})
     strategy:

@@ -3,8 +3,16 @@
 use super::connection::MatrixCore;
 use anyhow::{Context, Result};
 use matrix_sdk::{
-    Client,
-    ruma::{api::client::room::create_room, events::StateEventType},
+    Client, RoomState,
+    ruma::{
+        EventId, RoomId,
+        api::client::{
+            account::register,
+            room::{create_room, get_room_event},
+            uiaa,
+        },
+        events::StateEventType,
+    },
 };
 use serde_json::{Value, json};
 use std::{io::Cursor, time::Duration};
@@ -19,10 +27,28 @@ async fn device_as(name: &str, user: &str) -> Result<MatrixCore> {
         homeserver == "https://native.test:8448",
         "Only the isolated fixture is allowed"
     );
+    let client = fixture_client(&homeserver).await?;
+    client
+        .matrix_auth()
+        .login_username(user, "password123")
+        .device_id(name)
+        .send()
+        .await?;
+    fixture_core(client)
+}
+
+async fn fixture_client(homeserver: &str) -> Result<Client> {
+    anyhow::ensure!(
+        matches!(
+            homeserver,
+            "https://native.test:8448" | "https://reference.test:8448"
+        ),
+        "Only the isolated fixture is allowed"
+    );
     let ca = std::fs::read(std::env::var("MATRIX_TEST_CA")?)?;
     let _ = rustls::crypto::ring::default_provider().install_default();
     let store = std::env::temp_dir().join(format!("river-matrix-test-{}", uuid::Uuid::new_v4()));
-    let client = Client::builder()
+    Ok(Client::builder()
         .homeserver_url(homeserver)
         .with_encryption_settings(matrix_sdk::encryption::EncryptionSettings {
             backup_download_strategy:
@@ -33,18 +59,29 @@ async fn device_as(name: &str, user: &str) -> Result<MatrixCore> {
         .add_root_certificates(vec![matrix_sdk::reqwest::Certificate::from_pem(&ca)?])
         .sqlite_store(&store, Some("isolated-test-store-passphrase-long-enough"))
         .build()
-        .await?;
-    client
-        .matrix_auth()
-        .login_username(user, "password123")
-        .device_id(name)
-        .send()
-        .await?;
+        .await?)
+}
+
+fn fixture_core(client: Client) -> Result<MatrixCore> {
+    let user = client
+        .user_id()
+        .context("Test login did not establish a session")?
+        .to_owned();
     Ok(MatrixCore::from_client(
-        client.clone(),
-        client.user_id().unwrap().to_owned(),
+        client,
+        user,
         uuid::Uuid::new_v4().to_string(),
     ))
+}
+
+async fn synapse_device() -> Result<MatrixCore> {
+    let client = fixture_client("https://reference.test:8448").await?;
+    let mut request = register::v3::Request::new();
+    request.username = Some(format!("riverinterop{}", uuid::Uuid::new_v4().simple()));
+    request.password = Some("isolated-test-device".into());
+    request.auth = Some(uiaa::AuthData::Dummy(uiaa::Dummy::new()));
+    client.matrix_auth().register(request).await?;
+    fixture_core(client)
 }
 async fn step(clients: &[&MatrixCore]) -> Result<()> {
     for core in clients {
@@ -52,6 +89,239 @@ async fn step(clients: &[&MatrixCore]) -> Result<()> {
             .await
             .context("River production sync path failed")?;
     }
+    Ok(())
+}
+
+async fn assert_encrypted_wire_event(
+    core: &MatrixCore,
+    room: &RoomId,
+    event: &EventId,
+    plaintext: &str,
+) -> Result<()> {
+    let response = core
+        .client
+        .send(get_room_event::v3::Request::new(
+            room.to_owned(),
+            event.to_owned(),
+        ))
+        .await?;
+    let wire: Value = serde_json::from_str(response.event.json().get())?;
+    assert_eq!(wire["type"], "m.room.encrypted");
+    assert_eq!(wire["content"]["algorithm"], "m.megolm.v1.aes-sha2");
+    assert!(wire["content"]["ciphertext"].is_string());
+    assert!(!wire["content"].to_string().contains(plaintext));
+    Ok(())
+}
+
+async fn decrypted_event(core: &MatrixCore, room: &RoomId, event: &EventId) -> Result<Value> {
+    tokio::time::timeout(Duration::from_secs(80), async {
+        loop {
+            core.sync().await?;
+            let history: Value =
+                serde_json::from_str(&core.history(room.to_string(), None).await?)?;
+            if let Some(found) = history["events"]
+                .as_array()
+                .context("Missing room timeline")?
+                .iter()
+                .find(|item| item["event_id"] == event.as_str() && item["type"] == "m.room.message")
+            {
+                assert_eq!(found["river_encrypted"], true);
+                return Ok(found.clone());
+            }
+        }
+    })
+    .await
+    .with_context(|| format!("{event} did not decrypt for {} in {room}", core.own_user))?
+}
+
+async fn federated_round_trip(host: &MatrixCore, joiner: &MatrixCore, room: &RoomId) -> Result<()> {
+    let room_id = room.to_string();
+    let host_room = host
+        .client
+        .get_room(room)
+        .context("Host cannot see its new room")?;
+    host_room.request_encryption_state().await?;
+    assert!(
+        host_room.encryption_state().is_encrypted(),
+        "Encryption must be set before the invite is accepted"
+    );
+
+    tokio::time::timeout(Duration::from_secs(80), async {
+        loop {
+            joiner.sync().await?;
+            if joiner
+                .client
+                .get_room(room)
+                .is_some_and(|room| room.state() == RoomState::Invited)
+            {
+                return Ok::<_, anyhow::Error>(());
+            }
+        }
+    })
+    .await
+    .context("Federated invitation did not reach the other homeserver")??;
+    assert!(
+        joiner
+            .send(
+                room_id.clone(),
+                "m.room.message".into(),
+                json!({"msgtype":"m.text", "body":"must be rejected before joining"}).to_string(),
+                uuid::Uuid::new_v4().to_string(),
+            )
+            .await
+            .is_err()
+    );
+
+    let response: Value = serde_json::from_str(
+        &joiner
+            .action(
+                json!({
+                    "action": "join", "room": room_id, "via": [host.own_user.server_name()],
+                })
+                .to_string(),
+            )
+            .await?,
+    )?;
+    assert_eq!(response["room_id"], room_id);
+    tokio::time::timeout(Duration::from_secs(80), async {
+        loop {
+            host.sync().await?;
+            let list: Value = serde_json::from_str(&host.members(room_id.clone()).await?)?;
+            if list["members"]
+                .as_array()
+                .context("Missing room members")?
+                .iter()
+                .any(|member| {
+                    member["user_id"] == joiner.own_user.as_str() && member["membership"] == "join"
+                })
+            {
+                return Ok::<_, anyhow::Error>(());
+            }
+        }
+    })
+    .await
+    .context("Accepted membership did not reach the room host")??;
+
+    let mut previous = None;
+    for (sender, recipient) in [(host, joiner), (joiner, host)] {
+        let body = format!("Encrypted message from {}", sender.own_user);
+        let mut content = json!({"msgtype":"m.text", "body":body});
+        if let Some(ref event) = previous {
+            content["m.relates_to"] = json!({"m.in_reply_to":{"event_id":event}});
+        }
+        let sent: Value = serde_json::from_str(
+            &sender
+                .send(
+                    room_id.clone(),
+                    "m.room.message".into(),
+                    content.to_string(),
+                    uuid::Uuid::new_v4().to_string(),
+                )
+                .await?,
+        )?;
+        let event = EventId::parse(
+            sent["event_id"]
+                .as_str()
+                .context("Missing encrypted send ID")?,
+        )?;
+        assert_encrypted_wire_event(sender, room, &event, &body).await?;
+        let received = decrypted_event(recipient, room, &event).await?;
+        assert_eq!(received["sender"], sender.own_user.as_str());
+        assert_eq!(received["content"]["body"], body);
+        if let Some(ref replied_to) = previous {
+            assert_eq!(
+                received["content"]["m.relates_to"]["m.in_reply_to"]["event_id"],
+                json!(replied_to)
+            );
+        }
+        assert_encrypted_wire_event(recipient, room, &event, &body).await?;
+        previous = Some(event);
+
+        let filename = "federated-attachment.txt";
+        let bytes = format!("Encrypted attachment sent by {}", sender.own_user).into_bytes();
+        let uploaded: Value = serde_json::from_str(
+            &sender
+                .send_attachment(
+                    room_id.clone(),
+                    filename.into(),
+                    "text/plain".into(),
+                    bytes.clone(),
+                    uuid::Uuid::new_v4().to_string(),
+                )
+                .await?,
+        )?;
+        let attachment = EventId::parse(
+            uploaded["event_id"]
+                .as_str()
+                .context("Missing attachment ID")?,
+        )?;
+        let received = decrypted_event(recipient, room, &attachment).await?;
+        assert_eq!(received["content"]["body"], filename);
+        assert!(received["content"]["file"].is_object());
+        assert_eq!(
+            recipient
+                .download_attachment(received["content"].to_string())
+                .await?,
+            bytes
+        );
+        assert_encrypted_wire_event(sender, room, &attachment, filename).await?;
+        assert_encrypted_wire_event(recipient, room, &attachment, filename).await?;
+    }
+
+    joiner
+        .action(json!({"action":"leave", "room":room_id}).to_string())
+        .await?;
+    assert!(
+        joiner
+            .send(
+                room_id,
+                "m.room.message".into(),
+                json!({"msgtype":"m.text", "body":"must be rejected after leaving"}).to_string(),
+                uuid::Uuid::new_v4().to_string(),
+            )
+            .await
+            .is_err()
+    );
+    println!(
+        "RIVER MATRIX {}-hosted encrypted invite, join, bidirectional text/reply and media, and membership checks PASS",
+        host.own_user.server_name()
+    );
+    Ok(())
+}
+
+#[tokio::test]
+#[ignore = "requires the isolated Gravitas and Synapse HTTPS fixtures"]
+async fn federated_encrypted_conversations() -> Result<()> {
+    let river = device_as(
+        &format!("RIVER-FEDERATION-{}", uuid::Uuid::new_v4()),
+        "deactlater",
+    )
+    .await?;
+    let external = synapse_device().await?;
+    tokio::try_join!(river.sync(), external.sync())?;
+
+    let response: Value = serde_json::from_str(
+        &river
+            .action(
+                json!({
+                    "action": "direct", "user": external.own_user,
+                })
+                .to_string(),
+            )
+            .await?,
+    )?;
+    let room = RoomId::parse(
+        response["room_id"]
+            .as_str()
+            .context("River did not create a direct room")?,
+    )?;
+    federated_round_trip(&river, &external, &room).await?;
+
+    let room = external.client.create_dm(&river.own_user).await?;
+    federated_round_trip(&external, &river, room.room_id()).await?;
+
+    river.close(true).await?;
+    external.close(true).await?;
     Ok(())
 }
 fn image(code: &Value) -> Result<Vec<u8>> {

@@ -3,8 +3,24 @@ set -Eeuo pipefail
 server_image=${1:?Pass the current Gravitas test image}
 client_image=${2:?Pass the River Matrix test image}
 server_source=${3:?Pass the pinned Gravitas source directory}
+reference_mode=${5:-modern}
+client_args=("$client_image")
+case "$reference_mode" in
+  modern)
+    reference_image=ghcr.io/element-hq/synapse@sha256:b497dc97929056f25401ad3f4e8c7e82cb374cfaba07d7348a3c4ea3d1ae950f
+    automatic_versions=0
+    synapse_start='exec python -m synapse.app.homeserver --config-path /fixtures/homeserver.yaml'
+    ;;
+  legacy)
+    reference_image=docker.io/matrixdotorg/synapse@sha256:70fdddfcba9058d2471ae7764f887b6db781d7527debcb75a1b8083217c342f1
+    automatic_versions=1
+    synapse_start='python -m synapse.app.homeserver --config-path /fixtures/homeserver.yaml --generate-keys; exec python -m synapse.app.homeserver --config-path /fixtures/homeserver.yaml'
+    client_args+=(cargo test --offline --locked --lib core::interop::federated_encrypted_conversations -- --ignored --nocapture)
+    ;;
+  *) echo 'Expected modern or legacy Synapse' >&2; exit 1 ;;
+esac
 fixtures=$(mktemp -d)
-name="river-matrix-qr-$$"
+name="river-matrix-$reference_mode-$$"
 cleanup() {
   status=$?
   if (( status != 0 )); then
@@ -42,13 +58,16 @@ for attempt in $(seq 1 60); do
 done
 docker run -d --name "$name-synapse" --network "$name" --network-alias reference.test \
   --user 0 --security-opt label=disable --read-only --tmpfs /data:rw --tmpfs /tmp:rw \
-  -v "$fixtures:/fixtures:ro" --entrypoint python \
-  ghcr.io/element-hq/synapse@sha256:b497dc97929056f25401ad3f4e8c7e82cb374cfaba07d7348a3c4ea3d1ae950f \
-  -m synapse.app.homeserver --config-path /fixtures/homeserver.yaml >/dev/null
+  -v "$fixtures:/fixtures:ro" --entrypoint sh "$reference_image" -ec "$synapse_start" >/dev/null
+for attempt in $(seq 1 90); do
+  if docker exec "$name-synapse" python -c 'import ssl, urllib.request; urllib.request.urlopen("https://reference.test:8448/_matrix/client/versions", context=ssl.create_default_context(cafile="/fixtures/ca.pem"), timeout=2).close()' >/dev/null 2>&1; then break; fi
+  if [[ $(docker inspect -f '{{.State.Running}}' "$name-synapse") != true ]] || (( attempt == 90 )); then exit 1; fi
+  sleep 1
+done
 docker run -d --name "$name-native" --network "$name" --network-alias native.test --init \
   --security-opt label=disable -v "$fixtures:/fixtures:ro" \
   -e POSTGRES_HOST=postgres -e POSTGRES_USER=postgres -e POSTGRES_PASSWORD=postgres \
-  -e WALLABY_SKIP=1 -e INTEROP_HOLD=1 -e INTEROP_SERVE_ONLY=1 \
+  -e WALLABY_SKIP=1 -e INTEROP_HOLD=1 -e INTEROP_SERVE_ONLY=1 -e INTEROP_AUTO_VERSIONS="$automatic_versions" \
   --entrypoint mix "$server_image" run --no-start integration/matrix/native.exs >/dev/null
 for attempt in $(seq 1 90); do
   if docker logs "$name-native" 2>&1 | grep -q 'INTEROP CRYPTO SERVER READY'; then break; fi
@@ -58,7 +77,7 @@ for attempt in $(seq 1 90); do
   sleep 1
 done
 docker run --name "$name-client" --network "$name" --security-opt label=disable \
-  -v "$fixtures/ca.pem:/fixtures/ca.pem:ro" "$client_image"
+  -v "$fixtures/ca.pem:/fixtures/ca.pem:ro" "${client_args[@]}"
 if [[ -n ${4:-} ]]; then
   docker run --name "$name-browser" --network "$name" --security-opt label=disable \
     -v "$fixtures/peer.pem:/fixtures/peer.pem:ro" "$4"
