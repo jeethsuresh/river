@@ -492,6 +492,12 @@ class ContentCard extends StatelessWidget {
                       '${t.hour.toString().padLeft(2, '0')}:${t.minute.toString().padLeft(2, '0')}${event['edited'] == true ? ' · edited' : ''}',
                       style: contentMetaStyle,
                     ),
+                    if (event['river_encrypted'] == false &&
+                        const [
+                          'm.room.message',
+                          'm.sticker',
+                        ].contains(event['type']))
+                      const Text('Unencrypted', style: contentMetaStyle),
                     if (audience != null)
                       Text(audience!, style: contentMetaStyle),
                     if (threadControl != null) threadControl!,

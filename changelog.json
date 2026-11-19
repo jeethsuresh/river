@@ -1,10 +1,8 @@
 {
   "schemaVersion": 1,
-  "version": "0.16.5",
-  "versionCode": 43,
+  "version": "0.16.6",
+  "versionCode": 44,
   "changes": [
-    "Open private chats even when this device cannot set up encryption.",
-    "Messages, replies, and attachments can automatically send unencrypted when encryption is unavailable.",
-    "River combines private chat history across rooms that share the same participants."
+    "Unencrypted messages and replies are labeled in chat history for everyone who can see them."
   ]
 }

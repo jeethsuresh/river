@@ -107,9 +107,9 @@ class FallbackTransport extends FlowTransport {
           'content': {'body': 'Message in $room', 'msgtype': 'm.text'},
           'river_encrypted': room == secureRoom,
         },
-        ...sentEvents.values.where(
-          (e) => cursor == null && e['room_id'] == room,
-        ),
+        for (final e in sentEvents.values)
+          if (cursor == null && e['room_id'] == room)
+            {...e, 'river_encrypted': room == secureRoom},
       ],
       'next_cursor': cursor == null ? 'earlier:$room' : null,
     };
@@ -354,12 +354,31 @@ void main() {
     final api = await openConversation(engine, disposeWithWidget: true);
     await tester.pumpWidget(RiverApp(api: api, boot: false));
     await tester.pumpAndSettle();
+    Finder encryptionLabelFor(String event) => find.descendant(
+      of: find.byKey(ValueKey('content-meta-$event')),
+      matching: find.text('Unencrypted'),
+    );
+
+    expect(api.events.map((event) => event['room_id']), [
+      olderRoom,
+      secureRoom,
+    ]);
+    for (final event in api.events) {
+      final eventId = event['event_id'] as String;
+      expect(find.byKey(ValueKey('content-meta-$eventId')), findsOneWidget);
+      expect(
+        encryptionLabelFor(eventId),
+        event['room_id'] == olderRoom ? findsOneWidget : findsNothing,
+      );
+    }
     final composer = tester.widget<RichComposer>(find.byType(RichComposer));
     composer.controller.text = 'Send this now';
     await tester.tap(find.byKey(const ValueKey('message-send')));
     await tester.pumpAndSettle();
     expect(composer.controller.text, isEmpty);
-    expect(engine.sentEvents.values.single['room_id'], plainRoom);
+    final sent = engine.sentEvents.values.single;
+    expect(sent['room_id'], plainRoom);
+    expect(encryptionLabelFor(sent['event_id'] as String), findsOneWidget);
     expect(api.selected, 'direct');
     expect(
       tester
