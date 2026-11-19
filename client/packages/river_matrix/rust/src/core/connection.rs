@@ -8,6 +8,7 @@ use std::{
 };
 
 use anyhow::{Context, Result, bail, ensure};
+use futures_util::{StreamExt, TryStreamExt, stream};
 
 pub(crate) fn sdk_error(error: impl std::fmt::Display) -> anyhow::Error {
     anyhow::anyhow!("{error}")
@@ -344,113 +345,23 @@ impl MatrixCore {
     pub async fn rooms(&self) -> Result<String> {
         self.active()?;
         let replacements = self.follow_room_upgrades().await;
-        let mut rooms = Vec::new();
-        for room in self.client.rooms() {
+        let all_rooms = self.client.rooms();
+        for room in &all_rooms {
             if room.state() == RoomState::Invited {
                 // Keep a failed automatic join visible as an invitation.
-                let _ = self.join_conversation_fallback(&room).await;
+                let _ = self.join_conversation_fallback(room).await;
             }
-            let membership = match room.state() {
-                RoomState::Joined => "join",
-                RoomState::Invited => "invite",
-                RoomState::Knocked => "knock",
-                _ => "leave",
-            };
-            let mut parents = Vec::new();
-            for event in room
-                .get_state_events(StateEventType::SpaceParent)
-                .await
-                .map_err(sdk_error)?
-            {
-                let value = serde_json::to_value(event)?;
-                if let Some(parent) = value["state_key"].as_str() {
-                    parents.push(parent.to_owned());
-                }
-            }
-            let metadata = room
-                .get_state_event(StateEventType::from("cool.gravitas.river.group.v1"), "")
-                .await
-                .map_err(sdk_error)?;
-            let metadata: Value = metadata
-                .map(serde_json::to_value)
-                .transpose()?
-                .unwrap_or(Value::Null);
-            let metadata = &metadata["content"];
-            let power = room.power_levels_or_default().await;
-            let name = room
-                .display_name()
-                .await
-                .map(|v| v.to_string())
-                .unwrap_or_else(|_| room.room_id().to_string());
-            let direct = room.is_direct().await.unwrap_or(false);
-            let fallback = self.fallback_link(&room).await?;
-            let fallback_for = self.linked_conversation(&room, &fallback).await?;
-            let direct_peer = if direct && fallback.is_none() {
-                self.direct_peer(&room).await?
-            } else {
-                None
-            };
-            let participants = self.conversation_participants(&room, &fallback).await;
-            let heroes = room.heroes().await;
-            let mut profiles: Vec<Value> = heroes
-                .iter()
-                .map(|h| {
-                    json!({
-                        "user_id": h.user_id, "username": h.display_name,
-                        "avatar_url": h.avatar_url,
-                    })
-                })
-                .collect();
-            let mut avatar = room.avatar_url().or_else(|| {
-                if direct {
-                    heroes
-                        .iter()
-                        .find(|h| h.user_id != self.own_user)
-                        .and_then(|h| h.avatar_url.clone())
-                } else {
-                    None
-                }
-            });
-            // Named direct rooms may have no heroes in /sync. Read their
-            // already-cached members without adding network work to room sync.
-            if direct && (avatar.is_none() || profiles.is_empty()) {
-                let members = room
-                    .members_no_sync(RoomMemberships::JOIN | RoomMemberships::INVITE)
-                    .await
-                    .unwrap_or_default();
-                for member in members.iter().filter(|m| m.user_id() != self.own_user) {
-                    if avatar.is_none() {
-                        avatar = member.avatar_url().map(ToOwned::to_owned);
-                    }
-                    if !profiles
-                        .iter()
-                        .any(|p| p["user_id"] == member.user_id().as_str())
-                    {
-                        profiles.push(json!({"user_id": member.user_id(),
-                            "username": member.display_name(), "avatar_url": member.avatar_url()}));
-                    }
-                }
-            }
-            rooms.push(json!({
-                "room_id": room.room_id(), "name": name, "membership": membership,
-                "avatar_url": avatar,
-                "heroes": profiles,
-                "direct_peer": direct_peer,
-                "conversation_participants": participants,
-                "is_fallback_room": fallback.is_some(),
-                "fallback_for": fallback_for,
-                "can_use_fallback": fallback.is_none() && super::conversation::private_chat(&room),
-                "replacement_room": replacements.get(room.room_id()),
-                "upgrade_pending": room.is_tombstoned() && !replacements.contains_key(room.room_id()),
-                "kind": if room.is_space() {"space"} else if direct {"dm"} else {metadata["kind"].as_str().unwrap_or("group")},
-                "channel_kind": metadata["channel_kind"],
-                "description": room.topic(),
-                "parents": parents, "encrypted": room.encryption_state().is_encrypted(),
-                "can_manage": power.user_can_send_state(&self.own_user, StateEventType::RoomName),
-                "can_encrypt": power.user_can_send_state(&self.own_user, StateEventType::RoomEncryption),
-                "unread_count": room.unread_notification_counts().notification_count,
-            }));
         }
+        // A lazy-loaded roster may require a homeserver request. Preserve room
+        // order and cap concurrent lookups so a cold cache cannot flood it.
+        let rooms: Vec<_> = stream::iter(all_rooms)
+            .map(|room| {
+                let replacement = replacements.get(room.room_id());
+                self.room_summary(room, replacement)
+            })
+            .buffered(8)
+            .try_collect()
+            .await?;
         let verified = self
             .client
             .encryption()
@@ -462,6 +373,109 @@ impl MatrixCore {
         Ok(json!({"rooms": rooms, "user_id": self.own_user,
             "device_id": self.client.device_id(), "device_verified": verified})
         .to_string())
+    }
+
+    async fn room_summary(&self, room: Room, replacement: Option<&OwnedRoomId>) -> Result<Value> {
+        let membership = match room.state() {
+            RoomState::Joined => "join",
+            RoomState::Invited => "invite",
+            RoomState::Knocked => "knock",
+            _ => "leave",
+        };
+        let mut parents = Vec::new();
+        for event in room
+            .get_state_events(StateEventType::SpaceParent)
+            .await
+            .map_err(sdk_error)?
+        {
+            let value = serde_json::to_value(event)?;
+            if let Some(parent) = value["state_key"].as_str() {
+                parents.push(parent.to_owned());
+            }
+        }
+        let metadata = room
+            .get_state_event(StateEventType::from("cool.gravitas.river.group.v1"), "")
+            .await
+            .map_err(sdk_error)?;
+        let metadata: Value = metadata
+            .map(serde_json::to_value)
+            .transpose()?
+            .unwrap_or(Value::Null);
+        let metadata = &metadata["content"];
+        let power = room.power_levels_or_default().await;
+        let name = room
+            .display_name()
+            .await
+            .map(|v| v.to_string())
+            .unwrap_or_else(|_| room.room_id().to_string());
+        let direct = room.is_direct().await.unwrap_or(false);
+        let fallback = self.fallback_link(&room).await?;
+        let fallback_for = self.linked_conversation(&room, &fallback).await?;
+        let direct_peer = if direct && fallback.is_none() {
+            self.direct_peer(&room).await?
+        } else {
+            None
+        };
+        let participants = self.conversation_participants(&room, &fallback).await;
+        let heroes = room.heroes().await;
+        let mut profiles: Vec<Value> = heroes
+            .iter()
+            .map(|h| {
+                json!({
+                    "user_id": h.user_id, "username": h.display_name,
+                    "avatar_url": h.avatar_url,
+                })
+            })
+            .collect();
+        let mut avatar = room.avatar_url().or_else(|| {
+            if direct {
+                heroes
+                    .iter()
+                    .find(|h| h.user_id != self.own_user)
+                    .and_then(|h| h.avatar_url.clone())
+            } else {
+                None
+            }
+        });
+        // Named direct rooms may have no heroes in /sync. Read their
+        // already-cached members without adding network work to room sync.
+        if direct && (avatar.is_none() || profiles.is_empty()) {
+            let members = room
+                .members_no_sync(RoomMemberships::JOIN | RoomMemberships::INVITE)
+                .await
+                .unwrap_or_default();
+            for member in members.iter().filter(|m| m.user_id() != self.own_user) {
+                if avatar.is_none() {
+                    avatar = member.avatar_url().map(ToOwned::to_owned);
+                }
+                if !profiles
+                    .iter()
+                    .any(|p| p["user_id"] == member.user_id().as_str())
+                {
+                    profiles.push(json!({"user_id": member.user_id(),
+                        "username": member.display_name(), "avatar_url": member.avatar_url()}));
+                }
+            }
+        }
+        Ok(json!({
+            "room_id": room.room_id(), "name": name, "membership": membership,
+            "avatar_url": avatar,
+            "heroes": profiles,
+            "direct_peer": direct_peer,
+            "conversation_participants": participants,
+            "is_fallback_room": fallback.is_some(),
+            "fallback_for": fallback_for,
+            "can_use_fallback": fallback.is_none() && super::conversation::private_chat(&room),
+            "replacement_room": replacement,
+            "upgrade_pending": room.is_tombstoned() && replacement.is_none(),
+            "kind": if room.is_space() {"space"} else if direct {"dm"} else {metadata["kind"].as_str().unwrap_or("group")},
+            "channel_kind": metadata["channel_kind"],
+            "description": room.topic(),
+            "parents": parents, "encrypted": room.encryption_state().is_encrypted(),
+            "can_manage": power.user_can_send_state(&self.own_user, StateEventType::RoomName),
+            "can_encrypt": power.user_can_send_state(&self.own_user, StateEventType::RoomEncryption),
+            "unread_count": room.unread_notification_counts().notification_count,
+        }))
     }
 
     pub(crate) fn room(&self, room: &str) -> Result<Room> {

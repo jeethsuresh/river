@@ -9,8 +9,9 @@ String matrixParticipantKey(Iterable<String> participants) =>
 /// Gravitas group as the representative so delegated actions retain their ID.
 List<MatrixJson> combineMatrixConversations(
   Map<String, MatrixJson> byWire,
-  String? ownUser,
-) {
+  String? ownUser, {
+  String? preferredWire,
+}) {
   final conversations = <String, List<MatrixJson>>{};
   final keys = <String, String>{};
   final anchors = <String, String>{};
@@ -45,6 +46,9 @@ List<MatrixJson> combineMatrixConversations(
       final aDelegated = a['matrix_only'] != true;
       final bDelegated = b['matrix_only'] != true;
       if (aDelegated != bDelegated) return aDelegated ? -1 : 1;
+      final aPreferred = a['room_id'] == preferredWire;
+      final bPreferred = b['room_id'] == preferredWire;
+      if (aPreferred != bPreferred) return aPreferred ? -1 : 1;
       return (a['room_id'] as String).compareTo(b['room_id'] as String);
     });
     final anchor = rooms.first['room_id'] as String;

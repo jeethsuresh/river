@@ -906,6 +906,7 @@ async fn direct_room_permissions(first: &MatrixCore) -> Result<()> {
     )?;
     assert!(result["event_id"].is_string());
     let mut request = create_room::v3::Request::new();
+    request.preset = Some(create_room::v3::RoomPreset::PrivateChat);
     request.invite = vec![peer.own_user.clone()];
     request.initial_state = vec![serde_json::from_value(json!({
         "type": "m.room.encryption", "state_key": "",
@@ -913,18 +914,56 @@ async fn direct_room_permissions(first: &MatrixCore) -> Result<()> {
     }))?];
     let encrypted = fresh.client.create_room(request).await?;
     step(&[&fresh, &peer]).await?;
+    peer.client.join_room_by_id(encrypted.room_id()).await?;
+    step(&[&fresh, &peer]).await?;
+    let transaction = uuid::Uuid::new_v4().to_string();
+    let content = json!({"msgtype": "m.text", "body": "Send from an unverified session"});
     let blocked: Value = serde_json::from_str(
         &fresh
             .send(
                 encrypted.room_id().to_string(),
                 "m.room.message".into(),
-                json!({"msgtype":"m.text", "body":"encryption requires device verification"})
-                    .to_string(),
-                uuid::Uuid::new_v4().to_string(),
+                content.to_string(),
+                transaction.clone(),
             )
             .await?,
     )?;
     assert_eq!(blocked, json!({"encryption_unavailable": true}));
+    let fallback: Value =
+        serde_json::from_str(&fresh.open_fallback(encrypted.room_id().as_str()).await?)?;
+    let route = RoomId::parse(
+        fallback["room_id"]
+            .as_str()
+            .context("Missing fallback room")?,
+    )?;
+    step(&[&fresh, &peer]).await?;
+    step(&[&fresh, &peer]).await?;
+    let sent: Value = serde_json::from_str(
+        &fresh
+            .send(
+                route.to_string(),
+                "m.room.message".into(),
+                content.to_string(),
+                transaction,
+            )
+            .await?,
+    )?;
+    assert_eq!(sent["river_encrypted"], false);
+    let delivered = peer
+        .client
+        .send(
+            matrix_sdk::ruma::api::client::room::get_room_event::v3::Request::new(
+                route,
+                matrix_sdk::ruma::EventId::parse(
+                    sent["event_id"]
+                        .as_str()
+                        .context("Missing fallback event")?,
+                )?,
+            ),
+        )
+        .await?;
+    let delivered: Value = serde_json::from_str(delivered.event.json().get())?;
+    assert_eq!(delivered["content"], content);
     fresh.close(true).await?;
     peer.close(true).await?;
     println!("RIVER MATRIX new/encrypted/legacy DM permissions and unchanged ACL PASS");
