@@ -56,6 +56,9 @@ List<MatrixEvent> renderMatrixTimeline(List<MatrixEvent> raw, String? ownUser) {
       original['rendered_content'] = (content['m.new_content'] as Map)
           .cast<String, dynamic>();
       original['edited'] = true;
+      if (event['river_encrypted'] == false) {
+        original['river_encrypted'] = false;
+      }
     }
     if (event['type'] == 'm.reaction' &&
         relation['rel_type'] == 'm.annotation' &&

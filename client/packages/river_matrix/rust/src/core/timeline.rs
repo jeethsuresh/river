@@ -15,9 +15,10 @@ impl MatrixCore {
     ) -> Result<String> {
         let room = self.room(&room)?;
         let event = EventId::parse(event)?;
-        let root = room.event(&event, None).await.map_err(sdk_error)?;
-        let mut root: Value = serde_json::from_str(root.raw().json().get())?;
+        let root_event = room.event(&event, None).await.map_err(sdk_error)?;
+        let mut root: Value = serde_json::from_str(root_event.raw().json().get())?;
         root["room_id"] = json!(room.room_id());
+        root["river_encrypted"] = json!(root_event.encryption_info().is_some());
         let options = RelationsOptions {
             from: cursor,
             limit: Some(50u32.into()),
