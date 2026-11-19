@@ -3,6 +3,7 @@ import 'username_login.dart';
 
 import 'dart:async';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -324,6 +325,13 @@ class _PostScreenState extends State<PostScreen> {
                       if (widget.app.user == null)
                         UsernameLogin(
                           defaultDomain: widget.app.defaultDomain,
+                          onContinue: !kIsWeb || widget.app.grantAccessRequired
+                              ? () => widget.app.login(
+                                  next: postPath(widget.event),
+                                )
+                              : null,
+                          accessRequired: widget.app.grantAccessRequired,
+                          accessDenied: widget.app.accessDenied,
                           onSubmit: (username) => widget.app.login(
                             username: username,
                             next: postPath(widget.event),

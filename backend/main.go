@@ -28,6 +28,7 @@ type pairing struct {
 	Challenge, Label, Session, Username string
 	Register                            bool
 	Delivered                           bool
+	Declined                            bool
 	Expires                             time.Time
 }
 type server struct {
@@ -146,8 +147,8 @@ func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		a, next, err := s.auth.Callback(w, r)
-		if errors.Is(err, gravitas.ErrConsentRequired) || errors.Is(err, gravitas.ErrLoginRequired) {
-			http.Redirect(w, r, "/?auto=off", 303)
+		if errors.Is(err, gravitas.ErrConsentRequired) || errors.Is(err, gravitas.ErrLoginRequired) || errors.Is(err, gravitas.ErrAccessDenied) {
+			s.finishLoginWithoutSession(w, r, next, err)
 			return
 		}
 		if err != nil {
@@ -266,9 +267,10 @@ func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	if r.URL.Path == "/" && r.Method == "GET" && r.URL.Query().Get("auto") != "off" && gravitas.HasSharedSignInHint(r) {
+	if (r.URL.Path == "/" || publicPage(r.URL.Path)) && r.Method == "GET" && r.URL.Query().Get("auto") != "off" && gravitas.HasSharedSignInHint(r) {
 		if _, err := r.Cookie(gravitas.SessionCookie); err != nil {
-			http.Redirect(w, r, "/auth/gravitas/start?prompt=none", 303)
+			q := url.Values{"prompt": {"none"}, "next": {r.URL.RequestURI()}}
+			http.Redirect(w, r, "/auth/gravitas/start?"+q.Encode(), 303)
 			return
 		}
 	}
@@ -497,7 +499,7 @@ func (s *server) nativeStart(w http.ResponseWriter, r *http.Request) {
 	id := r.URL.Query().Get("id")
 	s.mu.Lock()
 	p := s.pairs[id]
-	valid := p != nil && p.Expires.After(time.Now()) && p.Session == ""
+	valid := p != nil && p.Expires.After(time.Now()) && p.Session == "" && !p.Declined
 	s.mu.Unlock()
 	if !valid {
 		fail(w, 400, "Device request expired")
@@ -511,6 +513,33 @@ func (s *server) nativeStart(w http.ResponseWriter, r *http.Request) {
 		fail(w, 503, "Sign-in is temporarily unavailable")
 	}
 }
+
+func (s *server) finishLoginWithoutSession(w http.ResponseWriter, r *http.Request, next string, outcome error) {
+	target, _ := url.Parse(gravitas.SafeNext(next))
+	query := target.Query()
+	if target.Path == "/device/link" {
+		if errors.Is(outcome, gravitas.ErrAccessDenied) {
+			s.mu.Lock()
+			if p := s.pairs[query.Get("id")]; p != nil && p.Expires.After(time.Now()) && p.Session == "" {
+				p.Declined = true
+			}
+			s.mu.Unlock()
+		}
+		returnToApp(w, "native", "River sign-in was not completed")
+		return
+	}
+	query.Set("auto", "off")
+	query.Del("gravitas")
+	if errors.Is(outcome, gravitas.ErrConsentRequired) {
+		query.Set("gravitas", "consent_required")
+	}
+	if errors.Is(outcome, gravitas.ErrAccessDenied) {
+		query.Set("gravitas", "access_denied")
+	}
+	target.RawQuery = query.Encode()
+	http.Redirect(w, r, target.String(), http.StatusSeeOther)
+}
+
 func (s *server) nativeFinish(w http.ResponseWriter, r *http.Request) {
 	if r.Method != "GET" && r.Method != "POST" {
 		w.WriteHeader(405)
@@ -528,7 +557,7 @@ func (s *server) nativeFinish(w http.ResponseWriter, r *http.Request) {
 	defer s.mu.Unlock()
 	id := r.URL.Query().Get("id")
 	p := s.pairs[id]
-	if p == nil || !p.Expires.After(time.Now()) || p.Session != "" {
+	if p == nil || !p.Expires.After(time.Now()) || p.Session != "" || p.Declined {
 		fail(w, 400, "Device request expired")
 		return
 	}
@@ -562,6 +591,10 @@ func (s *server) nativeSession(w http.ResponseWriter, r *http.Request) {
 	p := s.pairs[input.ID]
 	if p == nil || !p.Expires.After(time.Now()) || subtle.ConstantTimeCompare([]byte(p.Challenge), []byte(challenge(input.Verifier))) != 1 {
 		fail(w, 403, "Device request invalid or expired")
+		return
+	}
+	if p.Declined {
+		respond(w, 200, map[string]string{"status": "access_denied"})
 		return
 	}
 	if p.Session == "" {

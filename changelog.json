@@ -1,9 +1,10 @@
 {
   "schemaVersion": 1,
-  "version": "0.16.1",
-  "versionCode": 39,
+  "version": "0.16.3",
+  "versionCode": 41,
   "changes": [
-    "Choose unencrypted sending after confirmation when encryption is unavailable.",
-    "Encrypted and unencrypted messages share one conversation history for the same participants."
+    "Reuse an active Gravitas sign-in when opening the app in your browser.",
+    "Review and grant app access explicitly when connecting for the first time.",
+    "Continue with your existing Gravitas account from the installed app."
   ]
 }

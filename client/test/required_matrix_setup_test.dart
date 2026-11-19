@@ -183,7 +183,7 @@ void main() {
     await tester.tap(find.text('Sign out'));
     await tester.pumpAndSettle();
     expect(f.api.user, isNull);
-    expect(find.text('🔥'), findsOneWidget);
+    expect(find.text('Continue with Gravitas'), findsOneWidget);
     expect(find.byKey(const ValueKey('required-matrix-setup')), findsNothing);
     await tester.pumpWidget(const SizedBox());
   });

@@ -89,6 +89,120 @@ func request(s *server, method, path, body, token string) *httptest.ResponseReco
 	s.ServeHTTP(w, r)
 	return w
 }
+
+func TestGravitasOnboardingStartsFirstConversation(t *testing.T) {
+	for _, native := range []bool{false, true} {
+		name := "browser"
+		if native {
+			name = "native"
+		}
+		t.Run(name, func(t *testing.T) {
+			s, _, _, _ := fixture(t)
+			original := s.auth.HTTP.Transport
+			s.auth.HTTP.Transport = roundTripFunc(func(r *http.Request) (*http.Response, error) {
+				if r.URL.Path != "/app/v1/direct" {
+					return original.RoundTrip(r)
+				}
+				var body map[string]string
+				_ = json.NewDecoder(r.Body).Decode(&body)
+				if r.Method != "POST" || r.Header.Get("Authorization") != "Bearer upstream-only" || body["user_id"] != "@bob:gravitas.cool" {
+					t.Errorf("unexpected first conversation request: %s %v", r.Method, body)
+				}
+				return &http.Response{StatusCode: 200, Header: http.Header{"Content-Type": {"application/json"}}, Body: ioCloser{bytes.NewReader([]byte(`{"id":"first-conversation"}`))}}, nil
+			})
+			serve := func(method, path, body string, cookies ...*http.Cookie) *httptest.ResponseRecorder {
+				r := httptest.NewRequest(method, s.auth.AppURL+path, strings.NewReader(body))
+				r.Header.Set("Content-Type", "application/json")
+				r.Header.Set("X-Gravitas-CSRF", "1")
+				for _, cookie := range cookies {
+					r.AddCookie(cookie)
+				}
+				w := httptest.NewRecorder()
+				s.ServeHTTP(w, r)
+				return w
+			}
+			callback := func(started *httptest.ResponseRecorder, query url.Values) *httptest.ResponseRecorder {
+				t.Helper()
+				target, err := url.Parse(started.Header().Get("Location"))
+				if err != nil || started.Code != 303 || target.Path != "/oauth/start" {
+					t.Fatalf("unexpected IAM start: %d %v %v", started.Code, target, err)
+				}
+				query.Set("state", target.Query().Get("state"))
+				return serve("GET", "/auth/gravitas/callback?"+query.Encode(), "", started.Result().Cookies()...)
+			}
+			marker := &http.Cookie{Name: gravitas.SharedSignInCookie, Value: "1"}
+			const payload = `{"user_id":"@bob:gravitas.cool"}`
+			if w := serve("POST", "/api/direct", payload, marker); w.Code != 401 {
+				t.Fatalf("shared sign-in marker authorized an API call: %d", w.Code)
+			}
+			if !native {
+				redirect := serve("GET", "/?view=inbox", "", marker).Header().Get("Location")
+				for outcome, expected := range map[string]string{
+					"login_required":   "/?auto=off&view=inbox",
+					"consent_required": "/?auto=off&gravitas=consent_required&view=inbox",
+				} {
+					silent := serve("GET", redirect, "")
+					if !strings.Contains(silent.Header().Get("Location"), "prompt=none") {
+						t.Fatal("shared sign-in did not start a passive authorization")
+					}
+					w := callback(silent, url.Values{"error": {outcome}})
+					if w.Code != 303 || w.Header().Get("Location") != expected || len(w.Result().Cookies()) != 1 {
+						t.Fatalf("unexpected %s response: %d %s", outcome, w.Code, w.Header().Get("Location"))
+					}
+				}
+				approved := callback(serve("GET", "/auth/gravitas/start", ""), url.Values{"code": {"approved"}})
+				var session *http.Cookie
+				for _, cookie := range approved.Result().Cookies() {
+					if cookie.Name == gravitas.SessionCookie {
+						session = cookie
+					}
+				}
+				if session == nil || session.Domain != "" || !session.Secure || !session.HttpOnly {
+					t.Fatal("browser login did not establish a host-only secure session")
+				}
+				if w := serve("POST", "/api/direct", payload, session); w.Code != 200 || !strings.Contains(w.Body.String(), "first-conversation") {
+					t.Fatalf("first conversation failed: %d %s", w.Code, w.Body)
+				}
+				return
+			}
+			verifier := strings.Repeat("v", 43)
+			newPair := func() (id, path string) {
+				t.Helper()
+				w := serve("POST", "/api/native/new", `{"challenge":"`+challenge(verifier)+`"}`)
+				var pair map[string]string
+				if w.Code != 200 || json.Unmarshal(w.Body.Bytes(), &pair) != nil || pair["id"] == "" {
+					t.Fatalf("failed to start native pairing: %d %s", w.Code, w.Body)
+				}
+				return pair["id"], strings.TrimPrefix(pair["url"], s.auth.AppURL)
+			}
+			redeem := func(id string) *httptest.ResponseRecorder {
+				return serve("POST", "/api/native/session", `{"id":"`+id+`","verifier":"`+verifier+`"}`)
+			}
+			id, start := newPair()
+			if w := redeem(id); w.Code != 202 {
+				t.Fatalf("unapproved native login was not pending: %d", w.Code)
+			}
+			callback(serve("GET", start, "", marker), url.Values{"error": {"access_denied"}})
+			if w := redeem(id); w.Code != 200 || !strings.Contains(w.Body.String(), `"status":"access_denied"`) {
+				t.Fatalf("native did not receive denial: %d %s", w.Code, w.Body)
+			}
+			id, start = newPair()
+			approved := callback(serve("GET", start, "", marker), url.Values{"code": {"approved"}})
+			linked := serve("POST", "/device/link?id="+id, "", approved.Result().Cookies()...)
+			if linked.Code != 200 {
+				t.Fatalf("pairing failed: %d %s", linked.Code, linked.Body)
+			}
+			w := redeem(id)
+			var result map[string]string
+			if w.Code != 200 || json.Unmarshal(w.Body.Bytes(), &result) != nil || result["session"] == "" {
+				t.Fatalf("native session not issued: %d %s", w.Code, w.Body)
+			}
+			if w := request(s, "POST", "/api/direct", payload, result["session"]); w.Code != 200 || !strings.Contains(w.Body.String(), "first-conversation") {
+				t.Fatalf("native first conversation failed: %d %s", w.Code, w.Body)
+			}
+		})
+	}
+}
 func TestPinnedRelayAndRevocation(t *testing.T) {
 	s, token, revoked, checks := fixture(t)
 	for range 2 {
