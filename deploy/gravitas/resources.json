@@ -148,6 +148,20 @@
                         "optional": true
                       }
                     }
+                  },
+                  {
+                    "name": "NEWTOND_UDP_ADDRESS",
+                    "value": "newtond.newtond.svc.cluster.local:5514"
+                  },
+                  {
+                    "name": "NEWTOND_UDP_KEY",
+                    "valueFrom": {
+                      "secretKeyRef": {
+                        "name": "newtond-sender",
+                        "key": "NEWTOND_UDP_KEY",
+                        "optional": true
+                      }
+                    }
                   }
                 ],
                 "envFrom": [
@@ -311,6 +325,28 @@
               {
                 "protocol": "TCP",
                 "port": 8443
+              }
+            ]
+          },
+          {
+            "to": [
+              {
+                "namespaceSelector": {
+                  "matchLabels": {
+                    "kubernetes.io/metadata.name": "newtond"
+                  }
+                },
+                "podSelector": {
+                  "matchLabels": {
+                    "app.kubernetes.io/name": "newtond"
+                  }
+                }
+              }
+            ],
+            "ports": [
+              {
+                "protocol": "UDP",
+                "port": 5514
               }
             ]
           }

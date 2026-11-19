@@ -38,6 +38,7 @@ type server struct {
 	pairs             map[string]*pairing
 	matrixLinks       map[string]*matrixLink
 	notificationStore string
+	newtond           *newtonSender
 }
 
 var uuidPattern = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)
@@ -63,6 +64,7 @@ func main() {
 		log.Fatal(err)
 	}
 	s := &server{auth: a, static: env("STATIC_DIR", "../client/build/web"), pairs: map[string]*pairing{}, notificationStore: notificationStore}
+	s.newtond = setupNewtonD()
 	go storecatalog.Run(context.Background())
 	go s.rtcReaper(context.Background())
 	h := &http.Server{Addr: env("ADDR", ":8080"), Handler: s, ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 20 * time.Second, WriteTimeout: 30 * time.Second, IdleTimeout: 60 * time.Second, MaxHeaderBytes: 16 << 10}
@@ -100,6 +102,11 @@ func decode(r *http.Request, v any) error {
 	return nil
 }
 func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if s.newtond != nil && (r.URL.Path == "/api/rtc" || r.URL.Path == "/api/session") {
+		writer, request, finish := s.newtond.observe(w, r)
+		w, r = writer, request
+		defer finish()
+	}
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	w.Header().Set("X-Frame-Options", "DENY")

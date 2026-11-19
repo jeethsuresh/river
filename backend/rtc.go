@@ -51,9 +51,12 @@ func icePolicy() string {
 	return "all"
 }
 func (s *server) rtc(w http.ResponseWriter, r *http.Request, session gravitas.AppSession) {
-	req, _ := http.NewRequestWithContext(r.Context(), "GET", s.upstream(r.Context()).Issuer+"/app/v1/rtc", nil)
+	upstream := s.upstream(r.Context())
+	req, _ := http.NewRequestWithContext(r.Context(), "GET", upstream.Issuer+"/app/v1/rtc", nil)
 	req.Header.Set("Authorization", "Bearer "+session.LocalToken)
-	response, err := s.upstream(r.Context()).HTTP.Do(req)
+	finish := s.observeIAMPermissions(req, upstream.Issuer)
+	response, err := upstream.HTTP.Do(req)
+	finish(response, err)
 	if err != nil {
 		fail(w, 503, "Gravitas permissions are temporarily unavailable")
 		return
