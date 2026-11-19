@@ -10,18 +10,25 @@ List<MatrixEvent> renderMatrixTimeline(List<MatrixEvent> raw, String? ownUser) {
   final redactions = {
     for (final event in events)
       if (event['type'] == 'm.room.redaction')
-        event['redacts'] ?? (event['content'] as Map?)?['redacts'],
+        (
+          event['room_id'],
+          event['redacts'] ?? (event['content'] as Map?)?['redacts'],
+        ),
   };
   bool redacted(MatrixEvent e) =>
       (e['unsigned'] as Map?)?['redacted_because'] != null ||
-      redactions.contains(e['event_id']);
+      redactions.contains((e['room_id'], e['event_id']));
   for (final event in events) {
     if (redacted(event)) continue;
     final content = event['content'] as Map? ?? {};
     final relation = content['m.relates_to'] as Map? ?? {};
     final target = relation['event_id'];
     final original = byId[target];
-    if (original == null || redacted(original)) continue;
+    if (original == null ||
+        original['room_id'] != event['room_id'] ||
+        redacted(original)) {
+      continue;
+    }
     if (relation['rel_type'] == 'm.replace' &&
         event['sender'] == original['sender'] &&
         event['type'] == original['type'] &&

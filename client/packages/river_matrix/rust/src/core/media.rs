@@ -30,6 +30,7 @@ impl MatrixCore {
         );
         let room = self.writable_room(&room)?;
         room.request_encryption_state().await.map_err(sdk_error)?;
+        self.check_fallback_send(&room).await?;
         let mime: mime::Mime = content_type.parse()?;
         let config = AttachmentConfig::new().txn_id(transaction.into());
         let response = room
