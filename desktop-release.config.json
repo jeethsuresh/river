@@ -2,13 +2,13 @@
   "name": "River",
   "directory": "client",
   "engine": "flutter",
-  "version": "0.16.6",
-  "versionCode": 16006,
+  "version": "0.16.7",
+  "versionCode": 16007,
   "flutterVersion": "3.47.7",
   "flutterRevision": "abaf9c523780a608bd46686fd5e53740a07077f8",
   "defines": [],
   "changes": [
-    "Unencrypted messages and replies are labeled in chat history for everyone who can see them."
+    "River asks you to join a Matrix conversation before sending a message or attachment."
   ],
   "schemaVersion": 1,
   "slug": "river",

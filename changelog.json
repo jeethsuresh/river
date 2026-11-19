@@ -1,8 +1,8 @@
 {
   "schemaVersion": 1,
-  "version": "0.16.6",
-  "versionCode": 44,
+  "version": "0.16.7",
+  "versionCode": 45,
   "changes": [
-    "Unencrypted messages and replies are labeled in chat history for everyone who can see them."
+    "River asks you to join a Matrix conversation before sending a message or attachment."
   ]
 }
