@@ -1,9 +1,9 @@
 {
   "schemaVersion": 1,
-  "version": "0.16.0",
-  "versionCode": 38,
+  "version": "0.16.2",
+  "versionCode": 40,
   "changes": [
-    "Send Gravitas contact requests from Home, Friends, or New conversation when no friend matches your search.",
-    "Keep the username when a contact request fails so you can correct it or retry."
+    "See River friends, incoming requests, and pending sent requests in the sidebar and mobile drawer.",
+    "Open a contact's actions from their sidebar entry."
   ]
 }
