@@ -171,7 +171,7 @@ async fn federated_round_trip(host: &MatrixCore, joiner: &MatrixCore, room: &Roo
     })
     .await
     .context("Federated invitation did not reach the other homeserver")??;
-    assert!(
+    assert_eq!(
         joiner
             .send(
                 room_id.clone(),
@@ -180,7 +180,23 @@ async fn federated_round_trip(host: &MatrixCore, joiner: &MatrixCore, room: &Roo
                 uuid::Uuid::new_v4().to_string(),
             )
             .await
-            .is_err()
+            .expect_err("An invite must not allow a message to be sent")
+            .to_string(),
+        "Join this conversation before sending."
+    );
+    assert_eq!(
+        joiner
+            .send_attachment(
+                room_id.clone(),
+                "pre-join.txt".into(),
+                "text/plain".into(),
+                b"must be rejected before joining".to_vec(),
+                uuid::Uuid::new_v4().to_string(),
+            )
+            .await
+            .expect_err("An invite must not allow an attachment to be uploaded")
+            .to_string(),
+        "Join this conversation before sending."
     );
 
     let response: Value = serde_json::from_str(
@@ -282,7 +298,7 @@ async fn federated_round_trip(host: &MatrixCore, joiner: &MatrixCore, room: &Roo
     joiner
         .action(json!({"action":"leave", "room":room_id}).to_string())
         .await?;
-    assert!(
+    assert_eq!(
         joiner
             .send(
                 room_id,
@@ -291,7 +307,9 @@ async fn federated_round_trip(host: &MatrixCore, joiner: &MatrixCore, room: &Roo
                 uuid::Uuid::new_v4().to_string(),
             )
             .await
-            .is_err()
+            .expect_err("A departed member must not send a message")
+            .to_string(),
+        "Join this conversation before sending."
     );
     println!(
         "RIVER MATRIX {}-hosted encrypted invite, join, bidirectional text/reply and media, and membership checks PASS",
