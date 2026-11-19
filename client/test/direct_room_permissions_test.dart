@@ -71,10 +71,7 @@ void main() {
             if (request.url.path == '/api/direct') {
               if (scenario == 'new') delegated.add({...sdk, 'owner': true});
               engine.nextRooms = [sdk];
-              return http.Response(
-                '{"id":"direct","room_id":"!direct:example.org"}',
-                200,
-              );
+              return http.Response(jsonEncode({...sdk, 'owner': true}), 200);
             }
             return http.Response(
               jsonEncode(
@@ -97,18 +94,16 @@ void main() {
 
         await api.conversation('Bob', ['@bob:example.org']);
         expect(api.selected, 'direct');
+        await api.send('direct', 'm.room.message', {
+          'body': 'The chat is ready',
+          'msgtype': 'm.text',
+        }, 'first');
+        expect(engine.sentEvents['first']?['room_id'], '!direct:example.org');
         expect(
           api.encrypted('direct'),
           encrypted || (canEncrypt && scenario != 'denied'),
         );
         expect(api.group('direct')?['can_encrypt'], canEncrypt);
-        if (scenario == 'denied') {
-          await api.send('direct', 'm.room.message', {
-            'body': 'The chat is ready',
-            'msgtype': 'm.text',
-          }, 'first');
-          expect(engine.sentEvents['first']?['room_id'], '!direct:example.org');
-        }
         final encrypts = engine.actions.where((a) => a['action'] == 'encrypt');
         expect(encrypts, hasLength(canEncrypt && !encrypted ? 1 : 0));
         expect(engine.actions.where((a) => a['action'] == 'state'), isEmpty);

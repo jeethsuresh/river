@@ -28,6 +28,7 @@ class FlowTransport extends FakeMatrixTransport {
   final historyCacheReads = <String>[];
   int syncs = 0;
   Completer<void>? syncGate;
+  final historyGates = <String, Completer<void>>{};
   @override
   Future<Json> sync() async {
     syncs++;
@@ -46,19 +47,23 @@ class FlowTransport extends FakeMatrixTransport {
   Future<Json> rooms() async => {'rooms': roomList};
 
   @override
-  Future<Json> history(String room, String? cursor) async => {
-    'events': [
-      {
-        'event_id': '\$message-$room',
-        'sender': '@alice:example.org',
-        'type': 'm.room.message',
-        'origin_server_ts': 1,
-        'content': {'body': 'Message in $room', 'msgtype': 'm.text'},
-      },
-      ...sentEvents.values.where((e) => e['room_id'] == room),
-    ],
-    'next_cursor': null,
-  };
+  Future<Json> history(String room, String? cursor) async {
+    if (historyGates[room] case final gate?) await gate.future;
+    return {
+      'events': [
+        {
+          'event_id': '\$message-$room',
+          'sender': '@alice:example.org',
+          'type': 'm.room.message',
+          'origin_server_ts': 1,
+          'content': {'body': 'Message in $room', 'msgtype': 'm.text'},
+        },
+        ...sentEvents.values.where((e) => e['room_id'] == room),
+      ],
+      'next_cursor': null,
+    };
+  }
+
   @override
   Future<Json> send(String room, String type, Json content, String txn) async {
     sendAttempts.add(txn);
@@ -299,12 +304,20 @@ void main() {
 
   for (final width in [390.0, 1200.0]) {
     testWidgets(
-      'picker, encrypted send retry and separate drafts at width $width',
+      'picker and encrypted send finish before history at width $width',
       (tester) async {
         await tester.binding.setSurfaceSize(Size(width, 1000));
         addTearDown(() => tester.binding.setSurfaceSize(null));
+        const wire = '!direct:example.org';
+        final history = Completer<void>();
+        final sync = Completer<void>();
         final engine = FlowTransport()
-          ..roomList = [room('old', '!old:example.org')];
+          ..roomList = [room('old', '!old:example.org')]
+          ..historyGates[wire] = history;
+        addTearDown(() {
+          if (!history.isCompleted) history.complete();
+          if (!sync.isCompleted) sync.complete();
+        });
         final saved = await device(engine);
         final delegated = [room('old', '!old:example.org')];
         final api =
@@ -315,9 +328,10 @@ void main() {
                 matrixStorage: saved.storage,
                 client: MockClient((r) async {
                   if (r.url.path == '/api/direct') {
-                    delegated.add(room('direct', '!direct:example.org'));
-                    engine.roomList = List.of(delegated);
-                    return http.Response('{"id":"direct"}', 200);
+                    final direct = {...room('direct', wire), 'kind': 'dm'};
+                    delegated.add(direct);
+                    engine.nextRooms = List.of(delegated);
+                    return http.Response(jsonEncode(direct), 200);
                   }
                   return http.Response(
                     jsonEncode(
@@ -342,6 +356,7 @@ void main() {
               ..loading = false;
         await api.matrix.bind(matrixProfile);
         await api.refresh();
+        engine.syncGate = sync;
         await tester.pumpWidget(
           MaterialApp(
             home: Scaffold(
@@ -363,10 +378,15 @@ void main() {
         await tester.pumpAndSettle();
         await tester.tap(find.text('Start conversation'));
         await tester.pumpAndSettle();
+        expect(find.text('Start conversation'), findsNothing);
         expect(api.selected, 'direct');
-        expect(engine.actions.any((a) => a['action'] == 'encrypt'), true);
         await tester.pumpWidget(RiverApp(api: api, boot: false));
         await tester.pumpAndSettle();
+        expect(find.text('Loading messages…'), findsOneWidget);
+        expect(engine.actions.where((a) => a['action'] == 'encrypt'), isEmpty);
+        sync.complete();
+        await tester.pumpAndSettle();
+        expect(engine.actions.any((a) => a['action'] == 'encrypt'), true);
         await tester.ensureVisible(find.text('Markdown'));
         await tester.tap(find.text('Markdown'));
         await tester.pumpAndSettle();
@@ -391,12 +411,15 @@ void main() {
         expect(engine.sendAttempts, hasLength(2));
         expect(engine.sendAttempts.toSet(), hasLength(1));
         expect(engine.sentEvents, hasLength(1));
+        expect(engine.sentEvents.values.single['room_id'], wire);
         expect(
           api.events.where(
             (e) => e['content']['body'] == 'A message with a lost response',
           ),
           hasLength(1),
         );
+        history.complete();
+        await tester.pumpAndSettle();
         await tester.enterText(find.byType(TextField).last, 'Direct draft');
         await api.open('old');
         await tester.pumpAndSettle();

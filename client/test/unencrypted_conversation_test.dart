@@ -199,23 +199,26 @@ void main() {
       );
       await api.messageFriend(bob);
       expect(api.selected, 'direct');
-      expect(
-        engine.actions.where((a) => a['action'] == 'encrypt'),
-        hasLength(1),
-      );
       await api.send('direct', 'm.room.message', {
         'body': 'Hi',
         'msgtype': 'm.text',
       }, 'first');
+      expect(
+        engine.actions.where((a) => a['action'] == 'encrypt'),
+        hasLength(1),
+      );
       expect(engine.sentEvents['first']?['room_id'], secureRoom);
     },
   );
 
   test(
-    'an ambiguous fallback delivery retries only its original route',
+    'verification rejection falls back with stale eligibility and retries in place',
     () async {
       final engine = FallbackTransport()..encryptionBlocked = true;
-      final api = await openConversation(engine);
+      final secure = dm('direct', secureRoom, encrypted: true)
+        ..remove('can_use_fallback');
+      final api = await openConversation(engine, roomSnapshot: [secure]);
+      expect(api.canSendUnencrypted('direct'), isFalse);
       final body = {'body': 'Keep this message', 'msgtype': 'm.text'};
       engine.loseSendResponse = true;
       await expectLater(
@@ -264,6 +267,30 @@ void main() {
       isEmpty,
     );
   });
+
+  test(
+    'an encrypted history room never replaces the Gravitas send route',
+    () async {
+      final canonical = dm('direct', secureRoom, encrypted: false);
+      final legacy = dm('older', olderRoom, encrypted: true);
+      final engine = FallbackTransport();
+      final api = await openConversation(
+        engine,
+        roomSnapshot: [canonical, legacy],
+        delegated: [canonical],
+      );
+      expect(
+        api.conversationWires('direct'),
+        containsAll([secureRoom, olderRoom]),
+      );
+      final sent = await api.send('direct', 'm.room.message', {
+        'body': 'Use the Gravitas room',
+        'msgtype': 'm.text',
+      }, 'canonical');
+      expect(sent['river_room_id'], secureRoom);
+      expect(engine.routes, [(secureRoom, 'canonical')]);
+    },
+  );
 
   test(
     'attachments and replies fall back within the same conversation',
@@ -331,6 +358,7 @@ void main() {
       expect(api.conversationForWire(olderRoom)?['id'], 'second');
       await api.conversation('Same conversation', [carol, bob]);
       expect(api.selected, 'second');
+      await pumpEventQueue();
       expect(api.events.map((e) => e['room_id']).toSet(), {
         olderRoom,
         secureRoom,

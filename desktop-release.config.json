@@ -2,13 +2,15 @@
   "name": "River",
   "directory": "client",
   "engine": "flutter",
-  "version": "0.16.7",
-  "versionCode": 16007,
+  "version": "0.16.8",
+  "versionCode": 16008,
   "flutterVersion": "3.47.7",
   "flutterRevision": "abaf9c523780a608bd46686fd5e53740a07077f8",
   "defines": [],
   "changes": [
-    "River asks you to join a Matrix conversation before sending a message or attachment."
+    "New River conversations open while message history loads.",
+    "Private conversation lists load faster when member details need to sync.",
+    "Private chats can recover from a device verification error using a participant-checked unencrypted route."
   ],
   "schemaVersion": 1,
   "slug": "river",

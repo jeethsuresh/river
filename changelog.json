@@ -1,8 +1,10 @@
 {
   "schemaVersion": 1,
-  "version": "0.16.7",
-  "versionCode": 45,
+  "version": "0.16.8",
+  "versionCode": 46,
   "changes": [
-    "River asks you to join a Matrix conversation before sending a message or attachment."
+    "New River conversations open while message history loads.",
+    "Private conversation lists load faster when member details need to sync.",
+    "Private chats can recover from a device verification error using a participant-checked unencrypted route."
   ]
 }

@@ -1853,7 +1853,9 @@ class _RiverShellState extends State<RiverShell> {
               : items.isEmpty
               ? Center(
                   child: Text(
-                    'Start the ${viewFilter == 'Chat' ? 'conversation' : viewFilter.toLowerCase()}.',
+                    app.loadingOpenHistory
+                        ? 'Loading messages…'
+                        : 'Start the conversation.',
                     style: const TextStyle(color: muted),
                   ),
                 )
