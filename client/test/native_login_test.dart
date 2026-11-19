@@ -103,17 +103,34 @@ void main() {
   ) async {
     final f = NativeLoginFixture();
     await tester.pumpWidget(RiverApp(api: f.api, boot: false));
-    await tester.enterText(find.byType(TextField), 'alice');
-    await tester.tap(find.text('🔥'));
+    await tester.tap(find.text('Continue with Gravitas'));
     await tester.pump();
     await f.polling.future;
     f.approval.complete(http.Response('{"session":"approved-session"}', 200));
     await tester.pumpAndSettle();
     expect(f.api.user, matrixProfile);
     expect(find.byKey(const ValueKey('required-matrix-setup')), findsOneWidget);
-    expect(find.text('🔥'), findsNothing);
+    expect(find.text('Continue with Gravitas'), findsNothing);
     expect(await f.api.storage.read(key: 'river_native_pending'), isNull);
     expect(await f.api.storage.read(key: 'river_session'), 'approved-session');
+    await tester.pumpWidget(const SizedBox());
+  });
+
+  testWidgets('declining app access clears the pending device login', (
+    tester,
+  ) async {
+    final f = NativeLoginFixture();
+    await tester.pumpWidget(RiverApp(api: f.api, boot: false));
+    await tester.tap(find.text('Continue with Gravitas'));
+    await tester.pump();
+    await f.polling.future;
+    f.approval.complete(http.Response('{"status":"access_denied"}', 200));
+    await tester.pumpAndSettle();
+    expect(find.text('Access was declined.'), findsOneWidget);
+    expect(find.text('Continue with Gravitas'), findsOneWidget);
+    expect(f.api.user, isNull);
+    expect(f.api.token, isNull);
+    expect(await f.api.storage.read(key: 'river_native_pending'), isNull);
     await tester.pumpWidget(const SizedBox());
   });
 
@@ -127,8 +144,7 @@ void main() {
           'session_id': '11111111-1111-4111-8111-111111111111',
         };
       await tester.pumpWidget(RiverApp(api: f.api, boot: false));
-      await tester.enterText(find.byType(TextField), 'alice');
-      await tester.tap(find.text('🔥'));
+      await tester.tap(find.text('Continue with Gravitas'));
       await tester.pumpAndSettle();
       expect(f.api.user, matrixProfile);
       expect(f.brokerExchanges, 1);
@@ -155,8 +171,7 @@ void main() {
           ..brokerRejected = true
           ..brokerStatus = status;
         await tester.pumpWidget(RiverApp(api: f.api, boot: false));
-        await tester.enterText(find.byType(TextField), 'alice');
-        await tester.tap(find.text('🔥'));
+        await tester.tap(find.text('Continue with Gravitas'));
         await tester.pump();
         await f.polling.future;
         f.approval.complete(
@@ -176,8 +191,7 @@ void main() {
   ) async {
     final f = NativeLoginFixture()..sessionUnavailable = true;
     await tester.pumpWidget(RiverApp(api: f.api, boot: false));
-    await tester.enterText(find.byType(TextField), 'alice');
-    await tester.tap(find.text('🔥'));
+    await tester.tap(find.text('Continue with Gravitas'));
     await tester.pump();
     await f.polling.future;
     f.approval.complete(http.Response('{"session":"approved-session"}', 200));
@@ -187,14 +201,14 @@ void main() {
     expect(await f.api.storage.read(key: 'river_native_pending'), isNull);
     expect(find.byKey(const ValueKey('finish-native-sign-in')), findsOneWidget);
     expect(find.text('Retry sign-in'), findsOneWidget);
-    expect(find.text('🔥'), findsNothing);
+    expect(find.text('Continue with Gravitas'), findsNothing);
 
     f.sessionUnavailable = false;
     await f.api.resumeAuthentication();
     await tester.pumpAndSettle();
     expect(f.api.user, matrixProfile);
     expect(find.byKey(const ValueKey('required-matrix-setup')), findsOneWidget);
-    expect(find.text('🔥'), findsNothing);
+    expect(find.text('Continue with Gravitas'), findsNothing);
     expect(f.sessionReads, greaterThan(1));
     await tester.pumpWidget(const SizedBox());
   });
@@ -204,8 +218,7 @@ void main() {
   ) async {
     final f = NativeLoginFixture()..pollFailures = 1;
     await tester.pumpWidget(RiverApp(api: f.api, boot: false));
-    await tester.enterText(find.byType(TextField), 'alice');
-    await tester.tap(find.text('🔥'));
+    await tester.tap(find.text('Continue with Gravitas'));
     await tester.pump();
     await f.polling.future;
     expect(await f.api.storage.read(key: 'river_native_pending'), isNotNull);
@@ -239,24 +252,24 @@ void main() {
     await tester.pumpWidget(const SizedBox());
   });
 
-  testWidgets('an expired approval reports the failure beside the username', (
-    tester,
-  ) async {
-    final f = NativeLoginFixture();
-    await tester.pumpWidget(RiverApp(api: f.api, boot: false));
-    await tester.enterText(find.byType(TextField), 'alice');
-    await tester.tap(find.text('🔥'));
-    await tester.pump();
-    await f.polling.future;
-    f.approval.complete(http.Response('{"error":"expired"}', 403));
-    await tester.pumpAndSettle();
-    expect(f.api.user, isNull);
-    expect(f.api.token, isNull);
-    expect(find.text('Unable to connect. Please try again.'), findsOneWidget);
-    expect(await f.api.storage.read(key: 'river_native_pending'), isNull);
-    expect(f.api.pairingLabel, isNull);
-    await tester.pumpWidget(const SizedBox());
-  });
+  testWidgets(
+    'an expired approval reports the failure beside the continue action',
+    (tester) async {
+      final f = NativeLoginFixture();
+      await tester.pumpWidget(RiverApp(api: f.api, boot: false));
+      await tester.tap(find.text('Continue with Gravitas'));
+      await tester.pump();
+      await f.polling.future;
+      f.approval.complete(http.Response('{"error":"expired"}', 403));
+      await tester.pumpAndSettle();
+      expect(f.api.user, isNull);
+      expect(f.api.token, isNull);
+      expect(find.text('Unable to connect. Please try again.'), findsOneWidget);
+      expect(await f.api.storage.read(key: 'river_native_pending'), isNull);
+      expect(f.api.pairingLabel, isNull);
+      await tester.pumpWidget(const SizedBox());
+    },
+  );
 
   testWidgets('a rejected session requires a fresh sign-in', (tester) async {
     final f = NativeLoginFixture()..sessionRejected = true;
@@ -272,7 +285,7 @@ void main() {
     expect(f.api.user, isNull);
     expect(await f.api.storage.read(key: 'river_session'), isNull);
     expect(find.byKey(const ValueKey('finish-native-sign-in')), findsNothing);
-    expect(find.text('🔥'), findsOneWidget);
+    expect(find.text('Continue with Gravitas'), findsOneWidget);
     await tester.pumpWidget(const SizedBox());
   });
 

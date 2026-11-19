@@ -37,6 +37,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends chromium python
     && rm -rf /var/lib/apt/lists/*
 COPY --from=matrix-web-build /out/pkg /src/client/web/pkg
 COPY scripts/test-matrix-browser.sh /src/scripts/test-matrix-browser.sh
+RUN CHROME_EXECUTABLE=/usr/bin/chromium flutter test --no-pub --platform chrome test/username_login_test.dart
 RUN bash /src/scripts/test-matrix-browser.sh
 
 FROM flutter-sdk AS matrix-browser-interop-client

@@ -1,9 +1,10 @@
 {
   "schemaVersion": 1,
-  "version": "0.16.0",
-  "versionCode": 38,
+  "version": "0.16.3",
+  "versionCode": 41,
   "changes": [
-    "Send Gravitas contact requests from Home, Friends, or New conversation when no friend matches your search.",
-    "Keep the username when a contact request fails so you can correct it or retry."
+    "Reuse an active Gravitas sign-in when opening the app in your browser.",
+    "Review and grant app access explicitly when connecting for the first time.",
+    "Continue with your existing Gravitas account from the installed app."
   ]
 }

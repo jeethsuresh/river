@@ -1,8 +1,50 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:river/username_login.dart';
 
 void main() {
+  for (final accessRequired in [true, false]) {
+    testWidgets(
+      'Existing account action waits for one explicit tap ($accessRequired)',
+      (tester) async {
+        var started = 0;
+        final completed = Completer<void>();
+        await tester.pumpWidget(
+          MaterialApp(
+            home: Scaffold(
+              body: UsernameLogin(
+                defaultDomain: 'gravitas.cool',
+                onSubmit: (_) async {},
+                onRegister: () async {},
+                onContinue: () {
+                  started++;
+                  return completed.future;
+                },
+                accessRequired: accessRequired,
+              ),
+            ),
+          ),
+        );
+        expect(find.byType(TextField), findsNothing);
+        expect(started, 0);
+        final action = find.text(
+          accessRequired ? 'Grant access' : 'Continue with Gravitas',
+        );
+        await tester.tap(action);
+        await tester.tap(action);
+        await tester.pump();
+        expect(find.text('Connecting…'), findsOneWidget);
+        expect(started, 1);
+        completed.complete();
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('Use another account'));
+        await tester.pumpAndSettle();
+        expect(find.byType(TextField), findsOneWidget);
+      },
+    );
+  }
   testWidgets(
     'username supports Enter and fire while registration uses the configured domain',
     (tester) async {

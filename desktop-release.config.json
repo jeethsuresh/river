@@ -2,14 +2,15 @@
   "name": "River",
   "directory": "client",
   "engine": "flutter",
-  "version": "0.16.0",
-  "versionCode": 16000,
+  "version": "0.16.3",
+  "versionCode": 16003,
   "flutterVersion": "3.47.7",
   "flutterRevision": "abaf9c523780a608bd46686fd5e53740a07077f8",
   "defines": [],
   "changes": [
-    "Send Gravitas contact requests from Home, Friends, or New conversation when no friend matches your search.",
-    "Keep the username when a contact request fails so you can correct it or retry."
+    "Reuse an active Gravitas sign-in when opening the app in your browser.",
+    "Review and grant app access explicitly when connecting for the first time.",
+    "Continue with your existing Gravitas account from the installed app."
   ],
   "schemaVersion": 1,
   "slug": "river",
