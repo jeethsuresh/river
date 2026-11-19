@@ -839,6 +839,11 @@ class _RiverShellState extends State<RiverShell> {
               const SizedBox(height: 32),
               UsernameLogin(
                 defaultDomain: app.defaultDomain,
+                onContinue: !kIsWeb || app.grantAccessRequired
+                    ? () => app.login()
+                    : null,
+                accessRequired: app.grantAccessRequired,
+                accessDenied: app.accessDenied,
                 onSubmit: (username) => app.login(username: username),
                 onRegister: () => app.login(register: true),
               ),

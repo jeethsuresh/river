@@ -44,7 +44,8 @@ void main() {
       await RustLib.init();
       await tester.pumpWidget(RiverApp(api: api, boot: false));
       await tester.pumpAndSettle();
-      expect(find.widgetWithText(TextField, 'Username'), findsOneWidget);
+      expect(find.text('Continue with Gravitas'), findsOneWidget);
+      expect(find.widgetWithText(TextField, 'Username'), findsNothing);
       await tester.pumpWidget(const SizedBox());
       expect(tester.takeException(), isNull);
     },

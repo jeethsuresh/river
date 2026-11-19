@@ -1415,6 +1415,16 @@ class RiverApi extends ChangeNotifier {
     }
   }
 
+  bool get grantAccessRequired =>
+      kIsWeb &&
+      const {
+        'consent_required',
+        'access_denied',
+      }.contains(Uri.base.queryParameters['gravitas']);
+
+  bool get accessDenied =>
+      kIsWeb && Uri.base.queryParameters['gravitas'] == 'access_denied';
+
   Future<void> _login({
     String? next,
     String? username,
@@ -1594,6 +1604,12 @@ class RiverApi extends ChangeNotifier {
             await storage.delete(key: 'river_native_pending');
           });
           return;
+        }
+        if (result['status'] == 'access_denied') {
+          await _sessionStorage(
+            () => storage.delete(key: 'river_native_pending'),
+          );
+          throw StateError('Access was declined.');
         }
         await Future<void>.delayed(const Duration(seconds: 2));
       }

@@ -30,6 +30,7 @@ const SessionLifetime = 8 * time.Hour
 
 var ErrLoginRequired = errors.New("login required")
 var ErrConsentRequired = errors.New("consent required")
+var ErrAccessDenied = errors.New("access denied")
 
 func HasSharedSignInHint(r *http.Request) bool {
 	marker, err := r.Cookie(SharedSignInCookie)
@@ -266,6 +267,9 @@ func (c *Client) Callback(w http.ResponseWriter, r *http.Request) (Authorization
 		}
 		if failure == "consent_required" && f.Silent {
 			return identity, f.Next, ErrConsentRequired
+		}
+		if failure == "access_denied" {
+			return identity, f.Next, ErrAccessDenied
 		}
 		return identity, f.Next, errors.New("IAM sign-in was not completed")
 	}
