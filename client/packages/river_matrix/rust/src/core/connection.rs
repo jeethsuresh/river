@@ -474,6 +474,10 @@ impl MatrixCore {
     pub(crate) fn writable_room(&self, id: &str) -> Result<Room> {
         let room = self.room(id)?;
         ensure!(
+            room.state() == RoomState::Joined,
+            "Join this conversation before sending."
+        );
+        ensure!(
             !room.is_tombstoned(),
             "This conversation is moving to a compatible room. Try again in a moment."
         );
