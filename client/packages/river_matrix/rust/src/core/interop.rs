@@ -905,6 +905,15 @@ async fn direct_room_permissions(first: &MatrixCore) -> Result<()> {
             .await?,
     )?;
     assert!(result["event_id"].is_string());
+    // Keep the nested Matrix setup futures off the fixture thread's stack.
+    Box::pin(unverified_session_delivery(&fresh, &peer)).await?;
+    fresh.close(true).await?;
+    peer.close(true).await?;
+    println!("RIVER MATRIX new/encrypted/legacy DM permissions and unchanged ACL PASS");
+    Ok(())
+}
+
+async fn unverified_session_delivery(fresh: &MatrixCore, peer: &MatrixCore) -> Result<()> {
     let mut request = create_room::v3::Request::new();
     request.preset = Some(create_room::v3::RoomPreset::PrivateChat);
     request.invite = vec![peer.own_user.clone()];
@@ -913,9 +922,9 @@ async fn direct_room_permissions(first: &MatrixCore) -> Result<()> {
         "content": {"algorithm": "m.megolm.v1.aes-sha2"},
     }))?];
     let encrypted = fresh.client.create_room(request).await?;
-    step(&[&fresh, &peer]).await?;
+    step(&[fresh, peer]).await?;
     peer.client.join_room_by_id(encrypted.room_id()).await?;
-    step(&[&fresh, &peer]).await?;
+    step(&[fresh, peer]).await?;
     let transaction = uuid::Uuid::new_v4().to_string();
     let content = json!({"msgtype": "m.text", "body": "Send from an unverified session"});
     let blocked: Value = serde_json::from_str(
@@ -930,14 +939,14 @@ async fn direct_room_permissions(first: &MatrixCore) -> Result<()> {
     )?;
     assert_eq!(blocked, json!({"encryption_unavailable": true}));
     let fallback: Value =
-        serde_json::from_str(&fresh.open_fallback(encrypted.room_id().as_str()).await?)?;
+        serde_json::from_str(&Box::pin(fresh.open_fallback(encrypted.room_id().as_str())).await?)?;
     let route = RoomId::parse(
         fallback["room_id"]
             .as_str()
             .context("Missing fallback room")?,
     )?;
-    step(&[&fresh, &peer]).await?;
-    step(&[&fresh, &peer]).await?;
+    step(&[fresh, peer]).await?;
+    step(&[fresh, peer]).await?;
     let sent: Value = serde_json::from_str(
         &fresh
             .send(
@@ -964,9 +973,6 @@ async fn direct_room_permissions(first: &MatrixCore) -> Result<()> {
         .await?;
     let delivered: Value = serde_json::from_str(delivered.event.json().get())?;
     assert_eq!(delivered["content"], content);
-    fresh.close(true).await?;
-    peer.close(true).await?;
-    println!("RIVER MATRIX new/encrypted/legacy DM permissions and unchanged ACL PASS");
     Ok(())
 }
 
@@ -1270,7 +1276,7 @@ async fn qr_verification_recovers_historical_encrypted_messages() -> Result<()> 
         recovered,
         "Recovery-key device did not decrypt historical messages"
     );
-    direct_room_permissions(&first).await?;
+    Box::pin(direct_room_permissions(&first)).await?;
     automatic_room_replacements(&first).await?;
     restored_member_cache(&first).await?;
     encrypted_notification_previews(&first).await?;
