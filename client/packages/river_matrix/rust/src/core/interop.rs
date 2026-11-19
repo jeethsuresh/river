@@ -3,7 +3,7 @@
 use super::connection::MatrixCore;
 use anyhow::{Context, Result};
 use matrix_sdk::{
-    Client,
+    Client, ClientBuilder,
     ruma::{api::client::room::create_room, events::StateEventType},
 };
 use serde_json::{Value, json};
@@ -14,6 +14,14 @@ async fn device(name: &str) -> Result<MatrixCore> {
 }
 
 async fn device_as(name: &str, user: &str) -> Result<MatrixCore> {
+    device_as_with(name, user, |builder| builder).await
+}
+
+async fn device_as_with(
+    name: &str,
+    user: &str,
+    customize: impl FnOnce(ClientBuilder) -> ClientBuilder,
+) -> Result<MatrixCore> {
     let homeserver = std::env::var("MATRIX_TEST_HOMESERVER")?;
     anyhow::ensure!(
         homeserver == "https://native.test:8448",
@@ -22,7 +30,7 @@ async fn device_as(name: &str, user: &str) -> Result<MatrixCore> {
     let ca = std::fs::read(std::env::var("MATRIX_TEST_CA")?)?;
     let _ = rustls::crypto::ring::default_provider().install_default();
     let store = std::env::temp_dir().join(format!("river-matrix-test-{}", uuid::Uuid::new_v4()));
-    let client = Client::builder()
+    let client = customize(Client::builder())
         .homeserver_url(homeserver)
         .with_encryption_settings(matrix_sdk::encryption::EncryptionSettings {
             backup_download_strategy:
@@ -462,8 +470,6 @@ async fn direct_room_permissions(first: &MatrixCore) -> Result<()> {
         legacy.room_id()
     );
     step(&[first, &peer]).await?;
-    peer.action(json!({"action": "join", "room": fallback_id}).to_string())
-        .await?;
     step(&[first, &peer]).await?;
     for core in [first, &peer] {
         let rooms: Value = serde_json::from_str(&core.rooms().await?)?;
@@ -571,6 +577,64 @@ async fn direct_room_permissions(first: &MatrixCore) -> Result<()> {
             .to_string()
             .contains("new DM stays encrypted")
     );
+    let fresh = device_as_with(
+        &format!("RIVER-PLAIN-{}", uuid::Uuid::new_v4()),
+        "deactclient",
+        |builder| {
+            builder.with_room_key_recipient_strategy(
+                matrix_sdk_crypto::CollectStrategy::IdentityBasedStrategy,
+            )
+        },
+    )
+    .await?;
+    let result: Value = serde_json::from_str(
+        &fresh
+            .action(
+                json!({
+                    "action":"direct", "user":peer.own_user, "prefer_encryption":false,
+                })
+                .to_string(),
+            )
+            .await?,
+    )?;
+    let wire = result["room_id"]
+        .as_str()
+        .context("Plain direct room missing")?;
+    step(&[&fresh, &peer]).await?;
+    let room = fresh.room(wire)?;
+    assert!(!room.encryption_state().is_encrypted());
+    let result: Value = serde_json::from_str(
+        &fresh
+            .send(
+                wire.into(),
+                "m.room.message".into(),
+                json!({"msgtype":"m.text", "body":"direct chat without verification"}).to_string(),
+                uuid::Uuid::new_v4().to_string(),
+            )
+            .await?,
+    )?;
+    assert!(result["event_id"].is_string());
+    let mut request = create_room::v3::Request::new();
+    request.invite = vec![peer.own_user.clone()];
+    request.initial_state = vec![serde_json::from_value(json!({
+        "type": "m.room.encryption", "state_key": "",
+        "content": {"algorithm": "m.megolm.v1.aes-sha2"},
+    }))?];
+    let encrypted = fresh.client.create_room(request).await?;
+    step(&[&fresh, &peer]).await?;
+    let blocked: Value = serde_json::from_str(
+        &fresh
+            .send(
+                encrypted.room_id().to_string(),
+                "m.room.message".into(),
+                json!({"msgtype":"m.text", "body":"encryption requires device verification"})
+                    .to_string(),
+                uuid::Uuid::new_v4().to_string(),
+            )
+            .await?,
+    )?;
+    assert_eq!(blocked, json!({"encryption_unavailable": true}));
+    fresh.close(true).await?;
     peer.close(true).await?;
     println!("RIVER MATRIX new/encrypted/legacy DM permissions and unchanged ACL PASS");
     Ok(())

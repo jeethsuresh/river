@@ -12,6 +12,17 @@ use anyhow::{Context, Result, bail, ensure};
 pub(crate) fn sdk_error(error: impl std::fmt::Display) -> anyhow::Error {
     anyhow::anyhow!("{error}")
 }
+
+// These failures occur while preparing encryption, before a room event is
+// submitted. HTTP failures may have committed the send and must stay on its
+// original transaction and room.
+pub(super) fn encryption_unavailable(error: &matrix_sdk::Error) -> bool {
+    matches!(error, matrix_sdk::Error::NoOlmMachine)
+        || matches!(error, matrix_sdk::Error::OlmError(error)
+            if matches!(error.as_ref(), matrix_sdk::encryption::OlmError::SessionRecipientCollectionError(_)))
+}
+
+pub(super) const ENCRYPTION_UNAVAILABLE: &str = r#"{"encryption_unavailable":true}"#;
 fn sync_error(error: matrix_sdk::Error) -> anyhow::Error {
     if matches!(
         error.client_api_error_kind(),
@@ -335,6 +346,10 @@ impl MatrixCore {
         let replacements = self.follow_room_upgrades().await;
         let mut rooms = Vec::new();
         for room in self.client.rooms() {
+            if room.state() == RoomState::Invited {
+                // Keep a failed automatic join visible as an invitation.
+                let _ = self.join_conversation_fallback(&room).await;
+            }
             let membership = match room.state() {
                 RoomState::Joined => "join",
                 RoomState::Invited => "invite",
@@ -375,6 +390,7 @@ impl MatrixCore {
             } else {
                 None
             };
+            let participants = self.conversation_participants(&room, &fallback).await;
             let heroes = room.heroes().await;
             let mut profiles: Vec<Value> = heroes
                 .iter()
@@ -420,6 +436,7 @@ impl MatrixCore {
                 "avatar_url": avatar,
                 "heroes": profiles,
                 "direct_peer": direct_peer,
+                "conversation_participants": participants,
                 "is_fallback_room": fallback.is_some(),
                 "fallback_for": fallback_for,
                 "can_use_fallback": fallback.is_none() && super::conversation::private_chat(&room),
@@ -509,12 +526,22 @@ impl MatrixCore {
         room.request_encryption_state().await.map_err(sdk_error)?;
         self.check_fallback_send(&room).await?;
         let transaction: matrix_sdk::ruma::OwnedTransactionId = transaction.into();
-        let response = room
+        let response = match room
             .send_raw(&event_type, content)
             .with_transaction_id(&transaction)
             .await
-            .map_err(sdk_error)?;
-        Ok(json!({"event_id": response.response.event_id}).to_string())
+        {
+            Ok(response) => response,
+            Err(error) if event_type == "m.room.message" && encryption_unavailable(&error) => {
+                return Ok(ENCRYPTION_UNAVAILABLE.into());
+            }
+            Err(error) => return Err(sdk_error(error)),
+        };
+        Ok(json!({
+            "event_id": response.response.event_id,
+            "river_encrypted": response.encryption_info.is_some(),
+        })
+        .to_string())
     }
 
     pub async fn action(&self, payload: String) -> Result<String> {
@@ -600,6 +627,7 @@ impl MatrixCore {
                         }
                     }
                 }
+                let prefer_encryption = data["prefer_encryption"].as_bool() != Some(false);
                 let (room, created) = match current {
                     Some(room) => (room, false),
                     None => {
@@ -607,23 +635,24 @@ impl MatrixCore {
                             !pending && self.client.get_dm_rooms(&user).next().is_none(),
                             "This conversation is moving to a compatible room. Try again in a moment."
                         );
-                        (self.client.create_dm(&user).await.map_err(sdk_error)?, true)
+                        let room = if prefer_encryption {
+                            self.client.create_dm(&user).await
+                        } else {
+                            self.create_plain_direct(&user).await
+                        };
+                        (room.map_err(sdk_error)?, true)
                     }
                 };
-                room.request_encryption_state().await.map_err(sdk_error)?;
-                if created {
-                    // SDK create_dm sends encryption in initial_state. Never
-                    // accept a new plaintext room if the server omitted it.
-                    ensure!(
-                        room.encryption_state().is_encrypted(),
-                        "New direct rooms must be encrypted"
-                    );
-                } else if data["prefer_encryption"].as_bool() != Some(false)
+                if !created
+                    && prefer_encryption
+                    && room.request_encryption_state().await.is_ok()
                     && !room.encryption_state().is_encrypted()
                 {
                     let power = room.power_levels_or_default().await;
                     if power.user_can_send_state(&self.own_user, StateEventType::RoomEncryption) {
-                        room.enable_encryption().await.map_err(sdk_error)?;
+                        // The existing chat is already writable. Enabling
+                        // encryption is opportunistic during conversation open.
+                        let _ = room.enable_encryption().await;
                     }
                 }
                 return Ok(json!({"room_id": room.room_id()}).to_string());

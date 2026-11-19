@@ -2,14 +2,15 @@
   "name": "River",
   "directory": "client",
   "engine": "flutter",
-  "version": "0.16.4",
-  "versionCode": 16004,
+  "version": "0.16.5",
+  "versionCode": 16005,
   "flutterVersion": "3.47.7",
   "flutterRevision": "abaf9c523780a608bd46686fd5e53740a07077f8",
   "defines": [],
   "changes": [
-    "See River friends, incoming requests, and pending sent requests in the sidebar.",
-    "Open a contact's actions from their sidebar entry."
+    "Open private chats even when this device cannot set up encryption.",
+    "Messages, replies, and attachments can automatically send unencrypted when encryption is unavailable.",
+    "River combines private chat history across rooms that share the same participants."
   ],
   "schemaVersion": 1,
   "slug": "river",

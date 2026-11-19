@@ -37,6 +37,35 @@ pub(super) fn private_chat(room: &Room) -> bool {
 }
 
 impl MatrixCore {
+    pub(super) async fn create_plain_direct(&self, peer: &UserId) -> matrix_sdk::Result<Room> {
+        let mut request = create_room::v3::Request::new();
+        request.preset = Some(create_room::v3::RoomPreset::PrivateChat);
+        request.invite = vec![peer.to_owned()];
+        request.is_direct = true;
+        self.client.create_room(request).await
+    }
+
+    pub(super) async fn conversation_participants(
+        &self,
+        room: &Room,
+        marker: &Option<Value>,
+    ) -> Option<BTreeSet<OwnedUserId>> {
+        if !private_chat(room) {
+            return None;
+        }
+        let participants = self.cached_participants(room).await.ok()?;
+        if participants.len() < 2 || !participants.contains(&self.own_user) {
+            return None;
+        }
+        if let Some(marker) = marker {
+            let link: FallbackLink = serde_json::from_value(marker["content"].clone()).ok()?;
+            if room.room_id() == link.conversation || participants != link.participants {
+                return None;
+            }
+        }
+        Some(participants)
+    }
+
     pub(super) async fn fallback_link(&self, room: &Room) -> Result<Option<Value>> {
         room.get_state_event(fallback_event_type(), "")
             .await
@@ -188,6 +217,11 @@ impl MatrixCore {
             serde_json::from_value(json!({"type": FALLBACK_EVENT, "state_key": "", "content": {
                 "conversation": origin.room_id(), "participants": participants,
             }}))?,
+            // Matrix includes topics in invite state. The reference lets a
+            // recipient with an existing conversation recognize its route.
+            serde_json::from_value(json!({"type": "m.room.topic", "state_key": "", "content": {
+                "topic": "Unencrypted River conversation", (FALLBACK_EVENT): origin.room_id(),
+            }}))?,
             serde_json::from_value(json!({"type": "m.room.guest_access", "state_key": "",
                 "content": {"guest_access": "forbidden"}}))?,
             serde_json::from_value(json!({"type": "m.room.history_visibility", "state_key": "",
@@ -197,6 +231,35 @@ impl MatrixCore {
         let id = room.room_id().to_owned();
         pending.insert(origin.room_id().to_owned(), id.clone());
         Ok(json!({"room_id": id}).to_string())
+    }
+
+    pub(super) async fn join_conversation_fallback(&self, room: &Room) -> Result<()> {
+        let Some(topic) = room
+            .get_state_event(StateEventType::RoomTopic, "")
+            .await
+            .map_err(sdk_error)?
+        else {
+            return Ok(());
+        };
+        let topic = serde_json::to_value(topic)?;
+        let Some(origin) = topic["content"][FALLBACK_EVENT]
+            .as_str()
+            .and_then(|id| self.room(id).ok())
+        else {
+            return Ok(());
+        };
+        let invite = room.invite_details().await.map_err(sdk_error)?;
+        if private_chat(&origin)
+            && matches!(room.join_rule(), Some(JoinRule::Invite))
+            && topic["sender"] == invite.inviter_id.as_str()
+            && self
+                .current_participants(origin.room_id())
+                .await?
+                .contains(&invite.inviter_id)
+        {
+            room.join().await.map_err(sdk_error)?;
+        }
+        Ok(())
     }
 
     pub(super) async fn check_fallback_send(&self, room: &Room) -> Result<()> {
