@@ -1,5 +1,17 @@
 typedef MatrixEvent = Map<String, dynamic>;
 
+const riverThreadRelation = 'cool.gravitas.river.thread.v1';
+
+Map? crossRoomThread(MatrixEvent event) {
+  final relation = (event['content'] as Map?)?[riverThreadRelation];
+  return relation is Map &&
+          relation['rel_type'] == 'm.thread' &&
+          relation['room_id'] is String &&
+          relation['event_id'] is String
+      ? relation
+      : null;
+}
+
 /// Render SDK-decrypted events in their supplied DAG order. Edits only apply
 /// to the same sender and event type; a relation is never an authorization.
 List<MatrixEvent> renderMatrixTimeline(List<MatrixEvent> raw, String? ownUser) {
@@ -21,6 +33,14 @@ List<MatrixEvent> renderMatrixTimeline(List<MatrixEvent> raw, String? ownUser) {
   for (final event in events) {
     if (redacted(event)) continue;
     final content = event['content'] as Map? ?? {};
+    final thread = crossRoomThread(event);
+    if (event['type'] == 'm.room.message' &&
+        thread != null &&
+        byId[thread['event_id']]?['room_id'] == thread['room_id']) {
+      replies
+          .putIfAbsent(thread['event_id'] as String, () => {})
+          .add(event['event_id'] as String);
+    }
     final relation = content['m.relates_to'] as Map? ?? {};
     final target = relation['event_id'];
     final original = byId[target];

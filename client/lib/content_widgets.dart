@@ -8,6 +8,7 @@ import 'package:flutter_markdown_plus/flutter_markdown_plus.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import 'api.dart';
+import 'matrix_timeline.dart';
 import 'comment_tree.dart';
 import 'publishing_widgets.dart';
 
@@ -832,6 +833,7 @@ class _ThreadScreenState extends State<ThreadScreen> {
   Json? root, parent;
   List<Json> events = [];
   String? cursor, error, payload;
+  bool sentUnencrypted = false;
   String txn = transactionId();
   bool loading = false, loaded = false, again = false, sending = false;
   final draft = TextEditingController(), scroll = ScrollController();
@@ -962,7 +964,7 @@ class _ThreadScreenState extends State<ThreadScreen> {
     }
     setState(() => sending = true);
     try {
-      await widget.app.send(
+      final result = await widget.app.send(
         widget.room,
         'm.room.message',
         c,
@@ -971,7 +973,10 @@ class _ThreadScreenState extends State<ThreadScreen> {
       );
       if (!mounted) return;
       if (draft.text.trim() == body) draft.clear();
-      setState(() => parent = null);
+      setState(() {
+        parent = null;
+        sentUnencrypted = result['river_encrypted'] == false;
+      });
       await load();
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted && scroll.hasClients) {
@@ -1053,8 +1058,16 @@ class _ThreadScreenState extends State<ThreadScreen> {
       padding: const EdgeInsets.symmetric(vertical: 8),
       child: Column(
         children: [
-          if (widget.app.isUnencryptedChat(widget.room, widget.eventRoom))
-            const Text('Replies are unencrypted'),
+          if (sentUnencrypted ||
+              widget.app.isUnencryptedChat(widget.room, widget.eventRoom))
+            Semantics(
+              liveRegion: true,
+              child: Text(
+                sentUnencrypted
+                    ? 'Reply sent unencrypted'
+                    : 'Replies are unencrypted',
+              ),
+            ),
           if (parent != null)
             Row(
               children: [
@@ -1098,7 +1111,8 @@ class _ThreadScreenState extends State<ThreadScreen> {
 }
 
 String? getReplyParent(Json e) =>
-    (((e['content'] as Json)['m.relates_to'] as Json?)?['m.in_reply_to']
+    (((crossRoomThread(e) ?? (e['content'] as Json)['m.relates_to'])
+                as Map?)?['m.in_reply_to']
             as Json?)?['event_id']
         as String?;
 

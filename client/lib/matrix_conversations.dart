@@ -1,23 +1,47 @@
+import 'dart:convert';
+
 import 'matrix_messaging.dart';
 
-/// A direct conversation is identified by the peer Matrix verified in its
-/// roster. A private group keeps its original identity and can have a linked
-/// room with the same roster. Invitations and archived rooms stay actionable.
-List<MatrixJson> combineMatrixConversations(Map<String, MatrixJson> byWire) {
-  final direct = <String, List<MatrixJson>>{};
+String matrixParticipantKey(Iterable<String> participants) =>
+    jsonEncode(participants.toSet().toList()..sort());
+
+/// Group joined private chats by their complete participant roster. Keep the
+/// Gravitas group as the representative so delegated actions retain their ID.
+List<MatrixJson> combineMatrixConversations(
+  Map<String, MatrixJson> byWire,
+  String? ownUser,
+) {
+  final conversations = <String, List<MatrixJson>>{};
+  final keys = <String, String>{};
   final anchors = <String, String>{};
   for (final room in byWire.values) {
+    if (!['dm', 'group'].contains(room['kind']) ||
+        room['membership'] != 'join' ||
+        room['replacement_room'] != null ||
+        room['upgrade_pending'] == true) {
+      continue;
+    }
+    final wire = room['room_id'] as String;
+    final participants = (room['conversation_participants'] as List?)
+        ?.whereType<String>()
+        .toSet();
     final peer = room['direct_peer'];
-    if (room['kind'] == 'dm' &&
-        room['membership'] == 'join' &&
-        room['replacement_room'] == null &&
-        room['upgrade_pending'] != true &&
-        peer is String) {
-      (direct[peer] ??= []).add(room);
+    if (participants != null &&
+        participants.length >= 2 &&
+        participants.contains(ownUser)) {
+      keys[wire] = matrixParticipantKey(participants);
+    } else if (room['kind'] == 'dm' && peer is String && ownUser != null) {
+      keys[wire] = matrixParticipantKey([ownUser, peer]);
+    }
+    if (keys[wire] case final key?) {
+      (conversations[key] ??= []).add(room);
     }
   }
-  for (final rooms in direct.values) {
+  for (final rooms in conversations.values) {
     rooms.sort((a, b) {
+      final aOrigin = a['is_fallback_room'] != true;
+      final bOrigin = b['is_fallback_room'] != true;
+      if (aOrigin != bOrigin) return aOrigin ? -1 : 1;
       final aDelegated = a['matrix_only'] != true;
       final bDelegated = b['matrix_only'] != true;
       if (aDelegated != bDelegated) return aDelegated ? -1 : 1;
@@ -33,7 +57,9 @@ List<MatrixJson> combineMatrixConversations(Map<String, MatrixJson> byWire) {
     if (room['membership'] == 'join' &&
         origin is String &&
         byWire[origin]?['membership'] == 'join' &&
-        ['dm', 'group'].contains(byWire[origin]?['kind'])) {
+        ['dm', 'group'].contains(byWire[origin]?['kind']) &&
+        (keys[room['room_id']] == null ||
+            keys[room['room_id']] == keys[origin])) {
       anchors[room['room_id'] as String] = anchors[origin] ?? origin;
     }
   }
@@ -55,6 +81,7 @@ List<MatrixJson> combineMatrixConversations(Map<String, MatrixJson> byWire) {
         if (histories[entry.key] case final rooms?)
           {
             ...entry.value,
+            'participant_key': keys[entry.key],
             'history_rooms': [for (final room in rooms) room['room_id']],
             'secure_room': rooms
                 .where(
@@ -73,7 +100,10 @@ List<MatrixJson> combineMatrixConversations(Map<String, MatrixJson> byWire) {
             ),
           }
         else
-          entry.value,
+          {
+            ...entry.value,
+            if (keys[entry.key] case final key?) 'participant_key': key,
+          },
   ];
 }
 

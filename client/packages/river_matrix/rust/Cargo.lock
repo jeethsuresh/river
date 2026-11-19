@@ -2836,6 +2836,7 @@ dependencies = [
  "jni",
  "matrix-sdk",
  "matrix-sdk-common",
+ "matrix-sdk-crypto",
  "matrix-sdk-store-encryption",
  "mime",
  "quircs",
