@@ -20,14 +20,22 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           repository: jeethsuresh/iam-server
-          ref: 525d49c6c42832d94943ae561f910eeb7104c59d
+          ref: 64f08188e34036ad1cff916387760a9aed97e5e0
           path: .matrix-server
           persist-credentials: false
-      - name: Build disposable protocol peers and River client
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069
+      - name: Build the test browser using the shared web build cache
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc
+        with:
+          context: .
+          target: matrix-browser-interop-client
+          cache-from: type=gha
+          load: true
+          tags: river-matrix-browser:test
+      - name: Build disposable protocol peers and native River client
         run: |
           docker build -f .matrix-server/Dockerfile.tests -t river-matrix-server:test .matrix-server
           docker build -f Dockerfile.matrix-tests -t river-matrix-client:test .
-          docker build --target matrix-browser-interop-client -t river-matrix-browser:test .
       - name: Verify encrypted federation, QR trust and key recovery
         run: |
           bash integration/matrix/run.sh river-matrix-server:test river-matrix-client:test .matrix-server river-matrix-browser:test > "$RUNNER_TEMP/matrix-modern.log" 2>&1 &
@@ -92,20 +100,30 @@ jobs:
           test "$(git -C "$RUNNER_TEMP/river-flutter" rev-parse HEAD)" = abaf9c523780a608bd46686fd5e53740a07077f8
       - name: Install pinned Rust
         run: bash scripts/matrix-toolchain.sh
+      - name: Set up the Rust compiler cache
+        id: rust-cache
+        uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
+        continue-on-error: true
+        with:
+          version: v0.16.0
+      - name: Enable the compiler cache
+        if: steps.rust-cache.outcome == 'success'
+        run: printf '%s\n' 'RUSTC_WRAPPER=sccache' 'CARGO_INCREMENTAL=0' >> "$GITHUB_ENV"
       - name: Prepare isolated Android HTTPS authentication fixture
         run: python3 scripts/android_matrix_fixture.py
       - name: Build shared Android client
         working-directory: client
         env:
           FLUTTER_SUPPRESS_ANALYTICS: 'true'
+          SCCACHE_GHA_ENABLED: 'true'
+          SCCACHE_GHA_RW_MODE: ${{ github.event_name == 'pull_request' && 'READ_ONLY' || 'READ_WRITE' }}
         run: |
           export JAVA_HOME="$JAVA_HOME_17_X64"
           export PATH="$JAVA_HOME/bin:$RUNNER_TEMP/river-flutter/bin:$PATH"
           flutter config --no-analytics
           flutter pub get --enforce-lockfile
           flutter build apk --debug --no-pub
-          ./android/gradlew --no-daemon -p android testDebugUnitTest
-          ./android/gradlew --no-daemon -p android :app:assembleDebugAndroidTest
+          ./android/gradlew --no-daemon -p android testDebugUnitTest :app:assembleDebugAndroidTest
           cp build/app/outputs/flutter-apk/app-debug.apk "$RUNNER_TEMP/river-auth-return.apk"
           cp build/app/outputs/apk/androidTest/debug/app-debug-androidTest.apk "$RUNNER_TEMP/river-push-tests.apk"
           flutter build apk --debug --no-pub --target tool/matrix_android_auth_smoke.dart
@@ -225,6 +243,8 @@ jobs:
     env:
       CSC_IDENTITY_AUTO_DISCOVERY: 'false'
       FLUTTER_SUPPRESS_ANALYTICS: 'true'
+      SCCACHE_GHA_ENABLED: 'true'
+      SCCACHE_GHA_RW_MODE: ${{ github.event_name == 'pull_request' && 'READ_ONLY' || 'READ_WRITE' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
       - name: Validate desktop version and changelog contract
@@ -242,6 +262,15 @@ jobs:
         run: sudo xcode-select --switch /Applications/Xcode_26.0.app/Contents/Developer
       - name: Install the pinned Matrix Rust toolchain
         run: bash scripts/matrix-toolchain.sh
+      - name: Set up the Rust compiler cache
+        id: rust-cache
+        uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
+        continue-on-error: true
+        with:
+          version: v0.16.0
+      - name: Enable the compiler cache
+        if: steps.rust-cache.outcome == 'success'
+        run: printf '%s\n' 'RUSTC_WRAPPER=sccache' 'CARGO_INCREMENTAL=0' >> "$GITHUB_ENV"
       - name: Install native Linux dependencies and credential service
         if: runner.os == 'Linux'
         run: |
