@@ -20,4 +20,4 @@ bash integration/matrix/run.sh river-matrix-server:test river-matrix-client:test
 bash integration/matrix/run.sh river-matrix-server:test river-matrix-client:test .matrix-server '' legacy
 ```
 
-The modern run also exercises existing device verification, recovery, and browser crypto tests. The legacy run exercises the federation regression with the Synapse 1.56 fixture and negotiated room versions.
+The modern run also exercises device verification, recovery, encrypted browser storage, private-room access by a separate account, and device-specific logout. The legacy run exercises the federation regression with the Synapse 1.56 fixture and negotiated room versions.

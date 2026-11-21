@@ -2,6 +2,7 @@
 import 'dart:convert';
 import 'dart:typed_data';
 import 'dart:ui' as ui;
+
 import 'package:http/http.dart' as http;
 import 'package:river_matrix/river_matrix.dart';
 import 'package:web/web.dart' as web;
@@ -17,6 +18,7 @@ Future<Json> request(
   String path, {
   Json? body,
   String? token,
+  int? expectedStatus,
 }) async {
   final response = await client.send(
     http.Request(method, Uri.parse('$homeserver$path'))
@@ -27,18 +29,22 @@ Future<Json> request(
       ..body = body == null ? '' : jsonEncode(body),
   );
   final data = jsonDecode(await response.stream.bytesToString()) as Json;
-  if (response.statusCode >= 400) {
-    throw StateError('Matrix test request failed: ${data['errcode']}');
+  if (expectedStatus != null
+      ? response.statusCode != expectedStatus
+      : response.statusCode >= 400) {
+    throw StateError(
+      '$method $path returned HTTP ${response.statusCode} (${data['errcode']})',
+    );
   }
   return data;
 }
 
-Future<Json> login(String device) => request(
+Future<Json> login(String device, {String user = 'deactclient'}) => request(
   'POST',
   '/_matrix/client/v3/login',
   body: {
     'type': 'm.login.password',
-    'identifier': {'type': 'm.id.user', 'user': 'deactclient'},
+    'identifier': {'type': 'm.id.user', 'user': user},
     'password': 'password123',
     'device_id': 'WEB-$device-$prefix',
   },
@@ -119,6 +125,7 @@ Future<void> main() async {
       '/_matrix/client/v3/createRoom',
       token: firstSession['access_token'] as String,
       body: {
+        'preset': 'private_chat',
         'initial_state': [
           {
             'type': 'm.room.encryption',
@@ -143,9 +150,11 @@ Future<void> main() async {
               ),
             )
             as Json;
+    final eventPath =
+        '/_matrix/client/v3/rooms/${Uri.encodeComponent(room)}/event/${Uri.encodeComponent(sent['event_id'] as String)}';
     final raw = await request(
       'GET',
-      '/_matrix/client/v3/rooms/${Uri.encodeComponent(room)}/event/${Uri.encodeComponent(sent['event_id'] as String)}',
+      eventPath,
       token: firstSession['access_token'] as String,
     );
     await verify(
@@ -277,8 +286,44 @@ Future<void> main() async {
       base64Encode(bytes) == base64Encode([7, 8, 9]),
       'Browser attachment decryption failed',
     );
+
+    progress('private room account isolation');
+    final outsider = await login('outsider', user: 'cryptoalice');
+    final outsiderToken = outsider['access_token'] as String;
+    final denied = await request(
+      'GET',
+      eventPath,
+      token: outsiderToken,
+      expectedStatus: 404,
+    );
+    await verify(
+      denied['errcode'] == 'M_NOT_FOUND',
+      'An unrelated account must not see private room events',
+    );
+    await request('POST', '/_matrix/client/v3/logout', token: outsiderToken);
+
+    progress('independent device logout');
     await first.close(logout: true);
     first.dispose();
+    final revoked = await request(
+      'GET',
+      '/_matrix/client/v3/account/whoami',
+      token: saved['access_token'] as String,
+      expectedStatus: 401,
+    );
+    await verify(
+      revoked['errcode'] == 'M_UNKNOWN_TOKEN',
+      'Closing with logout must revoke that browser device',
+    );
+    final active = await request(
+      'GET',
+      '/_matrix/client/v3/account/whoami',
+      token: secondSession['access_token'] as String,
+    );
+    await verify(
+      active['device_id'] == secondSession['device_id'],
+      'Signing out the first device must preserve the second device',
+    );
     await second.close(logout: true);
     second.dispose();
     result.textContent = 'RIVER_MATRIX_WEB_CRYPTO_PASS';
