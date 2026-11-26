@@ -140,7 +140,10 @@ jobs:
           # The installed APK is the tested artifact; compiler intermediates are
           # no longer needed and otherwise compete with the emulator for disk.
           rm -rf client/build
-          sudo chown "$(id -u):$(id -g)" /dev/kvm
+          if [ ! -r /dev/kvm ] || [ ! -w /dev/kvm ]; then
+            sudo chown "$(id -u):$(id -g)" /dev/kvm
+          fi
+          test -r /dev/kvm && test -w /dev/kvm
           sdkmanager 'platform-tools' 'emulator' 'system-images;android-35;google_apis;x86_64'
           printf 'no\n' | avdmanager create avd --force --name river-auth-return --path "$ANDROID_AVD_HOME/river-auth-return.avd" --package 'system-images;android-35;google_apis;x86_64'
           test -s "$ANDROID_AVD_HOME/river-auth-return.avd/config.ini"
