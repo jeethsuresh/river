@@ -12,7 +12,7 @@ concurrency:
 jobs:
   plan:
     if: github.ref == 'refs/heads/main'
-    runs-on: ubuntu-24.04
+    runs-on: gravitas-linux
     outputs:
       version: ${{ steps.release.outputs.version }}
       build: ${{ steps.release.outputs.build }}

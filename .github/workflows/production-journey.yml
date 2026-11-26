@@ -16,7 +16,7 @@ concurrency:
 jobs:
   journey:
     if: vars.RIVER_PRODUCTION_JOURNEY_ENABLED == 'true'
-    runs-on: ubuntu-24.04
+    runs-on: gravitas-linux
     timeout-minutes: 40
     env:
       FLUTTER_SUPPRESS_ANALYTICS: 'true'
