@@ -12,8 +12,8 @@ concurrency:
   cancel-in-progress: false
 jobs:
   matrix-interop:
-    runs-on: ubuntu-24.04
-    timeout-minutes: 45
+    runs-on: gravitas-linux
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
       - name: Check out the Gravitas interoperability fixture
@@ -53,7 +53,7 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - {os: ubuntu-24.04, platform: linux}
+          - {os: gravitas-linux, platform: linux}
           - {os: windows-2025, platform: windows}
           - {os: macos-15, platform: macos}
           - {os: macos-15, platform: ios}
@@ -87,8 +87,8 @@ jobs:
       - name: Link Flutter platform application
         run: python3 scripts/matrix-platform-smoke.py '${{ matrix.platform }}'
   android:
-    runs-on: ubuntu-24.04
-    timeout-minutes: 45
+    runs-on: gravitas-linux
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
       - name: Install pinned Flutter SDK
@@ -140,21 +140,24 @@ jobs:
           # The installed APK is the tested artifact; compiler intermediates are
           # no longer needed and otherwise compete with the emulator for disk.
           rm -rf client/build
-          sudo chown "$(id -u):$(id -g)" /dev/kvm
+          if [ ! -r /dev/kvm ] || [ ! -w /dev/kvm ]; then
+            sudo chown "$(id -u):$(id -g)" /dev/kvm
+          fi
+          test -r /dev/kvm && test -w /dev/kvm
           sdkmanager 'platform-tools' 'emulator' 'system-images;android-35;google_apis;x86_64'
           printf 'no\n' | avdmanager create avd --force --name river-auth-return --path "$ANDROID_AVD_HOME/river-auth-return.avd" --package 'system-images;android-35;google_apis;x86_64'
           test -s "$ANDROID_AVD_HOME/river-auth-return.avd/config.ini"
           # Keep emulator discovery independent of the command-line tools'
           # default preferences directory, which differs between SDK releases.
           printf 'avd.ini.encoding=UTF-8\npath=%s\ntarget=android-35\n' "$ANDROID_AVD_HOME/river-auth-return.avd" > "$ANDROID_AVD_HOME/river-auth-return.ini"
-          python3 scripts/test-android-auth-return.py --apk "$RUNNER_TEMP/river-auth-return.apk" --matrix-apk "$RUNNER_TEMP/river-matrix-auth.apk" --notification-test-apk "$RUNNER_TEMP/river-push-tests.apk" --avd river-auth-return
+          python3 scripts/test-android-auth-return.py --apk "$RUNNER_TEMP/river-auth-return.apk" --matrix-apk "$RUNNER_TEMP/river-matrix-auth.apk" --notification-test-apk "$RUNNER_TEMP/river-push-tests.apk" --avd river-auth-return --gpu host
   tests:
     name: Web and API tests (${{ matrix.target }})
     strategy:
       fail-fast: false
       matrix:
         target: [backend-test, frontend-test, matrix-browser-test]
-    runs-on: ubuntu-24.04
+    runs-on: gravitas-linux
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
@@ -169,7 +172,7 @@ jobs:
           cache-from: type=gha
           outputs: type=cacheonly
   image:
-    runs-on: ubuntu-24.04
+    runs-on: gravitas-linux
     timeout-minutes: 60
     permissions:
       contents: read
@@ -201,7 +204,7 @@ jobs:
   deploy:
     if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
     needs: [image, tests, desktop-verify, android, matrix-platforms, matrix-interop]
-    runs-on: ubuntu-24.04
+    runs-on: gravitas-linux
     timeout-minutes: 15
     environment:
       name: gravitas
@@ -231,7 +234,7 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - {os: ubuntu-22.04, platform: linux, arch: x64}
+          - {os: gravitas-linux-22, platform: linux, arch: x64}
           - {os: windows-2022, platform: windows, arch: x64}
           - {os: macos-15, platform: macos, arch: arm64}
           - {os: macos-15, platform: macos, arch: x64}
@@ -291,7 +294,7 @@ jobs:
 
   desktop-verify:
     needs: desktop
-    runs-on: ubuntu-24.04
+    runs-on: gravitas-linux
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
@@ -311,7 +314,7 @@ jobs:
   desktop-plan:
     if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
     needs: desktop-verify
-    runs-on: ubuntu-24.04
+    runs-on: gravitas-linux
     outputs:
       publish: ${{ steps.release.outputs.publish }}
     steps:
@@ -361,7 +364,7 @@ jobs:
   desktop-publish:
     if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
     needs: [deploy, desktop-verify, desktop-sign]
-    runs-on: ubuntu-24.04
+    runs-on: gravitas-linux
     permissions:
       contents: write
     steps:
