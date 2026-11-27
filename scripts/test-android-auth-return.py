@@ -10,6 +10,7 @@ import time
 parser = argparse.ArgumentParser()
 parser.add_argument('--apk', required=True, type=Path)
 parser.add_argument('--avd', required=True)
+parser.add_argument('--gpu', default='swiftshader', help='Android emulator graphics backend')
 parser.add_argument('--matrix-apk', required=True, type=Path)
 parser.add_argument('--notification-test-apk', type=Path)
 args = parser.parse_args()
@@ -72,7 +73,7 @@ def open_link(kind):
 with (output / 'emulator.log').open('w') as log:
     process = subprocess.Popen([emulator, '-avd', args.avd, '-port', '5554',
                                 '-no-window', '-no-audio', '-no-boot-anim',
-                                '-no-snapshot', '-gpu', 'swiftshader',
+                                '-no-snapshot', '-gpu', args.gpu,
                                 '-camera-back', 'none', '-camera-front', 'none'],
                                stdout=log, stderr=subprocess.STDOUT)
     try:
